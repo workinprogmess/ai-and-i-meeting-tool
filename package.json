@@ -1,0 +1,74 @@
+{
+  "name": "ai-and-i",
+  "version": "1.0.0",
+  "description": "AI Meeting Transcription Tool",
+  "productName": "ai&i",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "dist": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "audiotee": "^0.0.4",
+    "dotenv": "^17.2.1",
+    "fluent-ffmpeg": "^2.1.3",
+    "mac-screen-capture-permissions": "^2.1.0",
+    "node-mac-recorder": "^2.12.5",
+    "openai": "^5.15.0"
+  },
+  "build": {
+    "appId": "com.ai-and-i.meeting-transcription",
+    "productName": "ai&i",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "src/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!audio-temp/**/*",
+      "!transcripts/**/*",
+      "!test-transcription.js",
+      "!TESTING.md",
+      "!project-state.md",
+      "!dist/**/*",
+      "!.git/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "ai&i - Meeting Transcription Tool",
+      "contents": [
+        {
+          "x": 110,
+          "y": 150
+        },
+        {
+          "x": 240,
+          "y": 150,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

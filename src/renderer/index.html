@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ai&i</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1>ai&i</h1>
+            <div class="controls">
+                <button id="recordBtn" class="btn btn-primary">Start Recording</button>
+                <button id="stopBtn" class="btn btn-secondary" disabled>Stop Recording</button>
+            </div>
+        </header>
+        
+        <main class="main-content">
+            <div class="transcript-container">
+                <h2>Live Transcript</h2>
+                <div id="transcript" class="transcript-display">
+                    <p class="placeholder">Click "Start Recording" to begin transcription...</p>
+                </div>
+            </div>
+            
+            <div class="status-bar">
+                <span id="status">Ready</span>
+                <span id="cost-counter">API Cost: $0.00</span>
+            </div>
+        </main>
+    </div>
+    
+    <script src="renderer.js"></script>
+</body>
+</html>
