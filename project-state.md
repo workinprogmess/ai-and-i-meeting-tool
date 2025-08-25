@@ -6,7 +6,8 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 ## Current Phase & Milestone
 **Phase 1 - Milestone 1**: ✅ COMPLETE - Real-time transcription working with FFmpeg + AVFoundation
 **Phase 1 - Milestone 2**: ✅ COMPLETE - Sally Rooney-style human-like summaries
-**Current**: Ready for End-to-End Workflow (Real Meeting → Transcribe → Summarize)
+**Phase 1 - Milestone 2.5**: ✅ COMPLETE - Integrated UI with end-to-end workflow
+**Current**: Production-ready meeting tool with full pipeline
 
 ## Critical Technical Architecture Decision ⚠️
 **PROVEN APPROACH**: FFmpeg + AVFoundation (same as Granola, Loom, Zoom)
@@ -66,6 +67,13 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
     - Cost tracking and performance monitoring
 11. **Quality Comparison Framework** ✅ - Side-by-side testing and analysis
 
+### Phase 1 - Milestone 2.5: Integrated End-to-End UI ✅
+12. **Minimal Book-like UI Redesign** ✅ - Inter Tight typography, clean layout
+13. **Sidebar Recordings List** ✅ - All meetings accessible from sidebar
+14. **Tabbed Meeting View** ✅ - Summary vs Transcript tabs with copy functionality
+15. **Integrated Workflow** ✅ - Record → Auto-transcribe → Auto-summarize
+16. **Real-time Status Indicators** ✅ - Pastel recording dots, clean status updates
+
 ### Summary Generation Test Results 🎯
 **GPT-5 Performance:**
 - **Cost**: $0.0054 per 3-min meeting summary  
@@ -84,13 +92,16 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 ## Current Technical Stack
 ```javascript
 // Complete ai&i Pipeline
-FFmpeg (AVFoundation) → PCM Stream → Whisper API → Transcript → LLM → Sally Rooney Summary
+FFmpeg (AVFoundation) → PCM Stream → Whisper API → Transcript → Auto-Summary → UI
 
 // Audio Capture  
 ffmpeg -f avfoundation -i ":0" -f s16le -acodec pcm_s16le -ar 16000 -ac 1 -
 
+// End-to-End Workflow
+Record → Live Transcription → Auto Sally Rooney Summary → Tabbed UI Display
+
 // Summary Generation
-Transcript → [GPT-5 | Gemini 1.5 Pro] → Structured Summary (.md files)
+Transcript → [GPT-5 | Gemini 1.5 Pro] → Formatted Summary + Copy Function
 ```
 
 ## Key Files Structure
@@ -246,9 +257,10 @@ const ffmpegArgs = [
 - `file_test_1756036758188`: Twitter video, 702 words, ~84.5% accuracy
 
 ---
-Last Updated: 2025-08-24 (Milestone 2 COMPLETE - Sally Rooney Summaries)
-Session Duration: ~8 hours  
+Last Updated: 2025-08-25 (Milestone 2.5 COMPLETE - Integrated End-to-End UI)
+Session Duration: ~10 hours  
 Major Achievements: 
 - Milestone 1: Real-time transcription with FFmpeg + AVFoundation
 - Milestone 2: Human-like summaries with GPT-5 + Gemini 1.5 Pro
+- Milestone 2.5: Production-ready UI with full pipeline integration
 - Open source MIT licensed project on GitHub

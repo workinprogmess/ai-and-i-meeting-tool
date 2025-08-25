@@ -1,14 +1,18 @@
 const { app, BrowserWindow, ipcMain, Menu, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 const AudioCapture = require('./src/audio/audioCapture');
 const WhisperTranscription = require('./src/api/whisperTranscription');
+const SummaryGeneration = require('./src/api/summaryGeneration');
 
 let mainWindow;
 let isRecording = false;
 let audioCapture = null;
 let whisperTranscription = null;
+let summaryGeneration = null;
 let chunkMonitorInterval = null;
+let recordingsData = [];
 
 // Force the app to appear in macOS System Preferences by attempting screen capture
 async function ensureAppRegisteredWithMacOS() {
@@ -350,9 +354,111 @@ function stopRecording() {
   }
 }
 
+// initialize services (lazy loading to avoid startup errors)
+function initializeServices() {
+  // summaryGeneration will be initialized when first needed
+  console.log('✅ services ready (lazy loading enabled)');
+}
+
+// ipc handlers for new ui
+ipcMain.handle('get-recordings', async () => {
+  try {
+    return { recordings: recordingsData };
+  } catch (error) {
+    return { recordings: [], error: error.message };
+  }
+});
+
+ipcMain.handle('generate-summary', async (event, data) => {
+  try {
+    const { sessionId, transcript, provider = 'gemini' } = data;
+    
+    if (!summaryGeneration) {
+      summaryGeneration = new SummaryGeneration();
+    }
+    
+    console.log(`🎨 generating ${provider} summary for session ${sessionId}...`);
+    
+    const result = await summaryGeneration.generateSummary(transcript, {
+      participants: ['speaker 1', 'speaker 2'],
+      duration: 5, // estimate
+      topic: 'meeting discussion',
+      provider
+    });
+    
+    const summary = result[provider]?.summary || 'summary generation failed';
+    
+    // notify renderer
+    mainWindow.webContents.send('summary-generated', {
+      sessionId,
+      summary,
+      provider
+    });
+    
+    return { success: true, summary };
+  } catch (error) {
+    console.error('❌ summary generation failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// enhanced recording complete handler with summary generation
+async function handleRecordingComplete(sessionData) {
+  const { sessionId, transcript, duration, cost, timestamp } = sessionData;
+  
+  // save to recordings data
+  const recordingData = {
+    sessionId,
+    transcript,
+    duration,
+    cost,
+    timestamp
+  };
+  
+  recordingsData.unshift(recordingData);
+  
+  // notify renderer about recording completion
+  mainWindow.webContents.send('recording-complete', recordingData);
+  
+  // auto-generate summary
+  try {
+    console.log('🎨 auto-generating summary...');
+    await new Promise(resolve => setTimeout(resolve, 1000)); // brief delay
+    
+    if (!summaryGeneration) {
+      summaryGeneration = new SummaryGeneration();
+    }
+    
+    const summaryResult = await summaryGeneration.generateSummary(transcript, {
+      participants: ['speaker 1', 'speaker 2'],
+      duration: Math.floor(duration / 60),
+      topic: 'meeting discussion',
+      provider: 'gemini' // default to gemini for speed
+    });
+    
+    const summary = summaryResult.gemini?.summary;
+    if (summary) {
+      // update recording data
+      recordingData.summary = summary;
+      
+      // notify renderer
+      mainWindow.webContents.send('summary-generated', {
+        sessionId,
+        summary,
+        provider: 'gemini'
+      });
+      
+      console.log('✅ auto-summary generated');
+    }
+  } catch (error) {
+    console.error('❌ auto-summary failed:', error);
+  }
+}
+
 app.whenReady().then(async () => {
   createWindow();
   createMenu();
+  initializeServices();
   
   // Register with macOS permissions system after app is ready
   await ensureAppRegisteredWithMacOS();

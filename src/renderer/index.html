@@ -4,29 +4,95 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ai&i</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="app-container">
-        <header class="header">
-            <h1>ai&i</h1>
-            <div class="controls">
-                <button id="recordBtn" class="btn btn-primary">Start Recording</button>
-                <button id="stopBtn" class="btn btn-secondary" disabled>Stop Recording</button>
+        <!-- sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>meetings</h2>
+                <button id="newMeetingBtn" class="btn-minimal">new</button>
             </div>
-        </header>
+            
+            <div class="recordings-list" id="recordingsList">
+                <div class="empty-state">
+                    <p>no meetings yet</p>
+                    <span>start your first recording</span>
+                </div>
+            </div>
+        </aside>
         
+        <!-- main content -->
         <main class="main-content">
-            <div class="transcript-container">
-                <h2>Live Transcript</h2>
-                <div id="transcript" class="transcript-display">
-                    <p class="placeholder">Click "Start Recording" to begin transcription...</p>
+            <!-- recording view -->
+            <div id="recordingView" class="recording-view">
+                <div class="recording-header">
+                    <h1>ai&i</h1>
+                    <p>record • transcribe • summarize</p>
+                </div>
+                
+                <div class="recording-controls">
+                    <button id="recordBtn" class="btn-record">
+                        <span class="status-dot" id="recordDot"></span>
+                        start recording
+                    </button>
+                    <button id="stopBtn" class="btn-minimal" disabled>stop</button>
+                </div>
+                
+                <div id="liveTranscript" class="live-transcript">
+                    <div class="transcript-content" id="transcript">
+                        <p class="placeholder">click start to begin</p>
+                    </div>
+                </div>
+                
+                <div class="status-bar">
+                    <span id="status">ready</span>
+                    <span id="costCounter">$0.00</span>
                 </div>
             </div>
             
-            <div class="status-bar">
-                <span id="status">Ready</span>
-                <span id="cost-counter">API Cost: $0.00</span>
+            <!-- meeting view -->
+            <div id="meetingView" class="meeting-view" style="display: none;">
+                <div class="meeting-header">
+                    <button id="backBtn" class="btn-minimal">← meetings</button>
+                    <div class="meeting-info">
+                        <h2 id="meetingTitle">meeting title</h2>
+                        <div class="meeting-meta">
+                            <span id="meetingDate">date</span>
+                            <span class="separator">•</span>
+                            <span id="meetingDuration">duration</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="summary">summary</button>
+                    <button class="tab-btn" data-tab="transcript">transcript</button>
+                </div>
+                
+                <div class="tab-content">
+                    <div id="summaryTab" class="tab-panel active">
+                        <div class="content-header">
+                            <button id="copySummaryBtn" class="btn-copy">copy</button>
+                        </div>
+                        <div class="content-body" id="summaryContent">
+                            <div class="loading">generating summary...</div>
+                        </div>
+                    </div>
+                    
+                    <div id="transcriptTab" class="tab-panel">
+                        <div class="content-header">
+                            <button id="copyTranscriptBtn" class="btn-copy">copy</button>
+                        </div>
+                        <div class="content-body" id="transcriptContent">
+                            <div class="loading">loading transcript...</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
