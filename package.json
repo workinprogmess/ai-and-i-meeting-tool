@@ -1,6 +1,6 @@
 {
   "name": "ai-and-i",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI Meeting Transcription Tool",
   "productName": "ai&i",
   "main": "main.js",

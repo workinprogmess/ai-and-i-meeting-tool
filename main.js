@@ -1,18 +1,20 @@
-const { app, BrowserWindow, ipcMain, Menu, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const AudioCapture = require('./src/audio/audioCapture');
 const WhisperTranscription = require('./src/api/whisperTranscription');
 const SummaryGeneration = require('./src/api/summaryGeneration');
+const RecordingsDB = require('./src/storage/recordingsDB');
 
 let mainWindow;
+let tray = null;
 let isRecording = false;
 let audioCapture = null;
 let whisperTranscription = null;
 let summaryGeneration = null;
 let chunkMonitorInterval = null;
-let recordingsData = [];
+let recordingsDB = null;
 
 // Force the app to appear in macOS System Preferences by attempting screen capture
 async function ensureAppRegisteredWithMacOS() {
@@ -57,7 +59,8 @@ function createWindow() {
     },
     titleBarStyle: 'hiddenInset',
     show: true,
-    title: 'ai&i'
+    title: 'ai&i',
+    icon: path.join(__dirname, 'assets/fresh-ai-icon.icns') // dock icon
   });
 
   mainWindow.loadFile('src/renderer/index.html');
@@ -139,6 +142,85 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+function createTrayIcon() {
+  const iconPath = path.join(__dirname, 'assets/tray-icon.png');
+  tray = new Tray(iconPath);
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: isRecording ? 'Stop Recording' : 'Start Recording',
+      click: () => {
+        if (isRecording) {
+          mainWindow.webContents.send('stop-recording');
+        } else {
+          mainWindow.webContents.send('start-recording');
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Show ai&i',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit();
+      }
+    }
+  ]);
+  
+  tray.setContextMenu(contextMenu);
+  tray.setToolTip('ai&i - meeting recorder');
+  
+  tray.on('click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: isRecording ? 'Stop Recording' : 'Start Recording',
+      click: () => {
+        if (isRecording) {
+          mainWindow.webContents.send('stop-recording');
+        } else {
+          mainWindow.webContents.send('start-recording');
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Show ai&i',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit();
+      }
+    }
+  ]);
+  
+  tray.setContextMenu(contextMenu);
+}
+
 // Real-time PCM transcription with AudioTee
 function setupRealTimeTranscription() {
   if (!audioCapture) return;
@@ -187,7 +269,15 @@ function stopRealTimeTranscription() {
 }
 
 // IPC Handlers for audio capture and transcription
-ipcMain.handle('start-audio-capture', async () => {
+ipcMain.handle('start-recording', async (event, data) => {
+  return await startAudioCaptureHandler();
+});
+
+ipcMain.handle('stop-recording', async () => {
+  return await stopAudioCaptureHandler();
+});
+
+async function startAudioCaptureHandler() {
   try {
     if (!audioCapture) {
       audioCapture = new AudioCapture();
@@ -208,6 +298,9 @@ ipcMain.handle('start-audio-capture', async () => {
         sessionId: sessionId
       });
       
+      // Update tray menu
+      updateTrayMenu();
+      
       // Start real-time PCM transcription
       setupRealTimeTranscription();
     }
@@ -217,9 +310,13 @@ ipcMain.handle('start-audio-capture', async () => {
     console.error('Failed to start audio capture:', error);
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('start-audio-capture', async () => {
+  return await startAudioCaptureHandler();
 });
 
-ipcMain.handle('stop-audio-capture', async () => {
+async function stopAudioCaptureHandler() {
   try {
     if (!audioCapture) {
       return { success: false, error: 'No audio capture instance' };
@@ -233,6 +330,9 @@ ipcMain.handle('stop-audio-capture', async () => {
       // Stop real-time transcription
       stopRealTimeTranscription();
       
+      // Update tray menu
+      updateTrayMenu();
+      
       // Send status updates to renderer
       mainWindow.webContents.send('audio-status', {
         status: 'stopped',
@@ -245,6 +345,10 @@ ipcMain.handle('stop-audio-capture', async () => {
     console.error('Failed to stop audio capture:', error);
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('stop-audio-capture', async () => {
+  return await stopAudioCaptureHandler();
 });
 
 ipcMain.handle('get-audio-status', async () => {
@@ -351,19 +455,28 @@ function stopRecording() {
   if (isRecording && audioCapture) {
     audioCapture.stopRecording();
     isRecording = false;
+    updateTrayMenu();
   }
 }
 
 // initialize services (lazy loading to avoid startup errors)
 function initializeServices() {
-  // summaryGeneration will be initialized when first needed
-  console.log('✅ services ready (lazy loading enabled)');
+  try {
+    recordingsDB = new RecordingsDB();
+    console.log(`✅ services ready (${recordingsDB.getAllRecordings().length} recordings loaded)`);
+  } catch (error) {
+    console.warn('⚠️  Failed to initialize recordingsDB:', error.message);
+    recordingsDB = null;
+  }
 }
 
 // ipc handlers for new ui
 ipcMain.handle('get-recordings', async () => {
   try {
-    return { recordings: recordingsData };
+    if (!recordingsDB) {
+      return { recordings: [], error: 'Database not available' };
+    }
+    return { recordings: recordingsDB.getAllRecordings() };
   } catch (error) {
     return { recordings: [], error: error.message };
   }
@@ -415,7 +528,11 @@ async function handleRecordingComplete(sessionData) {
     timestamp
   };
   
-  recordingsData.unshift(recordingData);
+  if (recordingsDB) {
+    recordingsDB.addRecording(recordingData);
+  } else {
+    console.warn('⚠️  RecordingsDB not available, recording not persisted');
+  }
   
   // notify renderer about recording completion
   mainWindow.webContents.send('recording-complete', recordingData);
@@ -438,8 +555,10 @@ async function handleRecordingComplete(sessionData) {
     
     const summary = summaryResult.gemini?.summary;
     if (summary) {
-      // update recording data
-      recordingData.summary = summary;
+      // update recording in database
+      if (recordingsDB) {
+        recordingsDB.updateRecording(sessionId, { summary });
+      }
       
       // notify renderer
       mainWindow.webContents.send('summary-generated', {
@@ -448,7 +567,7 @@ async function handleRecordingComplete(sessionData) {
         provider: 'gemini'
       });
       
-      console.log('✅ auto-summary generated');
+      console.log('✅ auto-summary generated and saved');
     }
   } catch (error) {
     console.error('❌ auto-summary failed:', error);
@@ -458,6 +577,7 @@ async function handleRecordingComplete(sessionData) {
 app.whenReady().then(async () => {
   createWindow();
   createMenu();
+  createTrayIcon();
   initializeServices();
   
   // Register with macOS permissions system after app is ready

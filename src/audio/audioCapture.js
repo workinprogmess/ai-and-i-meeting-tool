@@ -203,10 +203,20 @@ class AudioCapture extends EventEmitter {
             console.log(`✅ FFmpeg recording stopped`);
             console.log(`📊 Total chunks: ${totalChunks}, Duration: ~${totalDuration}s`);
 
+            // CRITICAL FIX: Save the audio file from chunks
+            let audioFilePath = null;
+            try {
+                audioFilePath = await this.saveAudioFile();
+                console.log(`💾 Audio file saved: ${audioFilePath}`);
+            } catch (error) {
+                console.error(`❌ Failed to save audio file: ${error.message}`);
+            }
+
             const result = {
                 success: true,
                 message: 'FFmpeg recording stopped',
                 sessionId: this.sessionId,
+                audioFilePath,
                 totalChunks: totalChunks,
                 totalDuration: totalDuration,
                 audioConfig: {
@@ -240,6 +250,66 @@ class AudioCapture extends EventEmitter {
             chunksProcessed: this.chunkIndex,
             bufferSize: this.currentChunkBuffer?.length || 0
         };
+    }
+    
+    async saveAudioFile() {
+        if (!this.audioChunks || this.audioChunks.length === 0) {
+            throw new Error('No audio data to save');
+        }
+
+        const fs = require('fs').promises;
+        const path = require('path');
+        
+        // Create audio-temp directory if it doesn't exist
+        const audioTempDir = path.join(process.cwd(), 'audio-temp');
+        try {
+            await fs.access(audioTempDir);
+        } catch {
+            await fs.mkdir(audioTempDir, { recursive: true });
+        }
+        
+        const audioFilePath = path.join(audioTempDir, `session_${this.sessionId}.wav`);
+        
+        // Combine all PCM chunks into one buffer
+        const totalSize = this.audioChunks.reduce((sum, chunk) => sum + chunk.pcmData.length, 0);
+        const combinedPCM = Buffer.alloc(totalSize);
+        
+        let offset = 0;
+        for (const chunk of this.audioChunks) {
+            chunk.pcmData.copy(combinedPCM, offset);
+            offset += chunk.pcmData.length;
+        }
+        
+        // Create WAV header
+        const wavHeader = this.createWAVHeader(combinedPCM.length);
+        const wavFile = Buffer.concat([wavHeader, combinedPCM]);
+        
+        // Write WAV file
+        await fs.writeFile(audioFilePath, wavFile);
+        
+        console.log(`📁 Audio file saved: ${audioFilePath} (${(wavFile.length / 1024 / 1024).toFixed(2)} MB)`);
+        return audioFilePath;
+    }
+    
+    createWAVHeader(dataLength) {
+        const header = Buffer.alloc(44);
+        
+        // WAV header format
+        header.write('RIFF', 0);
+        header.writeUInt32LE(36 + dataLength, 4);
+        header.write('WAVE', 8);
+        header.write('fmt ', 12);
+        header.writeUInt32LE(16, 16);  // Subchunk1Size
+        header.writeUInt16LE(1, 20);   // AudioFormat (PCM)
+        header.writeUInt16LE(this.channels, 22);  // NumChannels
+        header.writeUInt32LE(this.sampleRate, 24);  // SampleRate
+        header.writeUInt32LE(this.sampleRate * this.channels * 2, 28);  // ByteRate
+        header.writeUInt16LE(this.channels * 2, 32);  // BlockAlign
+        header.writeUInt16LE(16, 34);  // BitsPerSample
+        header.write('data', 36);
+        header.writeUInt32LE(dataLength, 40);
+        
+        return header;
     }
 
     cleanup() {
