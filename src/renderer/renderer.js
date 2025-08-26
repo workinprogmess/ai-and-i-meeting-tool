@@ -292,7 +292,7 @@ class AIAndIApp {
             item.classList.toggle('active', item.dataset.id === recording.id);
         });
         
-        // load content
+        // load content (now using pipeline b as default)
         this.loadTranscriptContent();
         this.loadSummaryContent();
     }
@@ -309,32 +309,41 @@ class AIAndIApp {
     }
     
     loadTranscriptContent() {
-        if (!this.selectedRecording || !this.selectedRecording.transcript) {
+        // use pipeline b (enhanced transcript) as default, fallback to pipeline a
+        const transcript = this.selectedRecording?.transcriptB || this.selectedRecording?.transcript;
+        
+        if (!transcript) {
             this.transcriptContent.innerHTML = '<div class="loading">no transcript available</div>';
             return;
         }
         
-        // format transcript nicely
-        const transcript = this.selectedRecording.transcript;
-        const formattedTranscript = this.formatTranscriptForDisplay(transcript);
+        // format enhanced transcript if available, otherwise basic transcript
+        const formattedTranscript = this.selectedRecording?.transcriptB 
+            ? this.formatEnhancedTranscriptForDisplay(transcript)
+            : this.formatTranscriptForDisplay(transcript);
         this.transcriptContent.innerHTML = formattedTranscript;
     }
     
     loadSummaryContent() {
         if (!this.selectedRecording) return;
         
-        if (!this.selectedRecording.summary) {
+        // use pipeline b (enhanced summary) as default, fallback to pipeline a
+        const summary = this.selectedRecording?.summaryB || this.selectedRecording?.summary;
+        
+        if (!summary) {
             this.summaryContent.innerHTML = '<div class="loading">generating summary...</div>';
             // trigger summary generation
             this.generateSummary();
             return;
         }
         
-        // format summary nicely
-        const summary = this.selectedRecording.summary;
-        const formattedSummary = this.formatSummaryForDisplay(summary);
+        // format enhanced summary if available, otherwise basic summary
+        const formattedSummary = this.selectedRecording?.summaryB 
+            ? this.formatEnhancedSummaryForDisplay(summary)
+            : this.formatSummaryForDisplay(summary);
         this.summaryContent.innerHTML = formattedSummary;
     }
+    
     
     async generateSummary() {
         try {
@@ -372,19 +381,70 @@ class AIAndIApp {
         return '<div class="summary-text">formatted summary content</div>';
     }
     
+    formatEnhancedTranscriptForDisplay(transcriptB) {
+        if (typeof transcriptB === 'string') {
+            // format enhanced transcript with emotional context and conversation blocks
+            let formatted = transcriptB
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
+                .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
+                .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
+                .replace(/\[(\d{1,2}:\d{2}[:\d{2}]*(?:-\d{1,2}:\d{2}[:\d{2}]*)?)\]/g, '<span class="timestamp">[$1]</span>');
+            
+            return `<div class="enhanced-transcript">${formatted}</div>`;
+        }
+        
+        return '<div class="enhanced-transcript">enhanced transcript content</div>';
+    }
+    
+    formatEnhancedSummaryForDisplay(summaryB) {
+        if (typeof summaryB === 'string') {
+            // format enhanced summary with relationship dynamics and insights
+            let formatted = summaryB
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
+                .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
+                .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
+                .replace(/^- /gm, '• ');
+            
+            return `<div class="enhanced-summary"><p>${formatted}</p></div>`;
+        }
+        
+        return '<div class="enhanced-summary">enhanced summary content</div>';
+    }
+    
     async copyToClipboard(type) {
-        const content = type === 'summary' 
-            ? this.selectedRecording?.summary 
-            : this.selectedRecording?.transcript;
+        let content;
+        let buttonElement;
+        
+        switch(type) {
+            case 'summary':
+                // use pipeline b content if available, fallback to pipeline a
+                content = this.selectedRecording?.summaryB || this.selectedRecording?.summary;
+                buttonElement = this.copySummaryBtn;
+                break;
+            case 'transcript':
+                // use pipeline b content if available, fallback to pipeline a
+                content = this.selectedRecording?.transcriptB || this.selectedRecording?.transcript;
+                buttonElement = this.copyTranscriptBtn;
+                break;
+            default:
+                content = '';
+                buttonElement = null;
+        }
         
         if (!content) return;
         
         try {
             await navigator.clipboard.writeText(content);
-            const button = type === 'summary' ? this.copySummaryBtn : this.copyTranscriptBtn;
-            const originalText = button.textContent;
-            button.textContent = 'copied!';
-            setTimeout(() => button.textContent = originalText, 2000);
+            if (buttonElement) {
+                const originalText = buttonElement.textContent;
+                buttonElement.textContent = 'copied!';
+                setTimeout(() => buttonElement.textContent = originalText, 2000);
+            }
         } catch (error) {
             console.error('failed to copy:', error);
         }

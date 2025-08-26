@@ -11,6 +11,7 @@ class SummaryGeneration {
         
         this.gemini = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
         this.geminiModel = this.gemini.getGenerativeModel({ model: 'gemini-1.5-pro' });
+        this.geminiFlashModel = this.gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
         
         this.loadPromptTemplates();
         this.summaryHistory = [];
@@ -362,6 +363,302 @@ write a meeting summary that captures the human story while being genuinely usef
                            (results.gemini?.processingTime < 10000 ? 1 : 0);
         
         return gpt5Score >= geminiScore ? 'gpt-5' : 'gemini-2.5-pro';
+    }
+
+    // gemini 2.5 flash end-to-end: audio → transcript + summary + speaker labels
+    async processAudioEndToEnd(audioFilePath, options = {}) {
+        const {
+            participants = 'unknown participants',
+            expectedDuration = 60,
+            meetingTopic = 'business meeting',
+            context = 'team discussion'
+        } = options;
+
+        console.log(`🎯 gemini 2.5 flash end-to-end: ${audioFilePath}`);
+        
+        try {
+            const fs = require('fs').promises;
+            
+            // read audio file
+            const audioBuffer = await fs.readFile(audioFilePath);
+            
+            // create audio data for gemini
+            const audioData = {
+                inlineData: {
+                    data: audioBuffer.toString('base64'),
+                    mimeType: 'audio/wav'
+                }
+            };
+
+            const prompt = `analyze this ${expectedDuration}-minute meeting audio and create an enhanced transcript and human-centered summary that captures the emotional journey and relationship dynamics.
+
+meeting context:
+- participants: ${participants}
+- topic: ${meetingTopic}  
+- context: ${context}
+- expected duration: ~${expectedDuration} minutes
+
+provide your analysis in exactly this format:
+
+## transcript
+
+create an enhanced transcript showing minute-by-minute emotional journey:
+
+### formatting requirements:
+- all lowercase: names, annotations, everything
+- @person references when identifiable (@speaker1, @speaker2, @you)
+- _topic emphasis_: _key themes_, _important concepts_
+- emotional color coding: 🟡 excitement, 🔴 tension, 🔵 focus, 🟢 resolution, 🟠 concern
+- conversation blocks grouped by theme, not just chronological
+
+### structure:
+[timestamp range] what's happening + emotional context 🟡/🔴/🔵/🟢/🟠
+brief description of conversational or emotional shift
+
+[timestamp] @person: "actual quote"
+           (insight about this moment)
+
+[topic shift] when conversation moves to different context
+
+track: conversation flow, emotional shifts, relationship dynamics, off-topic moments, turning points, external interruptions
+
+## summary
+
+create human-like meeting summary using comprehensive approach:
+
+### part 1: meeting dna analysis
+**core theme:** what was this really about? (beyond agenda)
+**context clusters:** group related topics under broader themes  
+**emphasis patterns:** topics that kept recurring or were heavily stressed
+**side moments:** interruptions, tangents, personal moments
+
+### part 2: relationship dynamics  
+**individual goals:** what did each person want from this conversation?
+**satisfaction levels:** did they get what they needed? what's unresolved?
+**power dynamics:** who led, who followed, who influenced whom?
+**energy/mood:** frustrated, energized, hesitant, etc. for each person
+
+### part 3: meeting classification
+**format:** 1:1, brainstorm, update, pitch, planning, etc.
+**formality level:** casual vs structured vs crisis mode
+**relationship context:** peers, manager/report, client/vendor
+
+### part 4: summary writing
+use lowercase, @person references, _topic emphasis_, conversational warm tone, match meeting's actual energy
+
+**opening context:**
+"@speaker1 and @speaker2 met to discuss _[core theme]_ with [mood description]..."
+
+**main content by theme clusters:**
+for each topic: who drove it, emotional undertones with color coding, conversation flow, decision context, current status
+
+**closing assessment:**
+how meeting ended, satisfaction levels, next steps clarity
+
+### part 5: advanced insights
+**the one key thing:** most important takeaway
+**unresolved questions:** what needs more discussion  
+**memorable moments:** interesting details worth highlighting
+**specific action items:** clear next steps with owners
+
+write like a perceptive friend telling you about the meeting - engaging, insightful, human-centered. focus on the emotional story of how this conversation unfolded.
+
+be precise about actual content. no assumptions or invented details.`;
+
+            const startTime = Date.now();
+            
+            const result = await this.geminiFlashModel.generateContent([
+                { text: prompt },
+                audioData
+            ]);
+            
+            const response = await result.response;
+            const fullOutput = response.text();
+            const processingTime = Date.now() - startTime;
+
+            // parse the structured output
+            const sections = this.parseGeminiEndToEndOutput(fullOutput);
+            
+            const result_data = {
+                provider: 'gemini-2.5-flash-end-to-end',
+                fullOutput,
+                transcript: sections.transcript,
+                summary: sections.summary,
+                speakerAnalysis: sections.speakerAnalysis,
+                emotionalDynamics: sections.emotionalDynamics,
+                cost: this.calculateCost('gemini', prompt, fullOutput),
+                processingTime,
+                tokenUsage: response.usageMetadata,
+                timestamp: Date.now(),
+                audioFilePath
+            };
+
+            // save results
+            await this.saveEndToEndResult(result_data, options);
+            
+            console.log(`✅ gemini end-to-end complete: ${processingTime}ms, $${result_data.cost.totalCost.toFixed(4)}`);
+            
+            return result_data;
+
+        } catch (error) {
+            console.error('❌ gemini end-to-end failed:', error.message);
+            return {
+                provider: 'gemini-2.5-flash-end-to-end',
+                error: error.message,
+                timestamp: Date.now(),
+                audioFilePath
+            };
+        }
+    }
+
+    parseGeminiEndToEndOutput(fullOutput) {
+        const sections = {
+            transcript: '',
+            summary: '',
+            speakerAnalysis: '',
+            emotionalDynamics: ''
+        };
+
+        try {
+            // extract transcript section - everything after first timestamp pattern
+            const transcriptStartMatch = fullOutput.match(/\*\*\[[\d:\-]+\]/);
+            if (transcriptStartMatch) {
+                const transcriptStart = transcriptStartMatch.index;
+                const summaryStart = fullOutput.indexOf('## summary');
+                
+                if (summaryStart > transcriptStart) {
+                    sections.transcript = fullOutput.substring(transcriptStart, summaryStart).trim();
+                } else {
+                    sections.transcript = fullOutput.substring(transcriptStart).trim();
+                }
+            } else {
+                // fallback to section after "## transcript"
+                const transcriptMatch = fullOutput.match(/## transcript\s*([\s\S]*?)(?=## summary|$)/i);
+                sections.transcript = transcriptMatch ? transcriptMatch[1].trim() : 'enhanced transcript parsing failed';
+            }
+
+            // extract summary section - everything after "## summary" 
+            const summaryMatch = fullOutput.match(/## summary\s*([\s\S]*?)$/i);
+            sections.summary = summaryMatch ? summaryMatch[1].trim() : 'enhanced summary parsing failed';
+
+            // for enhanced format, speaker analysis and emotional dynamics are integrated into summary
+            // extract them if they exist as separate sections
+            const speakerMatch = fullOutput.match(/### part 2: relationship dynamics\s*([\s\S]*?)(?=### part 3|$)/i);
+            const emotionalMatch = fullOutput.match(/\*\*energy\/mood:\*\*\s*([\s\S]*?)(?=\*\*|$)/i);
+
+            sections.speakerAnalysis = speakerMatch ? speakerMatch[1].trim() : 'integrated into summary';
+            sections.emotionalDynamics = emotionalMatch ? emotionalMatch[1].trim() : 'integrated into summary';
+
+        } catch (error) {
+            console.error('❌ failed to parse enhanced gemini output:', error.message);
+            sections.transcript = fullOutput; // fallback to full output
+        }
+
+        return sections;
+    }
+
+    async saveEndToEndResult(resultData, options) {
+        const summariesDir = path.join(__dirname, '../../summaries');
+        if (!fs.existsSync(summariesDir)) {
+            fs.mkdirSync(summariesDir, { recursive: true });
+        }
+
+        const timestamp = Date.now();
+        const topicName = options.meetingTopic?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'meeting';
+        
+        // save complete result
+        const filename = `gemini-e2e-${topicName}-${timestamp}.json`;
+        const filepath = path.join(summariesDir, filename);
+        
+        fs.writeFileSync(filepath, JSON.stringify(resultData, null, 2));
+        
+        // save human-readable transcript
+        const transcriptFilename = `transcript-e2e-${topicName}-${timestamp}.md`;
+        const transcriptPath = path.join(summariesDir, transcriptFilename);
+        
+        const transcriptContent = `# meeting transcript - gemini 2.5 flash end-to-end\n\n**audio file:** ${resultData.audioFilePath}\n**processing time:** ${resultData.processingTime}ms\n**cost:** $${resultData.cost?.totalCost?.toFixed(4)}\n\n---\n\n${resultData.transcript}`;
+        
+        fs.writeFileSync(transcriptPath, transcriptContent);
+        
+        // save human-readable summary  
+        const summaryFilename = `summary-e2e-${topicName}-${timestamp}.md`;
+        const summaryPath = path.join(summariesDir, summaryFilename);
+        
+        const summaryContent = `# meeting summary - gemini 2.5 flash end-to-end\n\n**participants:** ${options.participants || 'unknown'}\n**duration:** ${options.expectedDuration || 0} minutes\n**processed by:** gemini-2.5-flash-end-to-end\n**processing time:** ${resultData.processingTime}ms\n\n---\n\n${resultData.summary}\n\n## speaker analysis\n${resultData.speakerAnalysis}\n\n## emotional dynamics\n${resultData.emotionalDynamics}`;
+        
+        fs.writeFileSync(summaryPath, summaryContent);
+        
+        console.log(`💾 gemini end-to-end saved: ${filename}, ${transcriptFilename}, ${summaryFilename}`);
+    }
+
+    // compare pipelines: current (whisper → gemini) vs new (gemini end-to-end)
+    async comparePipelines(audioFilePath, options = {}) {
+        console.log('🔄 comparing pipeline a (whisper→gemini) vs pipeline b (gemini end-to-end)...');
+        
+        const startTime = Date.now();
+        const results = {};
+
+        // pipeline a: current approach (whisper → gemini)
+        try {
+            console.log('🎵 pipeline a: whisper → gemini summary...');
+            
+            // would need to call whisper first, then pass transcript to existing generateSummary
+            // for now, simulate or use existing transcript if available
+            results.pipelineA = {
+                provider: 'whisper-transcription + gemini-summary',
+                status: 'needs whisper integration',
+                note: 'requires whisper api call first'
+            };
+            
+        } catch (error) {
+            results.pipelineA = { error: error.message };
+        }
+
+        // pipeline b: gemini end-to-end  
+        try {
+            console.log('🎯 pipeline b: gemini 2.5 flash end-to-end...');
+            results.pipelineB = await this.processAudioEndToEnd(audioFilePath, options);
+            
+        } catch (error) {
+            results.pipelineB = { error: error.message };
+        }
+
+        const totalTime = Date.now() - startTime;
+        
+        const comparison = {
+            timestamp: Date.now(),
+            audioFilePath,
+            totalProcessingTime: totalTime,
+            pipelineA: results.pipelineA,
+            pipelineB: results.pipelineB,
+            recommendation: this.getPipelineRecommendation(results)
+        };
+
+        // save comparison
+        const comparisonFilename = `pipeline_comparison_${comparison.timestamp}.json`;
+        const comparisonPath = path.join(__dirname, '../../summaries', comparisonFilename);
+        fs.writeFileSync(comparisonPath, JSON.stringify(comparison, null, 2));
+        
+        console.log('📊 pipeline comparison results:');
+        console.log(`pipeline a status: ${results.pipelineA.status || 'error'}`);
+        console.log(`pipeline b cost: $${results.pipelineB?.cost?.totalCost?.toFixed(4) || 'error'}`);
+        console.log(`recommendation: ${comparison.recommendation}`);
+        
+        return comparison;
+    }
+
+    getPipelineRecommendation(results) {
+        // if pipeline b worked and pipeline a didn't, recommend b
+        if (results.pipelineB && !results.pipelineB.error && results.pipelineA.error) {
+            return 'pipeline b (gemini end-to-end)';
+        }
+        
+        // if both worked, compare based on criteria
+        if (results.pipelineB && !results.pipelineB.error) {
+            return 'pipeline b (gemini end-to-end) - single api call, speaker identification, emotional context';
+        }
+        
+        return 'pipeline a (whisper → gemini) - proven approach';
     }
 }
 

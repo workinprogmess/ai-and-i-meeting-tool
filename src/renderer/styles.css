@@ -216,19 +216,20 @@ body {
     display: flex;
     border-bottom: 1px solid #e5e5e5;
     padding: 0 32px;
+    gap: 16px;
 }
 
 .tab-btn {
     padding: 16px 0;
-    margin-right: 32px;
     border: none;
     background: none;
-    font-size: 14px;
+    font-size: 13px;
     color: #6b7280;
     font-weight: 400;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: color 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
 }
 
 .tab-btn.active {
@@ -262,7 +263,46 @@ body {
     padding: 16px 32px;
     border-bottom: 1px solid #f0f0f0;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pipeline-info {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 400;
+    text-transform: lowercase;
+}
+
+/* enhanced content styling */
+.enhanced-transcript, .enhanced-summary {
+    line-height: 1.7;
+}
+
+.speaker-ref {
+    color: #059669;
+    font-weight: 500;
+}
+
+.topic-emphasis {
+    color: #dc2626;
+    font-style: normal;
+    font-weight: 500;
+}
+
+.emotion-indicator {
+    font-size: 16px;
+    margin-right: 4px;
+}
+
+.timestamp {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 500;
+    background: #f9fafb;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 8px;
 }
 
 .content-body {
