@@ -6,9 +6,9 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 ## Current Phase & Milestone
 **Phase 1 - Milestone 1**: ✅ COMPLETE - Real-time transcription working with FFmpeg + AVFoundation
 **Phase 1 - Milestone 2**: ✅ COMPLETE - Sally Rooney-style human-like summaries
-**Phase 1 - Milestone 2.5**: ✅ COMPLETE - Integrated UI with end-to-end workflow
-**Phase 1 - Milestone 3**: 🚧 IN PROGRESS - Production reliability & Gemini end-to-end pipeline
-**Current**: Reliability testing phase with dual pipeline approach
+**Phase 1 - Milestone 2.5**: ✅ COMPLETE - Human-centered meeting intelligence as default experience
+**Phase 1 - Milestone 3**: ⏳ IN PROGRESS - Beta-ready product experience (10-14 days)
+**Phase 1 - Milestone 4**: 📋 PLANNED - Enhanced collaboration and deployment (14-21 days)
 
 ## Critical Technical Architecture Decision ⚠️
 **PROVEN APPROACH**: FFmpeg + AVFoundation (same as Granola, Loom, Zoom)
@@ -68,24 +68,23 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
     - Cost tracking and performance monitoring
 11. **Quality Comparison Framework** ✅ - Side-by-side testing and analysis
 
-### Phase 1 - Milestone 2.5: Integrated End-to-End UI ✅
+### Phase 1 - Milestone 2.5: Human-Centered Meeting Intelligence ✅ COMPLETE
 12. **Minimal Book-like UI Redesign** ✅ - Inter Tight typography, clean layout
 13. **Sidebar Recordings List** ✅ - All meetings accessible from sidebar
 14. **Tabbed Meeting View** ✅ - Summary vs Transcript tabs with copy functionality
 15. **Integrated Workflow** ✅ - Record → Auto-transcribe → Auto-summarize
 16. **Real-time Status Indicators** ✅ - Pastel recording dots, clean status updates
-
-### Phase 1 - Milestone 3: Production Reliability & Gemini Pipeline 🚧
 17. **Critical Production Bug Fixes** ✅
     - Fixed AudioCapture to save audio files (prevented data loss)
     - Fixed RecordingsDB persistence issues  
     - Fixed UI display showing "undefined undefined 3000"
 18. **Development Guidelines Framework** ✅ - Comprehensive CLAUDE.md standards
 19. **Data Recovery from CTO Meeting Crisis** ✅ - Partial transcript recovery, lessons learned
-20. **Dual Pipeline Architecture** 🚧 IN PROGRESS
-    - Pipeline A: Audio → Whisper → Gemini Summary (current)
-    - Pipeline B: Audio → Gemini 2.5 Flash/Pro → Transcript + Summary + Speakers
-    - Parallel comparison testing framework
+20. **Gemini End-to-End Pipeline as Default** ✅
+    - Enhanced transcripts with @speaker references, _topic emphasis_, 🔵🟡🟠 emotional context
+    - Human-centered summaries with relationship dynamics and meeting intelligence
+    - Single API call efficiency vs multi-step whisper → gemini approach
+    - Revolutionary differentiation from basic meeting tools
 
 ### Summary Generation Test Results 🎯
 **GPT-5 Performance:**
@@ -210,34 +209,87 @@ cat validation-reports/*_summary.txt
 **Target**: <5% WER
 **Path**: See WER_OPTIMIZATION_GUIDE.md
 
-## Next Steps: End-to-End Workflow
+## Phase 1 - Milestone 3: Beta-Ready Product Experience (10-14 Days)
 
-### Immediate Tasks  
-1. **Real Meeting Integration**
-   - Record actual meeting with transcription
-   - Generate sally rooney-style summary automatically
-   - Test full pipeline: Audio → Transcript → Summary
+### 3.1 App Packaging & Distribution (Days 1-3)
+- **electron-builder setup** for .dmg distribution
+- **auto-updater configuration** (self-hosted updates)
+- **icon refinement** and app metadata
+- **build pipeline** for releases
+- **target:** distributable app for beta users
 
-2. **Workflow Optimization**
-   - Add summary generation to main electron app
-   - Auto-generate summaries after meetings end
-   - Save summaries alongside transcripts
+### 3.2 Reliability Improvements (Days 4-6) 
+- **error recovery** for network failures during recording
+- **audio backup** during processing (prevent data loss)
+- **memory optimization** fixes (current 98% usage issue)
+- **beta feedback collection** mechanisms
+- **target:** stable experience for 60+ minute meetings
 
-### Technical Optimizations
-1. **Reduce WER to <10%**
-   - Increase chunk size to 30s
-   - Add noise reduction
-   - Implement context awareness
+### 3.3 Enhanced UI for Beta (Days 7-9)
+- **onboarding flow** for new users
+- **better recording management** (search, filters, export)
+- **usage indicators** and meeting metadata display
+- **account/settings page** foundation
+- **target:** polished experience for beta users
 
-2. **Memory Optimization**
-   - Fix 98% memory usage issue
-   - Implement streaming cleanup
-   - Add memory pressure handling
+### 3.4 Authentication & Backend (Days 10-12)
+- **supabase pro setup** ($25/month for 100gb storage + 8gb database)
+- **google oauth implementation** in electron (web flow)
+- **user schema design** and session management
+- **recordings sync** to cloud storage
+- **target:** user accounts and data persistence
 
-3. **Cost Optimization**
-   - Batch processing for non-real-time
-   - Implement local Whisper for offline
-   - Add cost controls/limits
+### 3.5 Payment Integration (Days 13-14)
+- **stripe setup** with granola-inspired pricing
+- **subscription gates** (free: 10 meetings, pro: $25/month unlimited)
+- **basic billing portal** for plan management
+- **usage tracking** per user
+- **target:** monetization framework
+
+## Phase 1 - Milestone 4: Enhanced Collaboration (14-21 Days)
+
+### 4.1 Calendar Integration
+- **google calendar sync** for automatic meeting detection
+- **meeting context** pre-population (participants, agenda)
+- **post-meeting summary** delivery to attendees
+
+### 4.2 Collaborative Features  
+- **meeting sharing** with attendees
+- **team workspaces** for organizations
+- **comment/annotation** system on transcripts
+- **export formats** (pdf, notion, slack integration)
+
+### 4.3 Advanced Intelligence
+- **action item extraction** and follow-up tracking  
+- **meeting series analysis** (recurring themes, progress tracking)
+- **participant insights** (contribution analysis, speaking time)
+
+### 4.4 Enterprise Ready
+- **sso integration** (okta, azure ad)
+- **admin dashboard** for team management
+- **compliance features** (data retention, audit logs)
+- **custom branding** and white-label options
+
+## Technical Research: Supabase vs Firebase
+
+### Decision: Supabase Pro ($25/month)
+
+**cost analysis at scale:**
+- **100 users:** supabase $25/month vs firebase $40-60/month
+- **1,000 users:** supabase $25-50/month vs firebase $200-400/month  
+- **10,000 users:** supabase $100-200/month vs firebase $2000+/month
+
+**key advantages:**
+- **fixed pricing model** vs firebase's expensive usage-based costs
+- **better for large files** (50gb uploads vs firebase's expensive storage/egress)
+- **postgresql database** perfect for meeting→user→transcript relationships
+- **unified authentication** included in base pricing
+- **open-source** foundation prevents vendor lock-in
+
+**architecture decision:**
+- **metadata in postgres:** user accounts, meeting records, subscription status
+- **large files in supabase storage:** audio files, full transcripts, summaries
+- **single provider simplicity** vs multi-service complexity
 
 ## Session Context for Resume
 **CRITICAL**: Always use FFmpeg + AVFoundation approach. Do NOT try AudioTee, osx-audio, or other experimental libraries - they don't work for microphone capture.
@@ -269,14 +321,42 @@ const ffmpegArgs = [
 - `validation_1755932041000`: 1-min test, 100% success, 68 words
 - `file_test_1756036758188`: Twitter video, 702 words, ~84.5% accuracy
 
+## Development Workflow: Git Branching Strategy
+
+### New Approach (Following Industry Best Practices)
+- **main/master branch:** stable, production-ready releases only (v1.0, v1.1, etc.)
+- **develop branch:** integration branch for all features in development  
+- **feature/milestone-x-y:** individual feature branches off develop
+
+### Benefits
+- **main stays stable** for users downloading releases
+- **parallel development** of multiple features
+- **proper release management** with version tags
+- **hotfix capability** without breaking ongoing development
+
+### Implementation
+```bash
+# create develop branch from current main
+git checkout -b develop
+git push -u origin develop
+
+# future feature work
+git checkout develop
+git checkout -b feature/milestone-3-packaging
+# ... work on feature ...
+git checkout develop
+git merge feature/milestone-3-packaging
+```
+
 ---
-Last Updated: 2025-08-26 (Milestone 3 IN PROGRESS - Production Reliability)
-Session Duration: ~15 hours across multiple sessions  
+Last Updated: 2025-08-26 (Milestone 2.5 COMPLETE → Milestone 3 PLANNING)
+Session Duration: ~20 hours across multiple sessions  
 Major Achievements: 
 - Milestone 1: Real-time transcription with FFmpeg + AVFoundation
 - Milestone 2: Human-like summaries with GPT-5 + Gemini 1.5 Pro  
-- Milestone 2.5: Production-ready UI with full pipeline integration
-- Milestone 3: Critical production fixes + development standards
-- CRISIS RESOLVED: 50-minute CTO meeting recovery (partial)
-- PRODUCTION FIX: AudioCapture now saves audio files properly
-- Open source MIT licensed project on GitHub
+- Milestone 2.5: Human-centered meeting intelligence as default experience
+- BREAKTHROUGH: Gemini end-to-end pipeline with emotional journey transcripts
+- DIFFERENTIATION: Revolutionary alternative to basic meeting tools (Granola/Otter)
+- CRISIS RESOLVED: 50-minute CTO meeting recovery + production reliability fixes
+- TECHNICAL DECISIONS: Supabase pro backend, proper git workflow, milestone 3/4 roadmap
+- Open source MIT licensed project on GitHub (license review pending)
