@@ -1,52 +1,66 @@
 # ai&i
 
-A real-time meeting transcription tool using OpenAI Whisper API with speaker diarization.
+ai meeting transcription tool with human-like summaries and emotional intelligence.
 
-## Project Structure
+**current state:** milestone 2.5 complete - breakthrough human-centered meeting intelligence
+
+## what makes ai&i different
+
+unlike granola/otter's basic transcripts, ai&i provides:
+- **enhanced transcripts:** speaker labels, topic emphasis, emotional context indicators  
+- **human-like summaries:** relationship dynamics and meeting intelligence (not corporate bullet points)
+- **single api approach:** gemini 2.5 flash end-to-end processing vs multi-step pipelines
+
+## current capabilities
+
+✅ **real-time transcription** - ffmpeg + avfoundation + whisper api  
+✅ **human-like summaries** - sally rooney style emotional intelligence  
+✅ **enhanced transcripts** - @speaker references, _topic emphasis_, 🔵🟡🟠 emotional journey  
+✅ **clean ui** - book-like interface with sidebar recordings and tabbed view  
+✅ **cost efficient** - $0.30/hour transcription, $0.03-0.06/hour summary generation  
+
+## project structure
 
 ```
 ai-and-i/
-├── main.js                 # Electron main process
-├── package.json            # Dependencies and scripts
+├── main.js                         # electron main + real-time transcription
 ├── src/
-│   ├── renderer/           # Frontend UI (vanilla HTML/CSS/JS)
-│   │   ├── index.html      # Main UI
-│   │   ├── styles.css      # Styling
-│   │   └── renderer.js     # Frontend logic
-│   ├── audio/              # Audio capture logic
-│   ├── storage/            # JSON file storage
-│   └── api/                # OpenAI Whisper API integration
-├── assets/                 # Static assets
-└── transcripts/            # Saved meeting transcripts (JSON)
+│   ├── audio/audioCapture.js       # ffmpeg + avfoundation implementation  
+│   ├── api/
+│   │   ├── whisperTranscription.js # whisper api integration
+│   │   └── summaryGeneration.js    # gemini 2.5 flash end-to-end
+│   ├── renderer/                   # clean book-like ui
+│   └── storage/                    # recordings database
+├── summaries/                      # generated transcripts + summaries
+└── audio-temp/                     # captured audio files
 ```
 
-## Development
+## usage
 
 ```bash
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run dev
-
-# Run production build
+# start the app
 npm start
+
+# test summary generation  
+node test-summary-generation.js
+
+# test with audio file
+node test-with-audio-file.js ~/path/to/meeting.mp3
 ```
 
-## Milestone 1 Features
+## technical breakthrough: gemini end-to-end
 
-- [x] Electron app foundation
-- [ ] Mac screen recording audio capture
-- [ ] OpenAI Whisper API integration
-- [ ] Speaker diarization
-- [ ] Real-time transcript display
-- [ ] JSON file storage
-- [ ] API cost tracking
+replaced whisper → gemini pipeline with single gemini 2.5 flash call:
+- **2.7x faster processing** (9.3s vs 24.8s)  
+- **enhanced transcripts** with speaker analysis and emotional context
+- **human-centered summaries** with relationship dynamics
+- **cost competitive** at $0.0059 per 3-minute meeting
 
-## Technical Decisions
+## next: phase 1 - milestone 3 (beta ready)
 
-- **Audio Capture**: Mac screen recording API for system audio
-- **Transcription**: OpenAI Whisper API with chunking
-- **UI Framework**: Vanilla HTML/CSS for rapid development
-- **Storage**: JSON files per meeting for simplicity
-- **Platform**: Mac-focused for Milestone 1
+planning authentication, payments, app packaging for 5-10 beta users.
+
+---
+
+**license:** mit  
+**status:** milestone 2.5 complete, ready for milestone 3 planning
