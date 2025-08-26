@@ -348,6 +348,34 @@ git checkout develop
 git merge feature/milestone-3-packaging
 ```
 
+## Current Session Context (2025-08-26)
+
+### Technical Decisions Made Today
+1. **Backend Selection:** supabase pro ($25/month) over firebase for cost efficiency and postgresql database
+2. **Git Workflow:** implemented main/develop/feature branching with versioning: v0.1 (m1), v0.2 (m2), v0.25 (m2.5), v0.3 (m3)
+3. **Milestone 3 Priority Reordering:** app packaging first → reliability → ui → auth → payments (user's strategic insight)
+4. **Pricing Strategy:** copy granola's model - free: 10 meetings, pro: $25/month unlimited
+5. **Repository Updates:** updated readme.md, created develop branch, tagged v0.25, created github release
+
+### Key Insights from Friend's Git Advice
+- proper branching strategy essential for beta deployment
+- main branch = stable releases only
+- develop branch = integration of all features
+- feature branches = individual milestone work
+- enables parallel development and proper release management
+
+### Current State
+- **branch:** develop (with milestone 3/4 roadmap)
+- **tagged:** v0.25 (milestone 2.5 complete)  
+- **next:** start feature/milestone-3-packaging branch for electron-builder setup
+- **licensing:** mit for now, business source license research postponed until actual users
+
+### Session Continuity Notes
+- readme.md updated to reflect gemini end-to-end breakthrough vs basic meeting tools
+- project-state.md contains comprehensive milestone 3/4 plans and supabase research
+- git workflow established with proper version tagging scheme
+- ready to begin milestone 3.1: app packaging (days 1-3 of 14-day beta-ready plan)
+
 ---
 Last Updated: 2025-08-26 (Milestone 2.5 COMPLETE → Milestone 3 PLANNING)
 Session Duration: ~20 hours across multiple sessions  
