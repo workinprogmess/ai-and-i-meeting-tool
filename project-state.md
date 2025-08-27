@@ -398,6 +398,13 @@ git merge feature/milestone-3-packaging
 - set up github releases as update server (provider: github)
 - auto-check for updates on app startup (production builds only)
 
+**beta testing feedback (critical issues discovered):**
+- **dmg installation failure**: "damaged, move to trash" error prevents app installation
+- **app icon formatting**: sharp corners + grey space in applications folder display
+- **menu bar icon color**: black text invisible on macos menu bar (fixed to white/bold)
+- **user experience**: need in-app update notifications like figma/amie (sidebar bottom)
+- **milestone 3.1 incomplete**: memory optimization, universal binaries, error recovery pending
+
 **current build output:**
 ```
 dist/ai&i-0.3.0-arm64.dmg (112MB)
@@ -409,9 +416,12 @@ dist/latest-mac.yml (auto-updater metadata)
 - ✅ basic .dmg distribution working  
 - ✅ custom ai&i branding icons implemented
 - ✅ auto-updater configuration complete (electron-updater + github releases)
-- ⚠️  no code signing (shows "unidentified developer" warning)
+- ❌ **critical issue**: dmg shows "damaged, move to trash" error - blocks installation
+- ❌ **app icon display**: sharp corners + grey space in applications folder
+- ✅ **menu bar icon**: fixed to white/bold for proper macos styling
+- ⚠️  no code signing (likely cause of dmg damaged error)
 - ⚠️  arm64 only (need intel + universal builds)  
-- 📋 next: test auto-update workflow, reliability improvements
+- 📋 next: fix dmg installation, app icon formatting, in-app update notifications
 
 ---
 Last Updated: 2025-08-27 (milestone 3.1 packaging in progress)

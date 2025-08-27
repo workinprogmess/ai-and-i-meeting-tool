@@ -189,7 +189,7 @@ function createMenu() {
 }
 
 function createTrayIcon() {
-  const iconPath = path.join(__dirname, 'assets/tray-icon-new.png');
+  const iconPath = path.join(__dirname, 'assets/tray-icon-white.png');
   tray = new Tray(iconPath);
   
   const contextMenu = Menu.buildFromTemplate([
