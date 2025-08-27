@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, desktopCapturer } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
@@ -15,6 +16,51 @@ let whisperTranscription = null;
 let summaryGeneration = null;
 let chunkMonitorInterval = null;
 let recordingsDB = null;
+
+// auto-updater configuration
+autoUpdater.checkForUpdatesAndNotify = false; // we'll handle this manually
+autoUpdater.autoDownload = false; // ask user before downloading
+
+// auto-updater event handlers
+autoUpdater.on('checking-for-update', () => {
+  console.log('🔍 checking for updates...');
+});
+
+autoUpdater.on('update-available', (info) => {
+  console.log('✅ update available:', info.version);
+  // notify user about available update
+  if (mainWindow) {
+    mainWindow.webContents.send('update-available', info);
+  }
+});
+
+autoUpdater.on('update-not-available', () => {
+  console.log('✅ app is up to date');
+  if (mainWindow) {
+    mainWindow.webContents.send('update-not-available');
+  }
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('❌ update error:', err);
+  if (mainWindow) {
+    mainWindow.webContents.send('update-error', err.message);
+  }
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  console.log(`📥 downloading: ${Math.round(progressObj.percent)}%`);
+  if (mainWindow) {
+    mainWindow.webContents.send('download-progress', progressObj);
+  }
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  console.log('✅ update downloaded, ready to install');
+  if (mainWindow) {
+    mainWindow.webContents.send('update-downloaded', info);
+  }
+});
 
 // Force the app to appear in macOS System Preferences by attempting screen capture
 async function ensureAppRegisteredWithMacOS() {
@@ -482,6 +528,25 @@ ipcMain.handle('get-recordings', async () => {
   }
 });
 
+// auto-updater ipc handlers
+ipcMain.handle('check-for-updates', async () => {
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdates();
+  }
+});
+
+ipcMain.handle('download-update', async () => {
+  if (app.isPackaged) {
+    autoUpdater.downloadUpdate();
+  }
+});
+
+ipcMain.handle('restart-and-install', async () => {
+  if (app.isPackaged) {
+    autoUpdater.quitAndInstall();
+  }
+});
+
 ipcMain.handle('generate-summary', async (event, data) => {
   try {
     const { sessionId, transcript, provider = 'gemini' } = data;
@@ -582,6 +647,13 @@ app.whenReady().then(async () => {
   
   // Register with macOS permissions system after app is ready
   await ensureAppRegisteredWithMacOS();
+  
+  // initialize auto-updater (check for updates on startup)
+  if (app.isPackaged) { // only in production builds
+    setTimeout(() => {
+      autoUpdater.checkForUpdates();
+    }, 3000); // wait 3 seconds after startup
+  }
 });
 
 app.on('window-all-closed', () => {

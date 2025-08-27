@@ -24,6 +24,7 @@
     "@google/generative-ai": "^0.21.0",
     "audiotee": "^0.0.4",
     "dotenv": "^17.2.1",
+    "electron-updater": "^6.6.2",
     "fluent-ffmpeg": "^2.1.3",
     "mac-screen-capture-permissions": "^2.1.0",
     "node-mac-recorder": "^2.12.5",
@@ -32,6 +33,13 @@
   "build": {
     "appId": "com.ai-and-i.meeting-transcription",
     "productName": "ai&i",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "workinprogmess",
+        "repo": "ai-and-i-meeting-tool"
+      }
+    ],
     "files": [
       "main.js",
       "src/**/*",
