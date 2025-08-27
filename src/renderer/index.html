@@ -48,17 +48,16 @@
                 </div>
                 
                 <div class="recording-controls">
-                    <button id="recordBtn" class="btn-record">
+                    <button id="toggleRecordBtn" class="btn-record">
                         <span class="status-dot" id="recordDot"></span>
-                        start recording
+                        <span id="recordBtnText">start recording</span>
                     </button>
-                    <button id="stopBtn" class="btn-minimal" disabled>stop</button>
                 </div>
                 
-                <div id="liveTranscript" class="live-transcript">
-                    <div class="transcript-content" id="transcript">
-                        <p class="placeholder">click start to begin</p>
-                    </div>
+                <div id="recordingDisplay" class="recording-display" style="display: none;">
+                    <div class="wave-animation" id="waveAnimation"></div>
+                    <div class="recording-timer" id="recordingTimer">00:00</div>
+                    <div class="recording-message" id="recordingMessage">recording in progress...</div>
                 </div>
                 
                 <div class="status-bar">

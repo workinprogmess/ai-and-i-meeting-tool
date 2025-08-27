@@ -19,13 +19,15 @@ class AIAndIApp {
     initializeElements() {
         // recording view elements
         this.newMeetingBtn = document.getElementById('newMeetingBtn');
-        this.recordBtn = document.getElementById('recordBtn');
-        this.stopBtn = document.getElementById('stopBtn');
-        this.transcript = document.getElementById('transcript');
+        this.toggleRecordBtn = document.getElementById('toggleRecordBtn');
+        this.recordBtnText = document.getElementById('recordBtnText');
+        this.recordDot = document.getElementById('recordDot');
+        this.recordingDisplay = document.getElementById('recordingDisplay');
+        this.waveAnimation = document.getElementById('waveAnimation');
+        this.recordingTimer = document.getElementById('recordingTimer');
+        this.recordingMessage = document.getElementById('recordingMessage');
         this.status = document.getElementById('status');
         this.costCounter = document.getElementById('costCounter');
-        this.recordDot = document.getElementById('recordDot');
-        this.liveTranscript = document.getElementById('liveTranscript');
         
         // sidebar elements
         this.recordingsList = document.getElementById('recordingsList');
@@ -60,8 +62,7 @@ class AIAndIApp {
     bindEvents() {
         // recording controls
         this.newMeetingBtn.addEventListener('click', () => this.showRecordingView());
-        this.recordBtn.addEventListener('click', () => this.startRecording());
-        this.stopBtn.addEventListener('click', () => this.stopRecording());
+        this.toggleRecordBtn.addEventListener('click', () => this.toggleRecording());
         
         // navigation
         this.backBtn.addEventListener('click', () => this.showRecordingView());
@@ -91,21 +92,26 @@ class AIAndIApp {
             if (this.isRecording) this.stopRecording();
         });
         
-        // audio and transcription updates
+        // audio status updates
         ipcRenderer.on('audio-status', (event, statusData) => {
             this.handleAudioStatus(statusData);
         });
         
-        ipcRenderer.on('transcription-update', (event, transcriptionData) => {
-            this.handleTranscriptionUpdate(transcriptionData);
+        // new gemini pipeline events
+        ipcRenderer.on('meeting-started', (event, meetingData) => {
+            this.handleMeetingStarted(meetingData);
+        });
+        
+        ipcRenderer.on('processing-started', (event, data) => {
+            this.handleProcessingStarted(data);
         });
         
         ipcRenderer.on('recording-complete', (event, recordingData) => {
             this.handleRecordingComplete(recordingData);
         });
         
-        ipcRenderer.on('summary-generated', (event, summaryData) => {
-            this.handleSummaryGenerated(summaryData);
+        ipcRenderer.on('processing-error', (event, errorData) => {
+            this.handleProcessingError(errorData);
         });
         
         // auto-updater events
@@ -122,18 +128,29 @@ class AIAndIApp {
         });
     }
     
+    // New toggle recording method
+    toggleRecording() {
+        if (this.isRecording) {
+            this.stopRecording();
+        } else {
+            this.startRecording();
+        }
+    }
+    
     async startRecording() {
         try {
             this.isRecording = true;
             this.currentSessionId = Date.now().toString();
             
-            // update ui
-            this.recordBtn.disabled = true;
-            this.stopBtn.disabled = false;
+            // update ui - single toggle button
+            this.recordBtnText.textContent = 'stop recording';
             this.recordDot.className = 'status-dot recording';
-            this.liveTranscript.classList.add('show');
-            this.transcript.innerHTML = '<p class="placeholder">listening...</p>';
             this.updateStatus('recording');
+            
+            // show recording display with wave animation
+            this.recordingDisplay.style.display = 'flex';
+            this.createWaveAnimation();
+            this.startRecordingTimer();
             
             // start recording via main process
             const result = await ipcRenderer.invoke('start-recording', {
@@ -172,11 +189,14 @@ class AIAndIApp {
     
     resetRecordingUI() {
         this.isRecording = false;
-        this.recordBtn.disabled = false;
-        this.stopBtn.disabled = true;
+        this.recordBtnText.textContent = 'start recording';
         this.recordDot.className = 'status-dot ready';
-        this.liveTranscript.classList.remove('show');
+        this.recordingDisplay.style.display = 'none';
+        this.stopRecordingTimer();
         this.updateStatus('ready');
+        
+        // Clear wave animation
+        this.waveAnimation.innerHTML = '';
     }
     
     handleAudioStatus(statusData) {
@@ -185,48 +205,53 @@ class AIAndIApp {
         this.costCounter.textContent = `$${this.currentCost.toFixed(4)}`;
     }
     
-    handleTranscriptionUpdate(transcriptionData) {
-        if (!this.isRecording) return;
-        
-        const { text, timestamp, chunkIndex } = transcriptionData;
-        
-        if (text && text.trim()) {
-            // format timestamp for display
-            const time = this.formatTime(chunkIndex * 5); // 5-second chunks
-            
-            // add new transcript line
-            const transcriptLine = document.createElement('p');
-            transcriptLine.innerHTML = `<span class="timestamp">[${time}]</span> ${text}`;
-            
-            // replace placeholder or append
-            if (this.transcript.querySelector('.placeholder')) {
-                this.transcript.innerHTML = '';
-            }
-            
-            this.transcript.appendChild(transcriptLine);
-            this.transcript.scrollTop = this.transcript.scrollHeight;
-        }
-    }
     
     handleRecordingComplete(recordingData) {
-        const { sessionId, transcript, duration, cost, timestamp } = recordingData;
+        const { 
+            sessionId, 
+            transcript, 
+            summary, 
+            cost, 
+            timestamp, 
+            duration,
+            speakerAnalysis,
+            emotionalDynamics
+        } = recordingData;
         
-        // add to recordings list
+        // stop sidebar timer if exists
+        if (this.sidebarTimers && this.sidebarTimers[sessionId]) {
+            clearInterval(this.sidebarTimers[sessionId]);
+            delete this.sidebarTimers[sessionId];
+        }
+        
+        // add to recordings list with gemini end-to-end data
         const recording = {
             id: sessionId,
             title: `meeting ${new Date().toLocaleDateString()}`,
             date: new Date(timestamp).toLocaleDateString(),
             time: new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-            duration: this.formatDuration(duration),
-            transcript,
-            cost,
-            timestamp
+            duration: this.formatDuration(duration || 0),
+            // gemini end-to-end provides both transcript and summary
+            transcriptB: transcript, // enhanced transcript from gemini
+            summaryB: summary, // enhanced summary from gemini
+            speakerAnalysis,
+            emotionalDynamics,
+            cost: cost || 0,
+            timestamp,
+            provider: 'gemini' // mark as gemini end-to-end
         };
         
         this.recordings.unshift(recording);
         this.renderRecordingsList();
         this.resetRecordingUI();
-        this.updateStatus(`recording saved • $${cost.toFixed(4)}`);
+        
+        // show the completed meeting in sidebar immediately
+        this.updateMeetingInSidebar(sessionId, 'completed');
+        
+        // navigate to the meeting view to show results
+        this.selectRecording(sessionId);
+        
+        this.updateStatus(`recording saved • $${(cost || 0).toFixed(4)}`);
     }
     
     handleSummaryGenerated(summaryData) {
@@ -491,6 +516,126 @@ class AIAndIApp {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // Wave animation and timer methods for milestone 3.1.9
+    createWaveAnimation() {
+        // Create wave bars dynamically
+        this.waveAnimation.innerHTML = '';
+        for (let i = 0; i < 8; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'wave-bar';
+            this.waveAnimation.appendChild(bar);
+        }
+    }
+    
+    startRecordingTimer() {
+        this.recordingStartTime = Date.now();
+        this.timerInterval = setInterval(() => {
+            const elapsed = Date.now() - this.recordingStartTime;
+            const seconds = Math.floor(elapsed / 1000);
+            this.recordingTimer.textContent = this.formatDuration(seconds);
+        }, 1000);
+    }
+    
+    stopRecordingTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+    }
+    
+    // New event handlers for gemini pipeline
+    handleMeetingStarted(meetingData) {
+        console.log('meeting started:', meetingData);
+        // Meeting appears in sidebar (will implement sidebar updates)
+        this.addMeetingToSidebar(meetingData);
+    }
+    
+    handleProcessingStarted(data) {
+        console.log('processing started:', data.message);
+        // Update UI with welcome message
+        this.recordingMessage.textContent = data.message;
+        this.updateStatus('processing');
+    }
+    
+    handleProcessingError(errorData) {
+        console.error('processing error:', errorData);
+        this.updateStatus('error');
+        this.recordingMessage.textContent = errorData.message;
+        this.resetRecordingUI();
+    }
+    
+    addMeetingToSidebar(meetingData) {
+        // Create meeting entry in sidebar
+        const meetingEl = document.createElement('div');
+        meetingEl.className = 'meeting-item recording';
+        meetingEl.dataset.sessionId = meetingData.sessionId;
+        meetingEl.innerHTML = `
+            <div class="meeting-title">${meetingData.title}</div>
+            <div class="meeting-status">recording...</div>
+            <div class="meeting-timer" id="sidebarTimer-${meetingData.sessionId}">00:00</div>
+        `;
+        
+        // Add to sidebar (insert at top)
+        const emptyState = this.recordingsList.querySelector('.empty-state');
+        if (emptyState) {
+            emptyState.style.display = 'none';
+        }
+        
+        this.recordingsList.insertBefore(meetingEl, this.recordingsList.firstChild);
+        
+        // Start sidebar timer
+        this.startSidebarTimer(meetingData.sessionId);
+    }
+    
+    startSidebarTimer(sessionId) {
+        const timerEl = document.getElementById(`sidebarTimer-${sessionId}`);
+        if (timerEl) {
+            const startTime = Date.now();
+            const interval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const seconds = Math.floor(elapsed / 1000);
+                timerEl.textContent = this.formatDuration(seconds);
+            }, 1000);
+            
+            // Store interval for cleanup
+            this.sidebarTimers = this.sidebarTimers || {};
+            this.sidebarTimers[sessionId] = interval;
+        }
+    }
+    
+    updateMeetingInSidebar(sessionId, status) {
+        const meetingEl = this.recordingsList.querySelector(`.meeting-item[data-session-id="${sessionId}"]`);
+        if (meetingEl) {
+            const statusEl = meetingEl.querySelector('.meeting-status');
+            const timerEl = meetingEl.querySelector('.meeting-timer');
+            
+            if (status === 'completed') {
+                statusEl.textContent = 'completed';
+                meetingEl.classList.remove('recording');
+                meetingEl.classList.add('completed');
+                
+                // Convert to permanent recording item
+                const recording = this.recordings.find(r => r.id === sessionId);
+                if (recording) {
+                    meetingEl.classList.remove('meeting-item');
+                    meetingEl.classList.add('recording-item');
+                    meetingEl.innerHTML = `
+                        <h3>${recording.title}</h3>
+                        <div class="meta">
+                            ${recording.date} • ${recording.time} • ${recording.duration}
+                        </div>
+                    `;
+                    meetingEl.dataset.id = sessionId;
+                    
+                    // Bind click event
+                    meetingEl.addEventListener('click', () => {
+                        this.selectRecording(sessionId);
+                    });
+                }
+            }
+        }
     }
     
     // update notification methods

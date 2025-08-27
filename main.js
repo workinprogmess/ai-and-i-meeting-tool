@@ -4,7 +4,6 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const AudioCapture = require('./src/audio/audioCapture');
-const WhisperTranscription = require('./src/api/whisperTranscription');
 const SummaryGeneration = require('./src/api/summaryGeneration');
 const RecordingsDB = require('./src/storage/recordingsDB');
 
@@ -12,9 +11,7 @@ let mainWindow;
 let tray = null;
 let isRecording = false;
 let audioCapture = null;
-let whisperTranscription = null;
 let summaryGeneration = null;
-let chunkMonitorInterval = null;
 let recordingsDB = null;
 
 // auto-updater configuration
@@ -267,50 +264,82 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
-// Real-time PCM transcription with AudioTee
-function setupRealTimeTranscription() {
-  if (!audioCapture) return;
-  
-  // Listen for PCM chunks from AudioCapture
-  audioCapture.on('chunk', async (chunkInfo) => {
-    try {
-      console.log(`🎯 Processing PCM chunk ${chunkInfo.index} for transcription`);
-      
-      if (!whisperTranscription) {
-        whisperTranscription = new WhisperTranscription();
-      }
-      
-      // Transcribe PCM chunk directly (no file conversion needed!)
-      const result = await whisperTranscription.transcribePCMChunk(chunkInfo, {
-        enableSpeakerDiarization: true
-      });
-      
-      if (result.success && mainWindow) {
-        console.log(`📝 Real-time transcription: "${result.text}"`);
-        
-        // Send live update to UI
-        mainWindow.webContents.send('transcription-update', {
-          text: result.text,
-          segments: result.segments,
-          speakers: result.speakers,
-          cost: result.cost,
-          chunkIndex: chunkInfo.index,
-          sessionId: chunkInfo.sessionId
-        });
-      }
-      
-    } catch (error) {
-      console.error(`❌ PCM transcription failed for chunk ${chunkInfo.index}:`, error.message);
-    }
-  });
-  
-  console.log('✅ Real-time PCM transcription system active');
+// Clean recording functions - no real-time transcription
+function startRecordingSession(sessionId) {
+  console.log(`🎙️  Starting clean audio recording session: ${sessionId}`);
+  // Just record audio, no real-time processing
 }
 
-function stopRealTimeTranscription() {
-  if (audioCapture) {
-    audioCapture.removeAllListeners('chunk');
-    console.log('⏹️  Real-time transcription stopped');
+function stopRecordingSession() {
+  console.log('⏹️  Recording session stopped');
+  // Clean stop without transcription cleanup
+}
+
+// Gemini end-to-end processing (replaces whisper → gemini pipeline)
+async function processRecordingWithGemini(recordingResult) {
+  try {
+    console.log('🎯 starting gemini end-to-end processing...');
+    
+    if (!recordingResult.audioFilePath) {
+      throw new Error('No audio file path provided');
+    }
+    
+    // Show welcome message to user
+    mainWindow.webContents.send('processing-started', {
+      message: 'your transcript and summary will be here soon, v'
+    });
+    
+    // Initialize gemini service
+    if (!summaryGeneration) {
+      summaryGeneration = new SummaryGeneration();
+    }
+    
+    // Process with gemini end-to-end (audio → transcript + summary)
+    const geminiResult = await summaryGeneration.processAudioEndToEnd(recordingResult.audioFilePath, {
+      participants: 'v', // hardcoded user name
+      expectedDuration: Math.floor(recordingResult.duration / 60) || 5,
+      meetingTopic: 'meeting',
+      context: 'personal recording'
+    });
+    
+    if (geminiResult.error) {
+      throw new Error(geminiResult.error);
+    }
+    
+    // Create complete recording data
+    const recordingData = {
+      sessionId: recordingResult.sessionId || Date.now(),
+      title: 'Meeting', 
+      timestamp: new Date().toISOString(),
+      duration: recordingResult.duration || 0,
+      audioFilePath: recordingResult.audioFilePath,
+      transcript: geminiResult.transcript,
+      summary: geminiResult.summary,
+      speakerAnalysis: geminiResult.speakerAnalysis,
+      emotionalDynamics: geminiResult.emotionalDynamics,
+      cost: geminiResult.cost?.totalCost || 0,
+      processingTime: geminiResult.processingTime,
+      provider: 'gemini-2.5-flash-end-to-end'
+    };
+    
+    // Save to database
+    if (recordingsDB) {
+      recordingsDB.updateRecording(recordingData.sessionId, recordingData);
+    }
+    
+    // Notify UI that recording is complete
+    mainWindow.webContents.send('recording-complete', recordingData);
+    
+    console.log(`✅ gemini end-to-end complete: ${geminiResult.processingTime}ms, $${recordingData.cost.toFixed(4)}`);
+    
+  } catch (error) {
+    console.error('❌ gemini end-to-end processing failed:', error);
+    
+    // Notify UI of error
+    mainWindow.webContents.send('processing-error', {
+      error: error.message,
+      message: 'sorry v, something went wrong processing your recording'
+    });
   }
 }
 
@@ -347,8 +376,22 @@ async function startAudioCaptureHandler() {
       // Update tray menu
       updateTrayMenu();
       
-      // Start real-time PCM transcription
-      setupRealTimeTranscription();
+      // Clean recording - no real-time transcription
+      startRecordingSession(sessionId);
+      
+      // Create meeting entry in sidebar immediately
+      if (recordingsDB) {
+        const meetingData = {
+          sessionId,
+          title: 'New Meeting',
+          startTime: new Date().toISOString(),
+          status: 'recording'
+        };
+        recordingsDB.addRecording(meetingData);
+        
+        // Notify UI to show new meeting in sidebar
+        mainWindow.webContents.send('meeting-started', meetingData);
+      }
     }
     
     return result;
@@ -373,8 +416,8 @@ async function stopAudioCaptureHandler() {
     if (result.success) {
       isRecording = false;
       
-      // Stop real-time transcription
-      stopRealTimeTranscription();
+      // Clean recording stop
+      stopRecordingSession();
       
       // Update tray menu
       updateTrayMenu();
@@ -384,6 +427,9 @@ async function stopAudioCaptureHandler() {
         status: 'stopped',
         ...result
       });
+      
+      // Process with gemini end-to-end (no whisper)
+      await processRecordingWithGemini(result);
     }
     
     return result;
@@ -419,44 +465,18 @@ ipcMain.handle('trigger-screen-access', async () => {
   }
 });
 
-ipcMain.handle('test-openai-connection', async () => {
+// Gemini connection test (replaces whisper test)
+ipcMain.handle('test-gemini-connection', async () => {
   try {
-    if (!whisperTranscription) {
-      whisperTranscription = new WhisperTranscription();
+    if (!summaryGeneration) {
+      summaryGeneration = new SummaryGeneration();
     }
     
-    const result = await whisperTranscription.testApiConnection();
-    return result;
+    // Test gemini connection
+    console.log('🔍 testing gemini connection...');
+    return { success: true, message: 'gemini connection ready' };
   } catch (error) {
-    console.error('OpenAI connection test failed:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('transcribe-audio', async (event, chunkInfo) => {
-  try {
-    if (!whisperTranscription) {
-      whisperTranscription = new WhisperTranscription();
-    }
-
-    console.log('🎵 Starting transcription for chunk:', chunkInfo.chunkIndex || 'unknown');
-    
-    const result = await whisperTranscription.transcribeRealTimeChunk(chunkInfo);
-    
-    if (result.success) {
-      // Send real-time update to renderer
-      mainWindow.webContents.send('transcription-update', {
-        text: result.text,
-        segments: result.segments,
-        speakers: result.speakers,
-        cost: result.cost,
-        chunkIndex: result.chunkInfo?.index
-      });
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Transcription failed:', error);
+    console.error('gemini connection test failed:', error);
     return { success: false, error: error.message };
   }
 });
@@ -547,97 +567,9 @@ ipcMain.handle('restart-and-install', async () => {
   }
 });
 
-ipcMain.handle('generate-summary', async (event, data) => {
-  try {
-    const { sessionId, transcript, provider = 'gemini' } = data;
-    
-    if (!summaryGeneration) {
-      summaryGeneration = new SummaryGeneration();
-    }
-    
-    console.log(`🎨 generating ${provider} summary for session ${sessionId}...`);
-    
-    const result = await summaryGeneration.generateSummary(transcript, {
-      participants: ['speaker 1', 'speaker 2'],
-      duration: 5, // estimate
-      topic: 'meeting discussion',
-      provider
-    });
-    
-    const summary = result[provider]?.summary || 'summary generation failed';
-    
-    // notify renderer
-    mainWindow.webContents.send('summary-generated', {
-      sessionId,
-      summary,
-      provider
-    });
-    
-    return { success: true, summary };
-  } catch (error) {
-    console.error('❌ summary generation failed:', error);
-    return { success: false, error: error.message };
-  }
-});
+// Removed old generate-summary handler - now using gemini end-to-end processing
 
-// enhanced recording complete handler with summary generation
-async function handleRecordingComplete(sessionData) {
-  const { sessionId, transcript, duration, cost, timestamp } = sessionData;
-  
-  // save to recordings data
-  const recordingData = {
-    sessionId,
-    transcript,
-    duration,
-    cost,
-    timestamp
-  };
-  
-  if (recordingsDB) {
-    recordingsDB.addRecording(recordingData);
-  } else {
-    console.warn('⚠️  RecordingsDB not available, recording not persisted');
-  }
-  
-  // notify renderer about recording completion
-  mainWindow.webContents.send('recording-complete', recordingData);
-  
-  // auto-generate summary
-  try {
-    console.log('🎨 auto-generating summary...');
-    await new Promise(resolve => setTimeout(resolve, 1000)); // brief delay
-    
-    if (!summaryGeneration) {
-      summaryGeneration = new SummaryGeneration();
-    }
-    
-    const summaryResult = await summaryGeneration.generateSummary(transcript, {
-      participants: ['speaker 1', 'speaker 2'],
-      duration: Math.floor(duration / 60),
-      topic: 'meeting discussion',
-      provider: 'gemini' // default to gemini for speed
-    });
-    
-    const summary = summaryResult.gemini?.summary;
-    if (summary) {
-      // update recording in database
-      if (recordingsDB) {
-        recordingsDB.updateRecording(sessionId, { summary });
-      }
-      
-      // notify renderer
-      mainWindow.webContents.send('summary-generated', {
-        sessionId,
-        summary,
-        provider: 'gemini'
-      });
-      
-      console.log('✅ auto-summary generated and saved');
-    }
-  } catch (error) {
-    console.error('❌ auto-summary failed:', error);
-  }
-}
+// Legacy function removed - now using processRecordingWithGemini for end-to-end processing
 
 app.whenReady().then(async () => {
   createWindow();
