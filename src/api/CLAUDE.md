@@ -8,6 +8,11 @@
 - **communication**: maintain lowercase convention in all to/fro communications
 - **exception**: preserve proper nouns and API names (OpenAI, Whisper, Gemini) when necessary
 
+### git commit standards
+- **no claude signatures**: never add "generated with claude code" or "co-authored-by: claude" signatures
+- **focus on why**: commit messages should explain why the change was made, not just what changed
+- **technical reasoning**: include context about problems solved or decisions made
+
 ## current architecture
 ### dual pipeline approach
 - **Pipeline A**: Whisper (transcription) → Gemini (summary)

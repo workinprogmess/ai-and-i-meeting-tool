@@ -60,7 +60,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     show: true,
     title: 'ai&i',
-    icon: path.join(__dirname, 'assets/fresh-ai-icon.icns') // dock icon
+    icon: path.join(__dirname, 'assets/ai-and-i.icns') // dock icon
   });
 
   mainWindow.loadFile('src/renderer/index.html');
@@ -143,7 +143,7 @@ function createMenu() {
 }
 
 function createTrayIcon() {
-  const iconPath = path.join(__dirname, 'assets/tray-icon.png');
+  const iconPath = path.join(__dirname, 'assets/tray-icon-new.png');
   tray = new Tray(iconPath);
   
   const contextMenu = Menu.buildFromTemplate([
