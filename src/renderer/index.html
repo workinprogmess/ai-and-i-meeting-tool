@@ -24,6 +24,18 @@
                     <span>start your first recording</span>
                 </div>
             </div>
+            
+            <!-- update notification -->
+            <div class="update-notification" id="updateNotification" style="display: none;">
+                <div class="update-content">
+                    <div class="update-icon">⚡</div>
+                    <div class="update-text">
+                        <span class="update-title">update available</span>
+                        <span class="update-version" id="updateVersion">v0.3.2</span>
+                    </div>
+                </div>
+                <button class="update-btn" id="updateBtn">install</button>
+            </div>
         </aside>
         
         <!-- main content -->
@@ -97,6 +109,30 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- figma-style update popup -->
+    <div class="update-popup-overlay" id="updatePopup" style="display: none;">
+        <div class="update-popup">
+            <div class="update-popup-header">
+                <h3>update available</h3>
+                <span class="update-popup-version" id="popupVersion">v0.3.2</span>
+            </div>
+            
+            <div class="update-popup-content">
+                <p>a new version of ai&i is ready to install</p>
+                <ul class="update-features" id="updateFeatures">
+                    <li>improved meeting transcription accuracy</li>
+                    <li>enhanced summary generation</li>
+                    <li>bug fixes and performance improvements</li>
+                </ul>
+            </div>
+            
+            <div class="update-popup-actions">
+                <button class="btn-secondary" id="updateLater">later</button>
+                <button class="btn-primary" id="updateNow">update now</button>
+            </div>
+        </div>
     </div>
     
     <script src="renderer.js"></script>

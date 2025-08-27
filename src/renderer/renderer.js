@@ -29,6 +29,15 @@ class AIAndIApp {
         
         // sidebar elements
         this.recordingsList = document.getElementById('recordingsList');
+        this.updateNotification = document.getElementById('updateNotification');
+        this.updateBtn = document.getElementById('updateBtn');
+        this.updateVersion = document.getElementById('updateVersion');
+        
+        // update popup elements
+        this.updatePopup = document.getElementById('updatePopup');
+        this.popupVersion = document.getElementById('popupVersion');
+        this.updateLater = document.getElementById('updateLater');
+        this.updateNow = document.getElementById('updateNow');
         
         // meeting view elements
         this.recordingView = document.getElementById('recordingView');
@@ -65,6 +74,11 @@ class AIAndIApp {
         // copy buttons
         this.copySummaryBtn.addEventListener('click', () => this.copyToClipboard('summary'));
         this.copyTranscriptBtn.addEventListener('click', () => this.copyToClipboard('transcript'));
+        
+        // update notifications
+        this.updateBtn.addEventListener('click', () => this.handleUpdateClick());
+        this.updateLater.addEventListener('click', () => this.hideUpdatePopup());
+        this.updateNow.addEventListener('click', () => this.handleUpdateNow());
     }
     
     setupIPC() {
@@ -92,6 +106,19 @@ class AIAndIApp {
         
         ipcRenderer.on('summary-generated', (event, summaryData) => {
             this.handleSummaryGenerated(summaryData);
+        });
+        
+        // auto-updater events
+        ipcRenderer.on('update-available', (event, info) => {
+            this.showUpdateNotification(info);
+        });
+        
+        ipcRenderer.on('update-downloaded', (event, info) => {
+            this.showUpdateReady(info);
+        });
+        
+        ipcRenderer.on('update-error', (event, error) => {
+            console.error('update error:', error);
         });
     }
     
@@ -464,6 +491,48 @@ class AIAndIApp {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // update notification methods
+    showUpdateNotification(info) {
+        console.log('update available:', info);
+        this.currentUpdateInfo = info;
+        
+        // show sidebar notification
+        this.updateVersion.textContent = `v${info.version}`;
+        this.updateNotification.style.display = 'flex';
+        this.updateBtn.textContent = 'download';
+        
+        // show figma-style popup
+        this.popupVersion.textContent = `v${info.version}`;
+        this.updatePopup.style.display = 'flex';
+    }
+    
+    showUpdateReady(info) {
+        console.log('update ready:', info);
+        this.updateBtn.textContent = 'restart';
+        this.updateBtn.style.background = 'rgba(76, 175, 80, 0.3)';
+    }
+    
+    async handleUpdateClick() {
+        if (this.updateBtn.textContent === 'download') {
+            this.updateBtn.textContent = 'downloading...';
+            this.updateBtn.disabled = true;
+            await ipcRenderer.invoke('download-update');
+        } else if (this.updateBtn.textContent === 'restart') {
+            await ipcRenderer.invoke('restart-and-install');
+        }
+    }
+    
+    hideUpdatePopup() {
+        this.updatePopup.style.display = 'none';
+    }
+    
+    async handleUpdateNow() {
+        this.hideUpdatePopup();
+        this.updateBtn.textContent = 'downloading...';
+        this.updateBtn.disabled = true;
+        await ipcRenderer.invoke('download-update');
     }
 }
 
