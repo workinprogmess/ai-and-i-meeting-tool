@@ -1,6 +1,6 @@
 {
   "name": "ai-and-i",
-  "version": "1.0.1",
+  "version": "0.3.0",
   "description": "AI Meeting Transcription Tool",
   "productName": "ai&i",
   "main": "main.js",
@@ -18,7 +18,7 @@
   "type": "commonjs",
   "devDependencies": {
     "electron": "^37.3.1",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -32,21 +32,14 @@
   "build": {
     "appId": "com.ai-and-i.meeting-transcription",
     "productName": "ai&i",
-    "directories": {
-      "output": "dist"
-    },
     "files": [
       "main.js",
       "src/**/*",
-      "package.json",
-      "node_modules/**/*",
-      "!audio-temp/**/*",
-      "!transcripts/**/*",
-      "!test-transcription.js",
-      "!TESTING.md",
-      "!project-state.md",
-      "!dist/**/*",
-      "!.git/**/*"
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/mac-screen-capture-permissions/**/*",
+      "node_modules/node-mac-recorder/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",

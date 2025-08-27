@@ -1,4 +1,12 @@
-# API Integration Guidelines - ai&i
+# api integration guidelines - ai&i
+
+## general communication standards
+### lowercase convention
+- **all documents**: use lowercase for filenames, folder names, and git operations
+- **git commits**: lowercase commit messages, branch names, and tags
+- **research docs**: lowercase headings and document titles where possible
+- **communication**: maintain lowercase convention in all to/fro communications
+- **exception**: preserve proper nouns and API names (OpenAI, Whisper, Gemini) when necessary
 
 ## current architecture
 ### dual pipeline approach

@@ -376,15 +376,44 @@ git merge feature/milestone-3-packaging
 - git workflow established with proper version tagging scheme
 - ready to begin milestone 3.1: app packaging (days 1-3 of 14-day beta-ready plan)
 
+## Current Session Context (2025-08-27)
+
+### milestone 3.1 progress: app packaging & distribution
+
+**issue discovered & resolved: electron-builder stack overflow**
+- **problem**: electron-builder v26.0.12 had infinite recursion bug in nodeModulesCollector
+- **failed attempts**: 
+  - file exclusion patterns in package.json
+  - fresh node_modules installation
+  - minimal configuration approach
+- **solution**: downgraded to electron-builder v24.13.3 (stable version)
+- **result**: successful .dmg and .zip builds at ~112MB each
+
+**version correction**: updated from incorrect 1.0.1 → correct v0.3.0 (milestone 3)
+
+**current build output:**
+```
+dist/ai&i-0.3.0-arm64.dmg (112MB)
+dist/ai&i-0.3.0-arm64-mac.zip (113MB)  
+dist/latest-mac.yml (auto-updater metadata)
+```
+
+**packaging status:**
+- ✅ basic .dmg distribution working
+- ⚠️  no code signing (shows "unidentified developer" warning)
+- ⚠️  arm64 only (need intel + universal builds)
+- 📋 next: auto-updater, icon updates, release pipeline
+
 ---
-Last Updated: 2025-08-26 (Milestone 2.5 COMPLETE → Milestone 3 PLANNING)
-Session Duration: ~20 hours across multiple sessions  
+Last Updated: 2025-08-27 (milestone 3.1 packaging in progress)
+Session Duration: ~22 hours across multiple sessions  
 Major Achievements: 
-- Milestone 1: Real-time transcription with FFmpeg + AVFoundation
-- Milestone 2: Human-like summaries with GPT-5 + Gemini 1.5 Pro  
-- Milestone 2.5: Human-centered meeting intelligence as default experience
-- BREAKTHROUGH: Gemini end-to-end pipeline with emotional journey transcripts
-- DIFFERENTIATION: Revolutionary alternative to basic meeting tools (Granola/Otter)
-- CRISIS RESOLVED: 50-minute CTO meeting recovery + production reliability fixes
-- TECHNICAL DECISIONS: Supabase pro backend, proper git workflow, milestone 3/4 roadmap
-- Open source MIT licensed project on GitHub (license review pending)
+- milestone 1: real-time transcription with ffmpeg + avfoundation
+- milestone 2: human-like summaries with gpt-5 + gemini 1.5 pro  
+- milestone 2.5: human-centered meeting intelligence as default experience
+- **milestone 3.1 (partial): working .dmg distribution with electron-builder v24.13.3**
+- breakthrough: gemini end-to-end pipeline with emotional journey transcripts
+- differentiation: revolutionary alternative to basic meeting tools (granola/otter)
+- crisis resolved: 50-minute cto meeting recovery + production reliability fixes
+- technical decisions: supabase pro backend, proper git workflow, electron-builder downgrade
+- open source mit licensed project on github (license review pending)
