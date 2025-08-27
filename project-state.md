@@ -8,6 +8,7 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 **Phase 1 - Milestone 2**: ✅ COMPLETE - Sally Rooney-style human-like summaries
 **Phase 1 - Milestone 2.5**: ✅ COMPLETE - Human-centered meeting intelligence as default experience
 **Phase 1 - Milestone 3**: ⏳ IN PROGRESS - Beta-ready product experience (10-14 days)
+**Phase 1 - Milestone 3.1.9**: 🚀 CURRENT - Clean gemini end-to-end implementation
 **Phase 1 - Milestone 4**: 📋 PLANNED - Enhanced collaboration and deployment (14-21 days)
 
 ## Critical Technical Architecture Decision ⚠️
@@ -436,3 +437,57 @@ Major Achievements:
 - crisis resolved: 50-minute cto meeting recovery + production reliability fixes
 - technical decisions: supabase pro backend, proper git workflow, electron-builder downgrade
 - open source mit licensed project on github (license review pending)
+
+## Phase 1 - Milestone 3.1.9: Clean Gemini End-to-End Implementation 🚀
+
+### Critical Learning & Course Correction
+**Problem Identified**: milestone 2.5 was marked complete but integration was broken
+- gemini end-to-end method (`processAudioEndToEnd`) existed but was never called by main.js
+- whisper live transcription still running (should have been removed)
+- recording workflow got stuck in "generating summary" state
+- dual pipeline complexity created version conflicts and ui sync issues
+
+**Solution**: clean implementation with gemini-only pipeline
+
+### Core Architecture Changes
+**Pipeline Simplification**:
+- ❌ **Remove entirely**: whisper api, live transcription, real-time chunks
+- ✅ **Single pipeline**: audio file → gemini 2.5 flash → transcript + summary
+- ✅ **Clean main.js**: record → save audio → gemini processing → ui update
+
+### User Experience Design  
+**Recording Flow**:
+1. **Single Toggle Button**: "start recording" ↔ "stop recording" 
+2. **Immediate Sidebar Meeting**: appears when recording starts with timer
+3. **Visual Recording State**: 
+   - main screen: timer + beautiful wave animation
+   - sidebar meeting: timer + smaller wave animation
+4. **No Live Transcription**: clean, distraction-free recording
+
+**Post-Recording Flow**:
+1. **Stop → Welcome Message**: "your transcript and summary will be here soon, v"
+2. **Tabs with Loading States**: show transcript and summary tabs immediately
+3. **Sequential Population**: transcript appears first, then summary (as generated)
+4. **User Name**: hardcoded as "v" until authentication in later milestone
+
+### Cost Tracking Enhancement
+**Comprehensive Cost Analytics**:
+- total historical spend (all whisper + gemini costs from past sessions)
+- current meeting cost (gemini end-to-end processing) 
+- average cost per meeting (total spend ÷ number of meetings)
+- display in status bar area
+
+### Technical Implementation Tasks
+1. **Remove Whisper Dependencies**: clean removal of whisperTranscription.js usage
+2. **Integrate Gemini Pipeline**: main.js calls `processAudioEndToEnd` method  
+3. **UI Redesign**: remove live transcript area, add wave animations
+4. **Cost System**: aggregate historical costs, calculate averages
+5. **Stress Test Milestone 3.1**: auto-updater, icons, installation workflows
+
+### Success Criteria
+- ✅ single button recording workflow
+- ✅ clean gemini-only processing (no whisper)
+- ✅ beautiful recording animations and states
+- ✅ reliable meeting completion and sidebar population  
+- ✅ comprehensive cost tracking with averages
+- ✅ all milestone 3.1 features working (auto-updater, icons, installation)
