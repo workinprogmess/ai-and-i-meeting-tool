@@ -51,11 +51,12 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "assets/ai-and-i.icns",
+      "icon": "assets/icon.icns",
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "identity": null
     },
     "dmg": {
       "title": "ai&i - Meeting Transcription Tool",
