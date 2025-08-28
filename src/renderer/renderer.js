@@ -820,7 +820,7 @@ class AIAndIApp {
     
     showUpdateReady(info) {
         console.log('update ready:', info);
-        this.updateBtn.textContent = 'restart';
+        this.updateBtn.textContent = 'install';
         this.updateBtn.disabled = false;
         // Remove old styling, let CSS handle appearance
         this.updateBtn.style.background = '';
@@ -843,7 +843,7 @@ class AIAndIApp {
                 this.updateBtn.disabled = true;
                 const result = await ipcRenderer.invoke('download-update');
                 console.log('📥 Download result:', result);
-            } else if (this.updateBtn.textContent === 'restart') {
+            } else if (this.updateBtn.textContent === 'install') {
                 // Check if recording is active
                 if (this.isRecording) {
                     console.log('⚠️ Recording active, deferring update');
@@ -851,8 +851,8 @@ class AIAndIApp {
                     return;
                 }
                 
-                console.log('🔄 Showing update confirmation dialog');
-                this.showUpdateConfirmDialog();
+                console.log('🔄 Showing manual update instructions...');
+                this.showManualUpdateInstructions();
             }
         } catch (error) {
             console.error('❌ Update click error:', error);
@@ -953,6 +953,42 @@ class AIAndIApp {
     showUpdateSuccessToast(version, changelog) {
         const message = `Updated to ${version} - ${changelog}`;
         this.showToast(message, 15000);
+    }
+    
+    showManualUpdateInstructions() {
+        const dialog = document.createElement('div');
+        dialog.className = 'update-confirm-dialog';
+        dialog.innerHTML = `
+            <div class="update-confirm-overlay">
+                <div class="update-confirm-content">
+                    <h3>Update Ready to Install</h3>
+                    <p>The new version has been downloaded. To complete the update:</p>
+                    <ol style="margin: 16px 0; padding-left: 20px; color: #666;">
+                        <li>Quit ai&i</li>
+                        <li>Download the latest version from GitHub releases</li>
+                        <li>Replace the app in Applications folder</li>
+                        <li>Restart ai&i</li>
+                    </ol>
+                    <p style="font-size: 12px; color: #888;">Auto-install will work once we have code signing.</p>
+                    <div class="update-confirm-actions">
+                        <button class="btn-secondary">Close</button>
+                        <button class="btn-primary">Open GitHub Releases</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeBtn = dialog.querySelector('.btn-secondary');
+        const githubBtn = dialog.querySelector('.btn-primary');
+        
+        closeBtn.onclick = () => dialog.remove();
+        githubBtn.onclick = async () => {
+            dialog.remove();
+            // Open GitHub releases page
+            await ipcRenderer.invoke('open-external-url', 'https://github.com/workinprogmess/ai-and-i-meeting-tool/releases');
+        };
+        
+        document.body.appendChild(dialog);
     }
     
     checkDeferredUpdate() {

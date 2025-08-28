@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, desktopCapturer, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -636,6 +636,17 @@ ipcMain.handle('restart-and-install', async () => {
   } else {
     console.log('⚠️  Restart and install skipped (not packaged)');
     return { success: false, reason: 'not packaged' };
+  }
+});
+
+ipcMain.handle('open-external-url', async (event, url) => {
+  console.log('🌐 Opening external URL:', url);
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Failed to open external URL:', error.message);
+    throw error;
   }
 });
 
