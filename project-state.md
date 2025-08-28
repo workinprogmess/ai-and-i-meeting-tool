@@ -257,40 +257,36 @@ cat validation-reports/*_summary.txt
 - **auto-updater** deferred pending Apple Developer account
 - **target:** stable, memory-efficient gemini transcription experience
 
-### 3.2 App Packaging & Distribution (Next)
-- **code signing** with Apple Developer account (prerequisite for auto-updater)
-- **universal binaries** (Intel + ARM64 support)
-- **installation reliability** fixes for "damaged" DMG issue
-- **auto-updater re-enablement** once code signing available
-- **target:** distributable app for beta users
-
-### 3.2 Reliability Improvements (Days 4-6) 
-- **error recovery** for network failures during recording
-- **audio backup** during processing (prevent data loss)
-- **memory optimization** ⏳ IN PROGRESS - stream-to-disk audio architecture
-- **beta feedback collection** mechanisms
-- **target:** stable experience for 60+ minute meetings
-
-### 3.3 Enhanced UI for Beta (Days 7-9)
-- **onboarding flow** for new users
-- **better recording management** (search, filters, export)
-- **usage indicators** and meeting metadata display
-- **account/settings page** foundation
-- **target:** polished experience for beta users
-
-### 3.4 Authentication & Backend (Days 10-12)
+### 3.2 authentication & backend (next - days 1-3)
 - **supabase pro setup** ($25/month for 100gb storage + 8gb database)
 - **google oauth implementation** in electron (web flow)
 - **user schema design** and session management
 - **recordings sync** to cloud storage
-- **target:** user accounts and data persistence
+- **target:** user accounts and data persistence foundation
 
-### 3.5 Payment Integration (Days 13-14)
+### 3.3 enhanced ui for beta (days 4-6)
+- **onboarding flow** for new users
+- **better recording management** (search, filters, export)
+- **usage indicators** and meeting metadata display
+- **account/settings page** integration with auth
+- **target:** polished experience for authenticated beta users
+
+### 3.4 payment integration (days 7-9)
 - **stripe setup** with granola-inspired pricing
 - **subscription gates** (free: 10 meetings, pro: $25/month unlimited)
 - **basic billing portal** for plan management
 - **usage tracking** per user
 - **target:** monetization framework
+
+### 3.5 app packaging & distribution (days 10-14)
+- **code signing** with apple developer account (prerequisite for auto-updater)
+- **universal binaries** (intel + arm64 support)
+- **installation reliability** fixes for "damaged" dmg issue
+- **auto-updater re-enablement** once code signing available
+- **error recovery** for network failures during recording
+- **audio backup** during processing (prevent data loss)
+- **beta feedback collection** mechanisms
+- **target:** distributable app for beta users with full reliability
 
 ## Phase 1 - Milestone 4: Enhanced Collaboration (14-21 Days)
 
