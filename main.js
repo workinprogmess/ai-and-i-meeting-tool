@@ -698,17 +698,9 @@ app.whenReady().then(async () => {
     }
   }
 
-  // initialize auto-updater (check for updates on startup)
+  // auto-updater disabled until code signing is implemented
   console.log('🔍 app.isPackaged:', app.isPackaged);
-  if (app.isPackaged) { // only in production builds
-    console.log('⏰ scheduling auto-updater check in 3 seconds...');
-    setTimeout(() => {
-      console.log('🚀 triggering auto-updater check now');
-      autoUpdater.checkForUpdates();
-    }, 3000); // wait 3 seconds after startup
-  } else {
-    console.log('⚠️  skipping auto-updater (not packaged)');
-  }
+  console.log('⏸️  auto-updater disabled until Apple Developer account setup');
 });
 
 app.on('window-all-closed', () => {
