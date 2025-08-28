@@ -859,9 +859,16 @@ class AIAndIApp {
         }
         
         this.hideUpdatePopup();
-        this.updateBtn.textContent = 'downloading...';
-        this.updateBtn.disabled = true;
-        await ipcRenderer.invoke('download-update');
+        
+        // If update is already downloaded (button says 'restart'), install immediately
+        if (this.updateBtn.textContent === 'restart') {
+            await ipcRenderer.invoke('restart-and-install');
+        } else {
+            // Still need to download
+            this.updateBtn.textContent = 'downloading...';
+            this.updateBtn.disabled = true;
+            await ipcRenderer.invoke('download-update');
+        }
     }
     
     // Update protection and UX methods

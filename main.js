@@ -584,14 +584,32 @@ ipcMain.handle('check-for-updates', async () => {
 });
 
 ipcMain.handle('download-update', async () => {
+  console.log('📥 Download update requested');
   if (app.isPackaged) {
-    autoUpdater.downloadUpdate();
+    try {
+      await autoUpdater.downloadUpdate();
+      console.log('✅ Download update started successfully');
+    } catch (error) {
+      console.error('❌ Download update failed:', error.message);
+      throw error;
+    }
+  } else {
+    console.log('⚠️  Download update skipped (not packaged)');
   }
 });
 
 ipcMain.handle('restart-and-install', async () => {
+  console.log('🔄 Restart and install requested');
   if (app.isPackaged) {
-    autoUpdater.quitAndInstall();
+    try {
+      console.log('✅ Initiating quit and install...');
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      console.error('❌ Restart and install failed:', error.message);
+      throw error;
+    }
+  } else {
+    console.log('⚠️  Restart and install skipped (not packaged)');
   }
 });
 
@@ -608,10 +626,20 @@ app.whenReady().then(async () => {
   // Register with macOS permissions system after app is ready
   await ensureAppRegisteredWithMacOS();
   
-  // check if app was just updated (simple version check)
+  // check if app was just updated using persistent storage
   if (app.isPackaged) {
     const currentVersion = app.getVersion();
-    const lastVersion = global.sharedObj?.lastVersion;
+    const userDataPath = app.getPath('userData');
+    const versionFilePath = path.join(userDataPath, 'last-version.txt');
+    
+    let lastVersion = null;
+    try {
+      if (fs.existsSync(versionFilePath)) {
+        lastVersion = fs.readFileSync(versionFilePath, 'utf8').trim();
+      }
+    } catch (error) {
+      console.log('Could not read last version file:', error.message);
+    }
     
     if (lastVersion && lastVersion !== currentVersion) {
       console.log(`✅ App updated from ${lastVersion} to ${currentVersion}`);
@@ -626,8 +654,11 @@ app.whenReady().then(async () => {
     }
     
     // store current version for next startup
-    if (!global.sharedObj) global.sharedObj = {};
-    global.sharedObj.lastVersion = currentVersion;
+    try {
+      fs.writeFileSync(versionFilePath, currentVersion);
+    } catch (error) {
+      console.log('Could not write version file:', error.message);
+    }
   }
 
   // initialize auto-updater (check for updates on startup)
