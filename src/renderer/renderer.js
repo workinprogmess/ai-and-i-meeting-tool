@@ -821,28 +821,41 @@ class AIAndIApp {
     showUpdateReady(info) {
         console.log('update ready:', info);
         this.updateBtn.textContent = 'restart';
-        this.updateBtn.style.background = 'rgba(76, 175, 80, 0.3)';
+        this.updateBtn.disabled = false;
+        // Remove old styling, let CSS handle appearance
+        this.updateBtn.style.background = '';
+        this.updateBtn.style.removeProperty('background');
     }
     
     async handleUpdateClick() {
-        if (this.updateBtn.textContent === 'download') {
-            // Check if recording is active
-            if (this.isRecording) {
-                this.showUpdateDeferredMessage();
-                return;
+        console.log('🖱️ Update button clicked, text:', this.updateBtn.textContent);
+        try {
+            if (this.updateBtn.textContent === 'download') {
+                // Check if recording is active
+                if (this.isRecording) {
+                    console.log('⚠️ Recording active, deferring update');
+                    this.showUpdateDeferredMessage();
+                    return;
+                }
+                
+                console.log('📥 Starting download...');
+                this.updateBtn.textContent = 'downloading...';
+                this.updateBtn.disabled = true;
+                const result = await ipcRenderer.invoke('download-update');
+                console.log('📥 Download result:', result);
+            } else if (this.updateBtn.textContent === 'restart') {
+                // Check if recording is active
+                if (this.isRecording) {
+                    console.log('⚠️ Recording active, deferring update');
+                    this.showUpdateDeferredMessage();
+                    return;
+                }
+                
+                console.log('🔄 Showing update confirmation dialog');
+                this.showUpdateConfirmDialog();
             }
-            
-            this.updateBtn.textContent = 'downloading...';
-            this.updateBtn.disabled = true;
-            await ipcRenderer.invoke('download-update');
-        } else if (this.updateBtn.textContent === 'restart') {
-            // Check if recording is active
-            if (this.isRecording) {
-                this.showUpdateDeferredMessage();
-                return;
-            }
-            
-            this.showUpdateConfirmDialog();
+        } catch (error) {
+            console.error('❌ Update click error:', error);
         }
     }
     
@@ -896,8 +909,15 @@ class AIAndIApp {
         // Add click handler for update button
         const updateBtn = dialog.querySelector('.btn-primary');
         updateBtn.onclick = async () => {
+            console.log('🔄 Confirmation dialog: Update Now clicked');
             dialog.remove();
-            await ipcRenderer.invoke('restart-and-install');
+            try {
+                console.log('🔄 Calling restart-and-install IPC...');
+                const result = await ipcRenderer.invoke('restart-and-install');
+                console.log('🔄 Restart result:', result);
+            } catch (error) {
+                console.error('❌ Restart error:', error);
+            }
         };
         
         document.body.appendChild(dialog);
@@ -960,8 +980,15 @@ class AIAndIApp {
             
             laterBtn.onclick = () => dialog.remove();
             updateBtn.onclick = async () => {
+                console.log('🔄 Deferred update dialog: Update Now clicked');
                 dialog.remove();
-                await ipcRenderer.invoke('restart-and-install');
+                try {
+                    console.log('🔄 Calling restart-and-install IPC from deferred dialog...');
+                    const result = await ipcRenderer.invoke('restart-and-install');
+                    console.log('🔄 Deferred restart result:', result);
+                } catch (error) {
+                    console.error('❌ Deferred restart error:', error);
+                }
             };
             
             document.body.appendChild(dialog);
