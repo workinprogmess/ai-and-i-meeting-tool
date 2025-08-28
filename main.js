@@ -306,12 +306,15 @@ async function processRecordingWithGemini(recordingResult) {
       throw new Error(geminiResult.error);
     }
     
-    // Create complete recording data
+    // Create complete recording data with proper timestamp
+    const completionTime = new Date().toISOString();
     const recordingData = {
       sessionId: recordingResult.sessionId || Date.now(),
-      title: 'Meeting', 
-      timestamp: new Date().toISOString(),
-      duration: recordingResult.duration || 0,
+      title: `meeting ${new Date().toLocaleDateString()}`, 
+      timestamp: completionTime,
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+      duration: recordingResult.totalDuration || recordingResult.duration || 0,
       audioFilePath: recordingResult.audioFilePath,
       transcript: geminiResult.transcript,
       summary: geminiResult.summary,
@@ -383,7 +386,7 @@ async function startAudioCaptureHandler() {
       if (recordingsDB) {
         const meetingData = {
           sessionId,
-          title: 'New Meeting',
+          title: 'new meeting',
           startTime: new Date().toISOString(),
           status: 'recording'
         };

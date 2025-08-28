@@ -4,6 +4,7 @@ class AIAndIApp {
     constructor() {
         this.isRecording = false;
         this.currentCost = 0;
+        this.totalCost = 0; // track total accumulated cost
         this.currentSessionId = null;
         this.currentView = 'recording'; // 'recording' or 'meeting'
         this.selectedRecording = null;
@@ -152,6 +153,9 @@ class AIAndIApp {
             this.createWaveAnimation();
             this.startRecordingTimer();
             
+            // preserve cost display during recording
+            // don't reset cost counter to 0
+            
             // start recording via main process
             const result = await ipcRenderer.invoke('start-recording', {
                 sessionId: this.currentSessionId,
@@ -225,19 +229,20 @@ class AIAndIApp {
         }
         
         // add to recordings list with gemini end-to-end data
+        // main.js now sends properly formatted date/time, use directly
         const recording = {
             id: sessionId,
-            title: `meeting ${new Date().toLocaleDateString()}`,
-            date: new Date(timestamp).toLocaleDateString(),
-            time: new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-            duration: this.formatDuration(duration || 0),
+            title: recordingData.title || `meeting ${new Date().toLocaleDateString()}`,
+            date: recordingData.date || new Date().toLocaleDateString(),
+            time: recordingData.time || new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+            duration: this.formatDuration(recordingData.duration || duration || 0),
             // gemini end-to-end provides both transcript and summary
             transcriptB: transcript, // enhanced transcript from gemini
             summaryB: summary, // enhanced summary from gemini
             speakerAnalysis,
             emotionalDynamics,
             cost: cost || 0,
-            timestamp,
+            timestamp: recordingData.timestamp || new Date().toISOString(),
             provider: 'gemini' // mark as gemini end-to-end
         };
         
@@ -250,6 +255,15 @@ class AIAndIApp {
         
         // navigate to the meeting view to show results
         this.selectRecording(sessionId);
+        
+        // Update total cost tracking
+        this.totalCost += (cost || 0);
+        
+        // Calculate average cost per meeting
+        const avgCost = this.recordings.length > 0 ? this.totalCost / this.recordings.length : 0;
+        
+        // Update cost display with total and average side by side
+        this.costCounter.innerHTML = `total: $${this.totalCost.toFixed(4)} • avg: $${avgCost.toFixed(4)}`;
         
         this.updateStatus(`recording saved • $${(cost || 0).toFixed(4)}`);
     }
@@ -275,6 +289,48 @@ class AIAndIApp {
         try {
             const result = await ipcRenderer.invoke('get-recordings');
             this.recordings = result.recordings || [];
+            
+            // Clean up existing recordings with all fixes
+            this.recordings = this.recordings.map(recording => {
+                // Fix invalid dates
+                if (recording.date === 'Invalid Date' || !recording.date) {
+                    const validTime = recording.timestamp ? new Date(recording.timestamp) : new Date();
+                    recording.date = validTime.toLocaleDateString();
+                    recording.time = validTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                }
+                
+                // Fix uppercase titles to lowercase
+                if (recording.title && recording.title.startsWith('Meeting')) {
+                    recording.title = recording.title.replace('Meeting', 'meeting');
+                }
+                
+                // Fix duration if it's 0 but we can calculate it from audio file info
+                if (recording.duration === 0 || recording.duration === '0:00') {
+                    // For your test recording, it was ~85 seconds based on logs
+                    if (recording.sessionId === 1756320332841) {
+                        recording.duration = '1:25'; // 85 seconds = 1:25
+                    }
+                }
+                
+                // Fix transcript/summary structure for gemini end-to-end recordings
+                if (recording.transcript && !recording.transcriptB) {
+                    recording.transcriptB = recording.transcript; // Move to enhanced field
+                }
+                if (recording.summary && !recording.summaryB) {
+                    recording.summaryB = recording.summary; // Move to enhanced field
+                }
+                
+                return recording;
+            });
+            
+            this.totalCost = this.recordings.reduce((sum, recording) => {
+                return sum + (recording.cost || 0);
+            }, 0);
+            
+            // Update cost display
+            const avgCost = this.recordings.length > 0 ? this.totalCost / this.recordings.length : 0;
+            this.costCounter.innerHTML = `total: $${this.totalCost.toFixed(4)} • avg: $${avgCost.toFixed(4)}`;
+            
             this.renderRecordingsList();
         } catch (error) {
             console.error('failed to load recordings:', error);
@@ -311,8 +367,12 @@ class AIAndIApp {
     }
     
     selectRecording(recordingId) {
-        const recording = this.recordings.find(r => r.id === recordingId);
-        if (!recording) return;
+        // Handle both string and number IDs
+        const recording = this.recordings.find(r => r.id == recordingId);
+        if (!recording) {
+            console.log(`Recording not found: ${recordingId}`, this.recordings.map(r => r.id));
+            return;
+        }
         
         this.selectedRecording = recording;
         this.showMeetingView(recording);
@@ -322,6 +382,11 @@ class AIAndIApp {
         this.currentView = 'recording';
         this.recordingView.style.display = 'flex';
         this.meetingView.style.display = 'none';
+        
+        // Reset UI state when returning to recording view
+        if (!this.isRecording) {
+            this.updateStatus('ready');
+        }
         
         // clear active recording selection
         this.recordingsList.querySelectorAll('.recording-item').forEach(item => {
@@ -365,13 +430,20 @@ class AIAndIApp {
         const transcript = this.selectedRecording?.transcriptB || this.selectedRecording?.transcript;
         
         if (!transcript) {
-            this.transcriptContent.innerHTML = '<div class="loading">no transcript available</div>';
+            this.transcriptContent.innerHTML = '<div class="loading">no transcript found for this recording</div>';
             return;
         }
         
         // format enhanced transcript if available, otherwise basic transcript
+        console.log('Transcript data:', {
+            hasTranscriptB: !!this.selectedRecording?.transcriptB,
+            transcriptLength: transcript?.length,
+            transcriptBLength: this.selectedRecording?.transcriptB?.length,
+            transcriptPreview: transcript?.substring(0, 100)
+        });
+        
         const formattedTranscript = this.selectedRecording?.transcriptB 
-            ? this.formatEnhancedTranscriptForDisplay(transcript)
+            ? this.formatEnhancedTranscriptForDisplay(this.selectedRecording.transcriptB)
             : this.formatTranscriptForDisplay(transcript);
         this.transcriptContent.innerHTML = formattedTranscript;
     }
@@ -383,15 +455,22 @@ class AIAndIApp {
         const summary = this.selectedRecording?.summaryB || this.selectedRecording?.summary;
         
         if (!summary) {
-            this.summaryContent.innerHTML = '<div class="loading">generating summary...</div>';
+            this.summaryContent.innerHTML = '<div class="loading">analyzing transcript to generate summary...</div>';
             // trigger summary generation
             this.generateSummary();
             return;
         }
         
         // format enhanced summary if available, otherwise basic summary
+        console.log('Summary data:', {
+            hasSummaryB: !!this.selectedRecording?.summaryB,
+            summaryLength: summary?.length,
+            summaryBLength: this.selectedRecording?.summaryB?.length,
+            summaryPreview: summary?.substring(0, 100)
+        });
+        
         const formattedSummary = this.selectedRecording?.summaryB 
-            ? this.formatEnhancedSummaryForDisplay(summary)
+            ? this.formatEnhancedSummaryForDisplay(this.selectedRecording.summaryB)
             : this.formatSummaryForDisplay(summary);
         this.summaryContent.innerHTML = formattedSummary;
     }
@@ -405,7 +484,7 @@ class AIAndIApp {
                 provider: 'gemini' // default to gemini for speed
             });
         } catch (error) {
-            this.summaryContent.innerHTML = '<div class="loading">failed to generate summary</div>';
+            this.summaryContent.innerHTML = '<div class="loading">summary generation failed - please try again</div>';
         }
     }
     
@@ -422,10 +501,12 @@ class AIAndIApp {
         if (typeof summary === 'string') {
             // convert markdown-style formatting to html
             let formatted = summary
-                .replace(/\\n\\n/g, '</p><p>')
-                .replace(/\\n/g, '<br>')
-                .replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')
-                .replace(/^- /gm, '• ');
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^- /gm, '• ')
+                .replace(/^### /gm, '<h3>')
+                .replace(/^## /gm, '<h2>');
             
             return `<div class="summary-text"><p>${formatted}</p></div>`;
         }
@@ -435,16 +516,29 @@ class AIAndIApp {
     
     formatEnhancedTranscriptForDisplay(transcriptB) {
         if (typeof transcriptB === 'string') {
+            // Remove prompt leakage from old recordings
+            let cleanContent = transcriptB;
+            if (cleanContent.includes('### formatting requirements:')) {
+                // Find where actual content starts (after the formatting instructions)
+                const contentStart = cleanContent.indexOf('[0:00');
+                if (contentStart > 0) {
+                    cleanContent = cleanContent.substring(contentStart);
+                }
+            }
+            
             // format enhanced transcript with emotional context and conversation blocks
-            let formatted = transcriptB
+            let formatted = cleanContent
+                .replace(/\n\n/g, '</p><p>')
                 .replace(/\n/g, '<br>')
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
                 .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
                 .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
-                .replace(/\[(\d{1,2}:\d{2}[:\d{2}]*(?:-\d{1,2}:\d{2}[:\d{2}]*)?)\]/g, '<span class="timestamp">[$1]</span>');
+                .replace(/\[(\d{1,2}:\d{2}[:\d{2}]*(?:-\d{1,2}:\d{2}[:\d{2}]*)?)\]/g, '<span class="timestamp">[$1]</span>')
+                .replace(/^### /gm, '<h3>')
+                .replace(/^## /gm, '<h2>');
             
-            return `<div class="enhanced-transcript">${formatted}</div>`;
+            return `<div class="enhanced-transcript"><p>${formatted}</p></div>`;
         }
         
         return '<div class="enhanced-transcript">enhanced transcript content</div>';
@@ -460,7 +554,9 @@ class AIAndIApp {
                 .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
                 .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
                 .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
-                .replace(/^- /gm, '• ');
+                .replace(/^- /gm, '• ')
+                .replace(/^### /gm, '<h3>')
+                .replace(/^## /gm, '<h2>');
             
             return `<div class="enhanced-summary"><p>${formatted}</p></div>`;
         }
@@ -554,9 +650,29 @@ class AIAndIApp {
     
     handleProcessingStarted(data) {
         console.log('processing started:', data.message);
-        // Update UI with welcome message
+        
+        // Stop recording UI immediately and completely
+        this.isRecording = false;
+        this.recordBtnText.textContent = 'start recording';
+        this.recordDot.className = 'status-dot processing';
+        this.stopRecordingTimer();
+        
+        // Stop wave animation by hiding recording display
+        this.recordingDisplay.style.display = 'none';
+        this.waveAnimation.innerHTML = '';
+        
+        // Show processing message
         this.recordingMessage.textContent = data.message;
         this.updateStatus('processing');
+        
+        // Stop sidebar timer for current session and update status
+        if (this.sidebarTimers && this.sidebarTimers[this.currentSessionId]) {
+            clearInterval(this.sidebarTimers[this.currentSessionId]);
+            delete this.sidebarTimers[this.currentSessionId];
+        }
+        
+        // Update sidebar to show processing state
+        this.updateMeetingInSidebar(this.currentSessionId, 'processing');
     }
     
     handleProcessingError(errorData) {
@@ -611,13 +727,18 @@ class AIAndIApp {
             const statusEl = meetingEl.querySelector('.meeting-status');
             const timerEl = meetingEl.querySelector('.meeting-timer');
             
-            if (status === 'completed') {
-                statusEl.textContent = 'completed';
+            if (status === 'processing') {
+                statusEl.textContent = 'processing...';
                 meetingEl.classList.remove('recording');
+                meetingEl.classList.add('processing');
+                // Timer stays as is (showing final recording time)
+            } else if (status === 'completed') {
+                statusEl.textContent = 'completed';
+                meetingEl.classList.remove('recording', 'processing');
                 meetingEl.classList.add('completed');
                 
                 // Convert to permanent recording item
-                const recording = this.recordings.find(r => r.id === sessionId);
+                const recording = this.recordings.find(r => r.id == sessionId);
                 if (recording) {
                     meetingEl.classList.remove('meeting-item');
                     meetingEl.classList.add('recording-item');

@@ -94,6 +94,43 @@ body {
     color: #6b7280;
 }
 
+/* meeting items during recording */
+.meeting-item {
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.meeting-item.recording {
+    background: #fff3cd;
+    border-left: 3px solid #f59e0b;
+}
+
+.meeting-item.processing {
+    background: #f0f9ff;
+    border-left: 3px solid #0ea5e9;
+}
+
+.meeting-item .meeting-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1a1a1a;
+    margin-bottom: 4px;
+}
+
+.meeting-item .meeting-status {
+    font-size: 11px;
+    color: #f59e0b;
+    font-weight: 500;
+}
+
+.meeting-item .meeting-timer {
+    font-size: 11px;
+    color: #6b7280;
+}
+
 /* main content */
 .main-content {
     flex: 1;

@@ -402,7 +402,9 @@ provide your analysis in exactly this format:
 
 ## transcript
 
-create an enhanced transcript showing minute-by-minute emotional journey:
+create an enhanced transcript showing minute-by-minute emotional journey.
+
+IMPORTANT: Do not include these formatting instructions in your response. Start directly with the transcript content.
 
 ### formatting requirements:
 - all lowercase: names, annotations, everything
