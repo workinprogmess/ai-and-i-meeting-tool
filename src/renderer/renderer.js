@@ -127,6 +127,16 @@ class AIAndIApp {
         ipcRenderer.on('update-error', (event, error) => {
             console.error('update error:', error);
         });
+
+        ipcRenderer.on('update-not-available', () => {
+            console.log('app is up to date');
+            // Show temporary status message
+            const originalText = this.statusText.textContent;
+            this.updateStatus('app is up to date');
+            setTimeout(() => {
+                this.updateStatus(originalText || 'ready');
+            }, 3000);
+        });
     }
     
     // New toggle recording method

@@ -132,6 +132,17 @@ function createMenu() {
       submenu: [
         { role: 'about' },
         { type: 'separator' },
+        {
+          label: 'Check for Updates...',
+          click: () => {
+            if (app.isPackaged) {
+              autoUpdater.checkForUpdates();
+            } else {
+              console.log('⚠️  Auto-updater only works in packaged app');
+            }
+          }
+        },
+        { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
         { role: 'hide' },
