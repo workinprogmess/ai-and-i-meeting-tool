@@ -137,6 +137,11 @@ class AIAndIApp {
                 this.updateStatus(originalText || 'ready');
             }, 3000);
         });
+
+        ipcRenderer.on('update-success', (event, info) => {
+            console.log('update completed successfully:', info);
+            this.showUpdateSuccessToast(info.version, info.changelog || 'Performance improvements and bug fixes');
+        });
     }
     
     // New toggle recording method
@@ -211,6 +216,9 @@ class AIAndIApp {
         
         // Clear wave animation
         this.waveAnimation.innerHTML = '';
+        
+        // Check for deferred updates
+        this.checkDeferredUpdate();
     }
     
     handleAudioStatus(statusData) {
@@ -818,11 +826,23 @@ class AIAndIApp {
     
     async handleUpdateClick() {
         if (this.updateBtn.textContent === 'download') {
+            // Check if recording is active
+            if (this.isRecording) {
+                this.showUpdateDeferredMessage();
+                return;
+            }
+            
             this.updateBtn.textContent = 'downloading...';
             this.updateBtn.disabled = true;
             await ipcRenderer.invoke('download-update');
         } else if (this.updateBtn.textContent === 'restart') {
-            await ipcRenderer.invoke('restart-and-install');
+            // Check if recording is active
+            if (this.isRecording) {
+                this.showUpdateDeferredMessage();
+                return;
+            }
+            
+            this.showUpdateConfirmDialog();
         }
     }
     
@@ -831,10 +851,114 @@ class AIAndIApp {
     }
     
     async handleUpdateNow() {
+        // Check if recording is active
+        if (this.isRecording) {
+            this.hideUpdatePopup();
+            this.showUpdateDeferredMessage();
+            return;
+        }
+        
         this.hideUpdatePopup();
         this.updateBtn.textContent = 'downloading...';
         this.updateBtn.disabled = true;
         await ipcRenderer.invoke('download-update');
+    }
+    
+    // Update protection and UX methods
+    showUpdateDeferredMessage() {
+        this.showToast('Update will install automatically after recording ends', 5000);
+    }
+    
+    showUpdateConfirmDialog() {
+        // Create minimal confirmation dialog
+        const dialog = document.createElement('div');
+        dialog.className = 'update-confirm-dialog';
+        dialog.innerHTML = `
+            <div class="update-confirm-overlay">
+                <div class="update-confirm-content">
+                    <h3>Ready to update?</h3>
+                    <p>The app will restart to install the new version.</p>
+                    <div class="update-confirm-actions">
+                        <button class="btn-secondary" onclick="this.closest('.update-confirm-dialog').remove()">Cancel</button>
+                        <button class="btn-primary" onclick="this.confirmUpdate()">Update Now</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add click handler for update button
+        const updateBtn = dialog.querySelector('.btn-primary');
+        updateBtn.onclick = async () => {
+            dialog.remove();
+            await ipcRenderer.invoke('restart-and-install');
+        };
+        
+        document.body.appendChild(dialog);
+    }
+    
+    showToast(message, duration = 10000) {
+        // Remove any existing toast
+        const existingToast = document.querySelector('.update-toast');
+        if (existingToast) {
+            existingToast.remove();
+        }
+        
+        // Create new toast
+        const toast = document.createElement('div');
+        toast.className = 'update-toast';
+        toast.innerHTML = `
+            <div class="toast-content">
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="this.closest('.update-toast').remove()">×</button>
+            </div>
+        `;
+        
+        document.body.appendChild(toast);
+        
+        // Auto-remove after duration
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, duration);
+    }
+    
+    showUpdateSuccessToast(version, changelog) {
+        const message = `Updated to ${version} - ${changelog}`;
+        this.showToast(message, 15000);
+    }
+    
+    checkDeferredUpdate() {
+        // Check if there's a pending update (restart button is showing)
+        if (this.updateBtn.textContent === 'restart' && this.updateNotification.style.display === 'flex') {
+            // Show dialog asking if user wants to update now
+            const dialog = document.createElement('div');
+            dialog.className = 'update-confirm-dialog';
+            dialog.innerHTML = `
+                <div class="update-confirm-overlay">
+                    <div class="update-confirm-content">
+                        <h3>Ready to update now?</h3>
+                        <p>Recording finished. The app can now restart to install the new version.</p>
+                        <div class="update-confirm-actions">
+                            <button class="btn-secondary">Later</button>
+                            <button class="btn-primary">Update Now</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Add click handlers
+            const laterBtn = dialog.querySelector('.btn-secondary');
+            const updateBtn = dialog.querySelector('.btn-primary');
+            
+            laterBtn.onclick = () => dialog.remove();
+            updateBtn.onclick = async () => {
+                dialog.remove();
+                await ipcRenderer.invoke('restart-and-install');
+            };
+            
+            document.body.appendChild(dialog);
+        }
     }
 }
 

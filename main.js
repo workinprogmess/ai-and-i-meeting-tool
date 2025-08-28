@@ -197,8 +197,17 @@ function createMenu() {
 }
 
 function createTrayIcon() {
-  const iconPath = path.join(__dirname, 'assets/tray-icon-white.png');
-  tray = new Tray(iconPath);
+  try {
+    // Try multiple paths for tray icon
+    let iconPath = path.join(__dirname, 'assets/tray-icon-white.png');
+    if (!fs.existsSync(iconPath)) {
+      // Try in Resources folder for packaged app
+      iconPath = path.join(process.resourcesPath, 'app.asar.unpacked/assets/tray-icon-white.png');
+      if (!fs.existsSync(iconPath)) {
+        iconPath = path.join(process.resourcesPath, 'assets/tray-icon-white.png');
+      }
+    }
+    tray = new Tray(iconPath);
   
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -238,6 +247,10 @@ function createTrayIcon() {
       mainWindow.focus();
     }
   });
+  } catch (error) {
+    console.error('❌ Failed to create tray icon:', error.message);
+    console.log('   Continuing without tray icon...');
+  }
 }
 
 function updateTrayMenu() {
@@ -595,11 +608,38 @@ app.whenReady().then(async () => {
   // Register with macOS permissions system after app is ready
   await ensureAppRegisteredWithMacOS();
   
+  // check if app was just updated (simple version check)
+  if (app.isPackaged) {
+    const currentVersion = app.getVersion();
+    const lastVersion = global.sharedObj?.lastVersion;
+    
+    if (lastVersion && lastVersion !== currentVersion) {
+      console.log(`✅ App updated from ${lastVersion} to ${currentVersion}`);
+      setTimeout(() => {
+        if (mainWindow) {
+          mainWindow.webContents.send('update-success', {
+            version: currentVersion,
+            changelog: 'Auto-updater improvements and bug fixes'
+          });
+        }
+      }, 2000); // slight delay to let UI load
+    }
+    
+    // store current version for next startup
+    if (!global.sharedObj) global.sharedObj = {};
+    global.sharedObj.lastVersion = currentVersion;
+  }
+
   // initialize auto-updater (check for updates on startup)
+  console.log('🔍 app.isPackaged:', app.isPackaged);
   if (app.isPackaged) { // only in production builds
+    console.log('⏰ scheduling auto-updater check in 3 seconds...');
     setTimeout(() => {
+      console.log('🚀 triggering auto-updater check now');
       autoUpdater.checkForUpdates();
     }, 3000); // wait 3 seconds after startup
+  } else {
+    console.log('⚠️  skipping auto-updater (not packaged)');
   }
 });
 

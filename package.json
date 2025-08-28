@@ -47,7 +47,8 @@
     ],
     "asarUnpack": [
       "node_modules/mac-screen-capture-permissions/**/*",
-      "node_modules/node-mac-recorder/**/*"
+      "node_modules/node-mac-recorder/**/*",
+      "assets/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
