@@ -286,7 +286,8 @@ async function processRecordingWithGemini(recordingResult) {
     
     // Show welcome message to user
     mainWindow.webContents.send('processing-started', {
-      message: 'your transcript and summary will be here soon, v'
+      message: 'your transcript and summary will be here soon, v',
+      sessionId: recordingResult.sessionId
     });
     
     // Initialize gemini service
@@ -297,7 +298,7 @@ async function processRecordingWithGemini(recordingResult) {
     // Process with gemini end-to-end (audio → transcript + summary)
     const geminiResult = await summaryGeneration.processAudioEndToEnd(recordingResult.audioFilePath, {
       participants: 'v', // hardcoded user name
-      expectedDuration: Math.floor(recordingResult.duration / 60) || 5,
+      expectedDuration: Math.round((recordingResult.duration / 60) * 10) / 10, // convert to minutes with 1 decimal place
       meetingTopic: 'meeting',
       context: 'personal recording'
     });
@@ -348,20 +349,20 @@ async function processRecordingWithGemini(recordingResult) {
 
 // IPC Handlers for audio capture and transcription
 ipcMain.handle('start-recording', async (event, data) => {
-  return await startAudioCaptureHandler();
+  return await startAudioCaptureHandler(data);
 });
 
 ipcMain.handle('stop-recording', async () => {
   return await stopAudioCaptureHandler();
 });
 
-async function startAudioCaptureHandler() {
+async function startAudioCaptureHandler(data) {
   try {
     if (!audioCapture) {
       audioCapture = new AudioCapture();
     }
 
-    const sessionId = Date.now();
+    const sessionId = data?.sessionId || Date.now();
     const result = await audioCapture.startRecording(sessionId);
     
     if (result.success) {
@@ -387,7 +388,7 @@ async function startAudioCaptureHandler() {
         const meetingData = {
           sessionId,
           title: 'new meeting',
-          startTime: new Date().toISOString(),
+          startTime: data?.timestamp || new Date().toISOString(),
           status: 'recording'
         };
         recordingsDB.addRecording(meetingData);

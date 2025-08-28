@@ -14,10 +14,12 @@ class AudioCapture extends EventEmitter {
         this.ffmpegProcess = null;
         this.isRecording = false;
         this.sessionId = null;
-        this.audioChunks = [];
+        // MEMORY OPTIMIZATION: Stream-to-disk instead of accumulating chunks in memory
+        this.tempPCMFilePath = null; // temporary file for streaming PCM data
         this.chunkDuration = 5; // seconds per chunk for transcription
         this.currentChunkBuffer = Buffer.alloc(0);
         this.chunkIndex = 0;
+        this.totalBytesWritten = 0; // track total audio data for final WAV creation
         
         // Audio configuration for Whisper API
         this.sampleRate = 16000; // 16kHz for Whisper
@@ -44,7 +46,14 @@ class AudioCapture extends EventEmitter {
             this.sessionId = sessionId;
             this.currentChunkBuffer = Buffer.alloc(0);
             this.chunkIndex = 0;
-            this.audioChunks = [];
+            this.totalBytesWritten = 0;
+            
+            // Create temporary PCM file for streaming audio data
+            this.tempPCMFilePath = path.join(require('os').tmpdir(), `pcm_stream_${sessionId}.raw`);
+            
+            // Initialize empty temp file
+            const fs = require('fs').promises;
+            await fs.writeFile(this.tempPCMFilePath, Buffer.alloc(0));
 
             console.log('🎙️  Starting ffmpeg audio capture with AVFoundation...');
             
@@ -121,7 +130,7 @@ class AudioCapture extends EventEmitter {
         }
     }
 
-    processPCMData(pcmData) {
+    async processPCMData(pcmData) {
         if (!this.isRecording) return;
 
         // Accumulate PCM data
@@ -145,12 +154,13 @@ class AudioCapture extends EventEmitter {
                 sessionId: this.sessionId
             };
             
-            this.audioChunks.push(chunkInfo);
+            // MEMORY OPTIMIZATION: Stream chunk to disk immediately instead of storing in memory
+            await this.appendChunkToDisk(completeChunk);
             this.chunkIndex++;
             
-            console.log(`📦 Created PCM chunk ${this.chunkIndex - 1}: ${completeChunk.length} bytes`);
+            console.log(`📦 Streamed PCM chunk ${this.chunkIndex - 1}: ${completeChunk.length} bytes to disk`);
             
-            // Emit chunk for real-time transcription
+            // Emit chunk for real-time transcription (with temp data that gets cleaned up)
             this.emit('chunk', chunkInfo);
         }
     }
@@ -188,7 +198,8 @@ class AudioCapture extends EventEmitter {
                     sessionId: this.sessionId
                 };
                 
-                this.audioChunks.push(finalChunkInfo);
+                // Stream final chunk to disk
+                await this.appendChunkToDisk(this.currentChunkBuffer);
                 console.log(`📦 Final PCM chunk: ${this.currentChunkBuffer.length} bytes`);
                 
                 // Emit final chunk for transcription
@@ -197,8 +208,9 @@ class AudioCapture extends EventEmitter {
             
             this.isRecording = false;
             
-            const totalChunks = this.audioChunks.length;
-            const totalDuration = totalChunks * this.chunkDuration;
+            const totalChunks = this.chunkIndex;
+            // FIXED: Calculate actual duration from total bytes, not just complete chunks
+            const totalDuration = Math.round(this.totalBytesWritten / this.bytesPerSecond);
             
             console.log(`✅ FFmpeg recording stopped`);
             console.log(`📊 Total chunks: ${totalChunks}, Duration: ~${totalDuration}s`);
@@ -228,9 +240,23 @@ class AudioCapture extends EventEmitter {
             // Reset state
             this.ffmpegProcess = null;
             this.sessionId = null;
-            this.audioChunks = [];
             this.currentChunkBuffer = Buffer.alloc(0);
             this.chunkIndex = 0;
+            this.totalBytesWritten = 0;
+            
+            // Clean up temp PCM file
+            if (this.tempPCMFilePath) {
+                try {
+                    const fs = require('fs').promises;
+                    await fs.access(this.tempPCMFilePath);
+                    await fs.unlink(this.tempPCMFilePath);
+                    console.log('🗑️ Cleaned up temporary PCM file');
+                } catch (error) {
+                    // File doesn't exist or already cleaned, that's ok
+                    console.log('🗑️ Temp PCM file already cleaned or doesn\'t exist');
+                }
+            }
+            this.tempPCMFilePath = null;
 
             return result;
 
@@ -253,8 +279,8 @@ class AudioCapture extends EventEmitter {
     }
     
     async saveAudioFile() {
-        if (!this.audioChunks || this.audioChunks.length === 0) {
-            throw new Error('No audio data to save');
+        if (!this.tempPCMFilePath || this.totalBytesWritten === 0) {
+            throw new Error('No audio data to save - temp file missing or empty');
         }
 
         const fs = require('fs').promises;
@@ -270,15 +296,9 @@ class AudioCapture extends EventEmitter {
         
         const audioFilePath = path.join(audioTempDir, `session_${this.sessionId}.wav`);
         
-        // Combine all PCM chunks into one buffer
-        const totalSize = this.audioChunks.reduce((sum, chunk) => sum + chunk.pcmData.length, 0);
-        const combinedPCM = Buffer.alloc(totalSize);
-        
-        let offset = 0;
-        for (const chunk of this.audioChunks) {
-            chunk.pcmData.copy(combinedPCM, offset);
-            offset += chunk.pcmData.length;
-        }
+        // MEMORY OPTIMIZATION: Read PCM data directly from temp file instead of from memory
+        const combinedPCM = await fs.readFile(this.tempPCMFilePath);
+        console.log(`📾 Read ${combinedPCM.length} bytes of PCM data from temp file`);
         
         // Create WAV header
         const wavHeader = this.createWAVHeader(combinedPCM.length);
@@ -312,10 +332,37 @@ class AudioCapture extends EventEmitter {
         return header;
     }
 
-    cleanup() {
+    async appendChunkToDisk(chunkBuffer) {
+        if (!this.tempPCMFilePath) {
+            throw new Error('Temp PCM file path not initialized');
+        }
+        
+        // Append PCM data to temporary file using stream to minimize memory usage
+        const fs = require('fs').promises;
+        await fs.appendFile(this.tempPCMFilePath, chunkBuffer);
+        this.totalBytesWritten += chunkBuffer.length;
+        
+        console.log(`📦 Streamed ${chunkBuffer.length} bytes to temp file (total: ${this.totalBytesWritten} bytes)`);
+    }
+
+    async cleanup() {
         if (this.isRecording && this.ffmpegProcess) {
             this.ffmpegProcess.kill('SIGTERM');
         }
+        
+        // Clean up temp PCM file if it exists
+        if (this.tempPCMFilePath) {
+            try {
+                const fs = require('fs').promises;
+                await fs.unlink(this.tempPCMFilePath);
+                console.log('🗑️ Cleaned up temporary PCM file during cleanup');
+            } catch (error) {
+                // File might not exist, that's ok
+                console.log('🗑️ Temp PCM file already cleaned or doesn\'t exist');
+            }
+            this.tempPCMFilePath = null;
+        }
+        
         this.removeAllListeners();
     }
 }

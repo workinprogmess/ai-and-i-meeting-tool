@@ -414,6 +414,29 @@ class AIAndIApp {
         this.loadSummaryContent();
     }
     
+    showMeetingViewWithLoadingState(sessionId, message) {
+        // Switch to meeting view immediately
+        this.currentView = 'meeting';
+        this.recordingView.style.display = 'none';
+        this.meetingView.style.display = 'flex';
+        
+        // Set up meeting info with temp data
+        this.meetingTitle.textContent = 'meeting ' + new Date().toLocaleDateString();
+        this.meetingDate.textContent = new Date().toLocaleDateString();
+        this.meetingDuration.textContent = '0:00';
+        
+        // Show loading states in tabs with custom message
+        this.transcriptContent.innerHTML = `<div class="loading">${message}</div>`;
+        this.summaryContent.innerHTML = `<div class="loading">processing will complete soon...</div>`;
+        
+        // Set transcript tab as active
+        this.tabBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === 'transcript');
+        });
+        this.summaryTab.classList.remove('active');
+        this.transcriptTab.classList.add('active');
+    }
+    
     switchTab(tabName) {
         // update tab buttons
         this.tabBtns.forEach(btn => {
@@ -649,7 +672,7 @@ class AIAndIApp {
     }
     
     handleProcessingStarted(data) {
-        console.log('processing started:', data.message);
+        console.log('processing started:', data.message, 'for session:', data.sessionId);
         
         // Stop recording UI immediately and completely
         this.isRecording = false;
@@ -661,18 +684,21 @@ class AIAndIApp {
         this.recordingDisplay.style.display = 'none';
         this.waveAnimation.innerHTML = '';
         
-        // Show processing message
-        this.recordingMessage.textContent = data.message;
+        // Show processing message and navigate to meeting view with loading state
         this.updateStatus('processing');
         
-        // Stop sidebar timer for current session and update status
-        if (this.sidebarTimers && this.sidebarTimers[this.currentSessionId]) {
-            clearInterval(this.sidebarTimers[this.currentSessionId]);
-            delete this.sidebarTimers[this.currentSessionId];
+        // Stop sidebar timer for the correct session
+        const sessionId = data.sessionId || this.currentSessionId;
+        if (this.sidebarTimers && this.sidebarTimers[sessionId]) {
+            clearInterval(this.sidebarTimers[sessionId]);
+            delete this.sidebarTimers[sessionId];
         }
         
         // Update sidebar to show processing state
-        this.updateMeetingInSidebar(this.currentSessionId, 'processing');
+        this.updateMeetingInSidebar(sessionId, 'processing');
+        
+        // Navigate to meeting view and show loading state immediately
+        this.showMeetingViewWithLoadingState(sessionId, data.message);
     }
     
     handleProcessingError(errorData) {
