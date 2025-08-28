@@ -587,14 +587,23 @@ ipcMain.handle('download-update', async () => {
   console.log('📥 Download update requested');
   if (app.isPackaged) {
     try {
+      // Check if already downloaded
+      console.log('🔍 Starting download update process...');
       await autoUpdater.downloadUpdate();
-      console.log('✅ Download update started successfully');
+      console.log('✅ Download update completed successfully');
+      return { success: true };
     } catch (error) {
       console.error('❌ Download update failed:', error.message);
+      // Don't throw error if it's already downloaded
+      if (error.message.includes('already downloaded') || error.message.includes('Update has already been downloaded')) {
+        console.log('ℹ️  Update was already downloaded, continuing...');
+        return { success: true, alreadyDownloaded: true };
+      }
       throw error;
     }
   } else {
     console.log('⚠️  Download update skipped (not packaged)');
+    return { success: false, reason: 'not packaged' };
   }
 });
 
@@ -603,13 +612,30 @@ ipcMain.handle('restart-and-install', async () => {
   if (app.isPackaged) {
     try {
       console.log('✅ Initiating quit and install...');
-      autoUpdater.quitAndInstall();
+      // Use setImmediate to ensure the IPC response is sent back first
+      setImmediate(() => {
+        console.log('🔄 Executing quitAndInstall now...');
+        try {
+          // Try different quitAndInstall configurations
+          autoUpdater.quitAndInstall(false, true);
+        } catch (error) {
+          console.log('❌ First quitAndInstall attempt failed, trying alternative...');
+          try {
+            autoUpdater.quitAndInstall();
+          } catch (error2) {
+            console.log('❌ Second quitAndInstall attempt failed, trying app.quit...');
+            app.quit();
+          }
+        }
+      });
+      return { success: true };
     } catch (error) {
       console.error('❌ Restart and install failed:', error.message);
       throw error;
     }
   } else {
     console.log('⚠️  Restart and install skipped (not packaged)');
+    return { success: false, reason: 'not packaged' };
   }
 });
 
