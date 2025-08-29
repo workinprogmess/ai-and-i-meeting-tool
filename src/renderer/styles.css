@@ -498,6 +498,16 @@ body {
     background: #10b981;
 }
 
+.status-dot.error {
+    background: #dc2626;
+    animation: pulse-error 1s infinite;
+}
+
+@keyframes pulse-error {
+    0%, 100% { opacity: 1; background: #dc2626; }
+    50% { opacity: 0.7; background: #991b1b; }
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }

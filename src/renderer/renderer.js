@@ -115,6 +115,10 @@ class AIAndIApp {
             this.handleProcessingError(errorData);
         });
         
+        ipcRenderer.on('recording-error', (event, errorData) => {
+            this.handleRecordingError(errorData);
+        });
+        
         // auto-updater events
         ipcRenderer.on('update-available', (event, info) => {
             this.showUpdateNotification(info);
@@ -724,6 +728,40 @@ class AIAndIApp {
         this.updateStatus('error');
         this.recordingMessage.textContent = errorData.message;
         this.resetRecordingUI();
+    }
+    
+    handleRecordingError(errorData) {
+        console.error('❌ Recording error:', errorData);
+        
+        // Reset recording state immediately
+        this.isRecording = false;
+        this.recordBtnText.textContent = 'start recording';
+        this.recordDot.className = 'status-dot error';
+        
+        // Stop any running timers
+        this.stopRecordingTimer();
+        this.recordingDisplay.style.display = 'none';
+        this.waveAnimation.innerHTML = '';
+        
+        // Show user-friendly error message
+        let userMessage = 'recording error occurred';
+        if (errorData.phase === 'streaming_to_disk') {
+            userMessage = 'failed to save recording - check disk space and permissions';
+        } else if (errorData.type === 'pcm_processing_error') {
+            userMessage = 'audio processing error - recording may be incomplete';
+        }
+        
+        this.recordingMessage.textContent = userMessage;
+        this.recordingMessage.style.display = 'block';
+        
+        // Clean up any sidebar timers
+        if (this.sidebarTimers) {
+            Object.values(this.sidebarTimers).forEach(timer => clearInterval(timer));
+            this.sidebarTimers = {};
+        }
+        
+        console.error(`❌ User shown: ${userMessage}`);
+        console.error(`❌ Technical details:`, errorData);
     }
     
     addMeetingToSidebar(meetingData) {

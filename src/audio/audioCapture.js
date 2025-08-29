@@ -78,7 +78,17 @@ class AudioCapture extends EventEmitter {
             
             // Handle PCM audio data from stdout
             this.ffmpegProcess.stdout.on('data', (pcmData) => {
-                this.processPCMData(pcmData);
+                // CRITICAL FIX: Handle async processPCMData errors to prevent crashes
+                this.processPCMData(pcmData).catch(error => {
+                    console.error('❌ Critical error processing PCM data:', error);
+                    console.error('❌ This error was caught to prevent app crash');
+                    // Emit error event but don't crash the app
+                    this.emit('error', {
+                        type: 'pcm_processing_error',
+                        message: error.message,
+                        phase: 'streaming_to_disk'
+                    });
+                });
             });
 
             // Handle ffmpeg errors
@@ -337,12 +347,23 @@ class AudioCapture extends EventEmitter {
             throw new Error('Temp PCM file path not initialized');
         }
         
-        // Append PCM data to temporary file using stream to minimize memory usage
-        const fs = require('fs').promises;
-        await fs.appendFile(this.tempPCMFilePath, chunkBuffer);
-        this.totalBytesWritten += chunkBuffer.length;
-        
-        console.log(`📦 Streamed ${chunkBuffer.length} bytes to temp file (total: ${this.totalBytesWritten} bytes)`);
+        try {
+            // Append PCM data to temporary file using stream to minimize memory usage
+            const fs = require('fs').promises;
+            await fs.appendFile(this.tempPCMFilePath, chunkBuffer);
+            this.totalBytesWritten += chunkBuffer.length;
+            
+            console.log(`📦 Streamed ${chunkBuffer.length} bytes to temp file (total: ${this.totalBytesWritten} bytes)`);
+        } catch (error) {
+            // Provide detailed error information for debugging
+            console.error(`❌ Failed to write chunk to disk: ${error.message}`);
+            console.error(`❌ Temp file path: ${this.tempPCMFilePath}`);
+            console.error(`❌ Chunk size: ${chunkBuffer.length} bytes`);
+            console.error(`❌ Total bytes written so far: ${this.totalBytesWritten} bytes`);
+            
+            // Re-throw with more context
+            throw new Error(`Failed to stream audio chunk to disk: ${error.message}. This could be due to disk space, permissions, or file system issues.`);
+        }
     }
 
     async cleanup() {

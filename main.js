@@ -384,6 +384,25 @@ async function startAudioCaptureHandler(data) {
   try {
     if (!audioCapture) {
       audioCapture = new AudioCapture();
+      
+      // CRITICAL FIX: Add error handling for AudioCapture to prevent crashes
+      audioCapture.on('error', (errorInfo) => {
+        console.error('❌ AudioCapture error:', errorInfo);
+        
+        // Notify renderer about the error
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('recording-error', {
+            type: errorInfo.type || 'audio_capture_error',
+            message: errorInfo.message || 'Unknown audio capture error',
+            phase: errorInfo.phase || 'unknown',
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+        // Reset recording state
+        isRecording = false;
+        updateTrayMenu();
+      });
     }
 
     const sessionId = data?.sessionId || Date.now();
