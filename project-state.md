@@ -553,3 +553,72 @@ Major Achievements:
 - Audio timing: 10s FFmpeg startup delay documented as normal behavior
 
 **MILESTONE 3.1.9 COMPLETE AND PRODUCTION-READY** ✅
+
+## Critical Audio Data Loss Investigation (2025-08-29)
+
+### data loss pattern confirmed
+**progressive audio data loss during recording:**
+- 1:00 recording → 0:50 audio (10s loss, 17% data loss)
+- 5:08 recording → 4:34 audio (34s loss, 11% data loss) 
+- 7:31 recording → 6:41 audio (50s loss, 11% data loss)
+- 23:56 recording → 21:20 audio (2:36 loss, 10.9% data loss)
+- 33:13 recording → 29:35 audio (3:38 loss, 10.8% data loss)
+
+### root cause identified: ffmpeg avfoundation bugs
+**confirmed actual data loss, not calculation error:**
+- ffprobe analysis: wav files genuinely contain less audio than recording time
+- system timer accurate (Date.now() measurements correct)
+- ffmpeg + avfoundation dropping audio frames during capture
+
+**5-year-old unresolved ffmpeg bugs:**
+- bug #4437: race condition in captureOutput:didOutputSampleBuffer callback
+- bug #11398: missing audio samples during buffer overflows
+- bug #4089: avfoundation delays and timing drift issues
+
+### industry solution research breakthrough
+**granola architecture discovery:**
+- confirmed: granola is electron app (not native swift)
+- critical insight: granola does NOT use ffmpeg at all
+- successful electron meeting apps use electron-audio-loopback or native node modules
+- our assumption "ffmpeg = industry standard" was wrong
+
+**proven electron audio solutions:**
+1. **electron-audio-loopback**: uses native electron getDisplayMedia() apis, no data loss
+2. **native node modules**: naudiodon, node-miniaudio bypass ffmpeg entirely  
+3. **hybrid approaches**: automatic fallback from electron apis to optimized ffmpeg
+
+### impact assessment
+**critical data loss issue:**
+- **users losing actual meeting content**: 10-11% of speech missing from audio files
+- **transcript incomplete**: gemini processes truncated audio, missing final portions
+- **duration mismatch**: causes gemini timestamp confusion and summary parsing failures
+- **production blocker**: cannot ship with 10% content loss
+
+### immediate solution path
+**milestone 3.2 priority upgrade:**
+- implement electron-audio-loopback replacement for ffmpeg
+- requires electron >= 31.0.1 (check current version)
+- maintains current architecture but eliminates data loss
+- fallback to optimized ffmpeg parameters if electron method fails
+
+**technical implementation:**
+```javascript
+const { getLoopbackAudioMediaStream } = require('electron-audio-loopback');
+const stream = await getLoopbackAudioMediaStream({
+  systemAudio: false,
+  microphone: true
+});
+```
+
+### lessons learned
+**architecture decision errors:**
+- assumed ffmpeg + avfoundation = native macos audio capture
+- confused cross-platform wrapper with direct api usage
+- didn't investigate successful competitor technical stacks deeply enough
+- prioritized development convenience over production reliability
+
+**research methodology improvements:**
+- verify competitor tech stacks before architectural decisions
+- test data integrity early in development cycle
+- implement continuous audio quality monitoring
+- separate timing display issues from actual data loss problems

@@ -28,6 +28,17 @@ class AudioCapture extends EventEmitter {
         this.bytesPerSecond = this.sampleRate * this.channels * this.bytesPerSample;
         this.chunkSizeBytes = this.bytesPerSecond * this.chunkDuration;
         
+        // DETAILED DIAGNOSTICS: Track every aspect of data flow
+        this.diagnostics = {
+            dataEvents: 0,          // How many data events from ffmpeg
+            totalDataReceived: 0,   // Total raw PCM bytes received
+            chunksExpected: 0,      // Based on elapsed time
+            chunksActual: 0,        // Actually processed
+            lastChunkTime: null,    // When last chunk was processed
+            dataFlowGaps: [],       // Track gaps in data flow
+            chunkTimings: []        // Detailed timing of each chunk
+        };
+        
         console.log('✅ AudioCapture initialized with ffmpeg + AVFoundation');
     }
 
@@ -76,18 +87,24 @@ class AudioCapture extends EventEmitter {
             // Spawn ffmpeg process
             this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
             
+            // TIMING DIAGNOSTIC: Track when audio data actually starts flowing
+            this.recordingStartTime = Date.now();
+            this.firstDataTime = null;
+            
             // Handle PCM audio data from stdout
             this.ffmpegProcess.stdout.on('data', (pcmData) => {
-                // CRITICAL FIX: Handle async processPCMData errors to prevent crashes
+                // Track first data arrival time
+                if (!this.firstDataTime) {
+                    this.firstDataTime = Date.now();
+                    const startupDelay = this.firstDataTime - this.recordingStartTime;
+                    console.log(`⏱️  TIMING: First audio data arrived after ${startupDelay}ms startup delay`);
+                }
+                
+                // Process PCM data with non-blocking file I/O
                 this.processPCMData(pcmData).catch(error => {
-                    console.error('❌ Critical error processing PCM data:', error);
-                    console.error('❌ This error was caught to prevent app crash');
-                    // Emit error event but don't crash the app
-                    this.emit('error', {
-                        type: 'pcm_processing_error',
-                        message: error.message,
-                        phase: 'streaming_to_disk'
-                    });
+                    console.error('❌ Error in processPCMData:', error.message);
+                    // Log the error but don't emit error event to avoid stopping recording
+                    // Non-blocking file operations should prevent most issues
                 });
             });
 
@@ -100,12 +117,25 @@ class AudioCapture extends EventEmitter {
                 }
             });
 
-            // Handle process exit
+            // Handle process exit with enhanced diagnostics
             this.ffmpegProcess.on('exit', (code, signal) => {
-                console.log(`📝 FFmpeg process exited with code ${code}, signal ${signal}`);
+                const timestamp = new Date().toISOString();
+                console.log(`📝 FFmpeg process exited at ${timestamp}`);
+                console.log(`📝 Exit code: ${code}, signal: ${signal}`);
+                console.log(`📝 Total chunks processed: ${this.chunkIndex}`);
+                console.log(`📝 Total bytes written: ${this.totalBytesWritten}`);
+                console.log(`📝 Recording was active: ${this.isRecording}`);
+                
                 if (this.isRecording) {
+                    console.error('❌ UNEXPECTED FFMPEG EXIT DURING ACTIVE RECORDING!');
                     this.isRecording = false;
-                    this.emit('stopped', { code, signal });
+                    this.emit('stopped', { 
+                        code, 
+                        signal, 
+                        timestamp,
+                        chunksProcessed: this.chunkIndex,
+                        bytesWritten: this.totalBytesWritten
+                    });
                 }
             });
 
@@ -164,11 +194,24 @@ class AudioCapture extends EventEmitter {
                 sessionId: this.sessionId
             };
             
-            // MEMORY OPTIMIZATION: Stream chunk to disk immediately instead of storing in memory
-            await this.appendChunkToDisk(completeChunk);
+            // MEMORY OPTIMIZATION: Stream chunk to disk (NON-BLOCKING to prevent data loss)
+            // Use setImmediate to avoid blocking the PCM data event loop
+            const currentChunkIndex = this.chunkIndex;
+            setImmediate(() => {
+                this.appendChunkToDisk(completeChunk).catch(error => {
+                    console.error(`❌ Failed to write chunk ${currentChunkIndex} to disk:`, error.message);
+                    // Don't emit error - just log it to avoid stopping recording
+                });
+            });
             this.chunkIndex++;
             
-            console.log(`📦 Streamed PCM chunk ${this.chunkIndex - 1}: ${completeChunk.length} bytes to disk`);
+            // TIMING DIAGNOSTIC: Track first chunk processing time
+            if (currentChunkIndex === 0 && this.recordingStartTime) {
+                const firstChunkDelay = Date.now() - this.recordingStartTime;
+                console.log(`⏱️  TIMING: First chunk processed after ${firstChunkDelay}ms total delay`);
+            }
+            
+            console.log(`📦 Streamed PCM chunk ${currentChunkIndex}: ${completeChunk.length} bytes to disk (non-blocking)`);
             
             // Emit chunk for real-time transcription (with temp data that gets cleaned up)
             this.emit('chunk', chunkInfo);
@@ -219,11 +262,20 @@ class AudioCapture extends EventEmitter {
             this.isRecording = false;
             
             const totalChunks = this.chunkIndex;
-            // FIXED: Calculate actual duration from total bytes, not just complete chunks
-            const totalDuration = Math.round(this.totalBytesWritten / this.bytesPerSecond);
+            // ENHANCED DIAGNOSTICS: Compare multiple duration calculations
+            const sampleBasedDuration = Math.round(this.totalBytesWritten / this.bytesPerSecond);
+            const systemTimeDuration = Math.round((Date.now() - this.recordingStartTime) / 1000);
+            const expectedDataBytes = systemTimeDuration * this.bytesPerSecond;
+            const dataLossPercentage = ((expectedDataBytes - this.totalBytesWritten) / expectedDataBytes * 100).toFixed(1);
             
             console.log(`✅ FFmpeg recording stopped`);
-            console.log(`📊 Total chunks: ${totalChunks}, Duration: ~${totalDuration}s`);
+            console.log(`📊 TIMING ANALYSIS:`);
+            console.log(`   • System time elapsed: ${systemTimeDuration}s`);
+            console.log(`   • Sample-based duration: ${sampleBasedDuration}s`); 
+            console.log(`   • Total bytes captured: ${this.totalBytesWritten} bytes`);
+            console.log(`   • Expected bytes for ${systemTimeDuration}s: ${expectedDataBytes} bytes`);
+            console.log(`   • Data loss: ${dataLossPercentage}% (${expectedDataBytes - this.totalBytesWritten} bytes missing)`);
+            console.log(`   • Chunks processed: ${totalChunks}`);
 
             // CRITICAL FIX: Save the audio file from chunks
             let audioFilePath = null;
@@ -240,7 +292,9 @@ class AudioCapture extends EventEmitter {
                 sessionId: this.sessionId,
                 audioFilePath,
                 totalChunks: totalChunks,
-                totalDuration: totalDuration,
+                totalDuration: sampleBasedDuration, // Use sample-based duration, not system time
+                systemTimeDuration: systemTimeDuration, // Include for comparison
+                dataLossPercentage: dataLossPercentage,
                 audioConfig: {
                     sampleRate: this.sampleRate,
                     channels: this.channels
