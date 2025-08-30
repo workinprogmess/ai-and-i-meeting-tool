@@ -257,28 +257,87 @@ cat validation-reports/*_summary.txt
 - **auto-updater** deferred pending Apple Developer account
 - **target:** stable, memory-efficient gemini transcription experience
 
-### 3.2 authentication & backend (next - days 1-3)
+### 3.2 advanced audio capture & speaker recognition (next - days 1-4) 🚨 CRITICAL
+**what:** complete audio architecture overhaul to eliminate data loss and add speaker intelligence
+
+**why critical:** users currently lose 10-11% of actual meeting content due to unresolved 5-year-old ffmpeg bugs. granola (our main competitor) uses electron-audio-loopback for zero data loss + speaker recognition.
+
+**core changes:**
+1. **replace ffmpeg + avfoundation with electron-audio-loopback**
+   - why: ffmpeg has confirmed bugs (#4437, #11398) causing audio frame drops
+   - what: use native electron getDisplayMedia() apis for reliable capture
+   - impact: eliminates 2-6 minutes of lost content on longer recordings
+
+2. **implement dual-stream audio capture (granola's approach)**
+   - why: distinguish user speech from other participants without meeting bots
+   - what: capture microphone (user) + system audio (participants) simultaneously
+   - impact: automatic speaker labeling - mic = "v", system = "speaker a/b/c"
+
+3. **maintain memory optimization with simplified processing**
+   - why: preserve 99.7% memory reduction we achieved in milestone 3.1.9
+   - what: 60-second MediaRecorder segments merged into single file for processing
+   - impact: memory efficient (max 10mb vs 100mb+) + simple end-to-end workflow
+
+4. **verify electron version compatibility**
+   - why: electron-audio-loopback requires >= 31.0.1
+   - what: check current version, upgrade if needed
+   - impact: ensures new audio apis are available
+
+**technical implementation:**
+```javascript
+const { getLoopbackAudioMediaStream } = require('electron-audio-loopback');
+
+// dual-stream capture
+const micStream = await getLoopbackAudioMediaStream({
+  systemAudio: false,
+  microphone: true
+});
+
+const systemStream = await getLoopbackAudioMediaStream({
+  systemAudio: true, 
+  microphone: false
+});
+
+// memory-efficient recording with segments
+const recorder = new MediaRecorder(combinedStream, {
+  mimeType: 'audio/webm;codecs=opus',
+  audioBitsPerSecond: 128000
+});
+
+recorder.start(60000); // 60s segments for memory management
+```
+
+**success criteria:**
+- ✅ zero audio data loss (100% duration accuracy)
+- ✅ automatic speaker recognition (user vs participants)
+- ✅ memory efficient (maintain <10mb peak usage)
+- ✅ backward compatible with existing ui and gemini processing
+- ✅ tested across zoom, meet, teams, slack platforms
+
+**target:** production-ready audio capture matching granola's reliability + intelligence
+
+### 3.3 authentication & backend (days 5-7)
 - **supabase pro setup** ($25/month for 100gb storage + 8gb database)
 - **google oauth implementation** in electron (web flow)
 - **user schema design** and session management
 - **recordings sync** to cloud storage
 - **target:** user accounts and data persistence foundation
 
-### 3.3 enhanced ui for beta (days 4-6)
+### 3.4 enhanced ui for beta (days 8-10)
 - **onboarding flow** for new users
 - **better recording management** (search, filters, export)
 - **usage indicators** and meeting metadata display
 - **account/settings page** integration with auth
 - **target:** polished experience for authenticated beta users
 
-### 3.4 payment integration (days 7-9)
+### 3.5 payment integration (days 11-13)
 - **stripe setup** with granola-inspired pricing
 - **subscription gates** (free: 10 meetings, pro: $25/month unlimited)
 - **basic billing portal** for plan management
 - **usage tracking** per user
 - **target:** monetization framework
 
-### 3.5 app packaging & distribution (days 10-14)
+### 3.6 app packaging & distribution (days 14-18)
 - **code signing** with apple developer account (prerequisite for auto-updater)
 - **universal binaries** (intel + arm64 support)
 - **installation reliability** fixes for "damaged" dmg issue

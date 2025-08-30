@@ -20,9 +20,15 @@
 
 ## competitive research
 ### how industry leaders handle audio
-- **granola**: background recording with intelligent noise filtering
-- **otter**: seamless mobile + desktop recording with backup mechanisms
+- **granola**: captures system audio directly for real-time transcription, no traditional audio file recording
+- **otter**: offers both audio/video recording + transcription, mixed accuracy reviews for multi-speaker scenarios
 - **zoom**: local recording + cloud backup with automatic transcription
+
+### timing accuracy findings (2025-08-29)
+- **our current issue**: consistent ~11% duration loss across recordings (451s → 401s, 308s → 274s)
+- **ffmpeg + avfoundation**: known timing issues documented in ffmpeg bug tracker #4089
+- **avfoundation delays**: can vary from 0.5-2+ seconds, affects audio-video sync in screen capture
+- **industry approach**: successful apps like granola avoid traditional recording, use system audio capture instead
 
 ## file management
 ### storage strategy
