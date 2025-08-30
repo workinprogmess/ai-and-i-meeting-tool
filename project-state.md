@@ -113,6 +113,18 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
     - 📋 **STATUS**: Auto-updater disabled until code signing certificate available
 34. **Stress Testing** ✅ COMPLETE - Comprehensive validation of all core milestone 3.1.9 features
 
+### Phase 1 - Milestone 3.2: Advanced Audio Capture & Speaker Recognition ✅ COMPLETE
+35. **Critical Audio Data Loss Bug Discovery** ✅ - Identified 10-11% progressive data loss with FFmpeg
+36. **Root Cause Analysis** ✅ - Found 5-year-old FFmpeg bugs (#4437, #11398, #4089) causing timestamp drift
+37. **Granola Research** ✅ - Discovered they use electron-audio-loopback for zero data loss
+38. **electron-audio-loopback Implementation** ✅ - Renderer-based IPC architecture for dual-stream capture
+39. **AirPods Microphone Fix** ✅ - Explicit device selection with getUserMedia()
+40. **Dual-Stream Architecture** ✅ - Separate microphone and system audio capture
+41. **Device Switching Support** ✅ - Auto-switch when AirPods removed (500ms debounce)
+42. **Two-File Approach** ✅ - Separate files for microphone and system audio
+43. **Simplified Transcript Prompt** ✅ - Basic chronological with speaker labels (@me, @speaker1, etc)
+44. **Speaker Identification Fix** ✅ - Clear source labeling for Gemini processing
+
 ### Summary Generation Test Results 🎯
 **GPT-5 Performance:**
 - **Cost**: $0.0054 per 3-min meeting summary  
@@ -131,17 +143,17 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 ## Current Technical Stack
 ```javascript
 // Complete ai&i Pipeline
-electron-audio-loopback → Dual-Stream WebM → Gemini 2.5 Flash → Transcript + Summary → UI
+electron-audio-loopback → Two Separate WebM Files → Gemini 2.5 Flash → Transcript + Summary → UI
 
 // Audio Capture (Zero Data Loss)
-const AudioCaptureLoopback = require('./src/audio/audioCaptureLoopback');
-// Dual-stream: microphone + system audio with temporal interleaving
+const AudioLoopbackRenderer = require('./src/renderer/audioLoopbackRenderer');
+// Two-file approach: session_*_microphone.webm + session_*_system.webm
 
 // End-to-End Workflow
-Record → Dual-Stream Capture → Gemini Processing → Tabbed UI Display
+Record → Dual-Stream Capture → Two Audio Files → Gemini Processing → Tabbed UI Display
 
 // Processing Pipeline
-Professional Multi-Track WebM → Gemini 2.5 Flash → Enhanced Transcript + Human-Centered Summary
+Microphone WebM (source 1) + System WebM (source 2) → Gemini 2.5 Flash → Speaker-Identified Transcript
 ```
 
 ## Key Files Structure

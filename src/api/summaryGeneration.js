@@ -371,108 +371,75 @@ write a meeting summary that captures the human story while being genuinely usef
             participants = 'unknown participants',
             expectedDuration = 60,
             meetingTopic = 'business meeting',
-            context = 'team discussion'
+            context = 'team discussion',
+            systemAudioFilePath = null  // optional second audio file
         } = options;
 
-        console.log(`🎯 gemini 2.5 flash end-to-end: ${audioFilePath}`);
+        console.log(`🎯 gemini 2.5 flash end-to-end processing`);
         
         try {
             const fs = require('fs').promises;
             
-            // read audio file
-            const audioBuffer = await fs.readFile(audioFilePath);
+            // prepare audio inputs based on what's available
+            const audioInputs = [];
             
-            // create audio data for gemini
-            const audioData = {
-                inlineData: {
-                    data: audioBuffer.toString('base64'),
-                    mimeType: 'audio/wav'
-                }
-            };
+            // handle primary audio file (microphone or combined)
+            if (audioFilePath) {
+                console.log(`🎤 loading microphone audio: ${audioFilePath}`);
+                const micBuffer = await fs.readFile(audioFilePath);
+                audioInputs.push({
+                    text: "audio source 1 (microphone/me):"
+                });
+                audioInputs.push({
+                    inlineData: {
+                        data: micBuffer.toString('base64'),
+                        mimeType: 'audio/webm'
+                    }
+                });
+            }
+            
+            // handle system audio file if provided (two-file approach)
+            if (systemAudioFilePath) {
+                console.log(`🔊 loading system audio: ${systemAudioFilePath}`);
+                const systemBuffer = await fs.readFile(systemAudioFilePath);
+                audioInputs.push({
+                    text: "audio source 2 (system audio/other speakers):"
+                });
+                audioInputs.push({
+                    inlineData: {
+                        data: systemBuffer.toString('base64'),
+                        mimeType: 'audio/webm'
+                    }
+                });
+            }
 
-            const prompt = `analyze this ${expectedDuration}-minute meeting audio and create an enhanced transcript and human-centered summary that captures the emotional journey and relationship dynamics.
+            const prompt = `transcribe this ${expectedDuration}-minute audio recording.
 
-meeting context:
-- participants: ${participants}
-- topic: ${meetingTopic}  
-- context: ${context}
-- expected duration: ~${expectedDuration} minutes
+i'm providing ${audioInputs.length / 2} audio file(s):
+- audio source 1: microphone input (me speaking)
+${systemAudioFilePath ? '- audio source 2: system audio (other speakers from calls/videos)' : ''}
 
-provide your analysis in exactly this format:
+simple requirements:
+- transcribe exactly what was said chronologically
+- use @me for microphone audio (source 1)
+- use @speaker1, @speaker2, etc for system audio (source 2)
+- include timestamps [MM:SS] at speaker changes
+- just accurate transcription - no analysis or emotions
 
-## transcript
+format example:
+[0:00] @me: "what they said"
+[0:15] @speaker1: "what they said"
+[0:23] @me: "what they said"
 
-create an enhanced transcript showing minute-by-minute emotional journey.
-
-IMPORTANT: Do not include these formatting instructions in your response. Start directly with the transcript content.
-
-### formatting requirements:
-- all lowercase: names, annotations, everything
-- @person references when identifiable (@speaker1, @speaker2, @you)
-- _topic emphasis_: _key themes_, _important concepts_
-- emotional color coding: 🟡 excitement, 🔴 tension, 🔵 focus, 🟢 resolution, 🟠 concern
-- conversation blocks grouped by theme, not just chronological
-
-### structure:
-[timestamp range] what's happening + emotional context 🟡/🔴/🔵/🟢/🟠
-brief description of conversational or emotional shift
-
-[timestamp] @person: "actual quote"
-           (insight about this moment)
-
-[topic shift] when conversation moves to different context
-
-track: conversation flow, emotional shifts, relationship dynamics, off-topic moments, turning points, external interruptions
-
-## summary
-
-create human-like meeting summary using comprehensive approach:
-
-### part 1: meeting dna analysis
-**core theme:** what was this really about? (beyond agenda)
-**context clusters:** group related topics under broader themes  
-**emphasis patterns:** topics that kept recurring or were heavily stressed
-**side moments:** interruptions, tangents, personal moments
-
-### part 2: relationship dynamics  
-**individual goals:** what did each person want from this conversation?
-**satisfaction levels:** did they get what they needed? what's unresolved?
-**power dynamics:** who led, who followed, who influenced whom?
-**energy/mood:** frustrated, energized, hesitant, etc. for each person
-
-### part 3: meeting classification
-**format:** 1:1, brainstorm, update, pitch, planning, etc.
-**formality level:** casual vs structured vs crisis mode
-**relationship context:** peers, manager/report, client/vendor
-
-### part 4: summary writing
-use lowercase, @person references, _topic emphasis_, conversational warm tone, match meeting's actual energy
-
-**opening context:**
-"@speaker1 and @speaker2 met to discuss _[core theme]_ with [mood description]..."
-
-**main content by theme clusters:**
-for each topic: who drove it, emotional undertones with color coding, conversation flow, decision context, current status
-
-**closing assessment:**
-how meeting ended, satisfaction levels, next steps clarity
-
-### part 5: advanced insights
-**the one key thing:** most important takeaway
-**unresolved questions:** what needs more discussion  
-**memorable moments:** interesting details worth highlighting
-**specific action items:** clear next steps with owners
-
-write like a perceptive friend telling you about the meeting - engaging, insightful, human-centered. focus on the emotional story of how this conversation unfolded.
-
-be precise about actual content. no assumptions or invented details.`;
+transcribe the full ${expectedDuration} minutes.`;
 
             const startTime = Date.now();
             
-            const result = await this.geminiFlashModel.generateContent([
-                { text: prompt },
-                audioData
-            ]);
+            // build content array with prompt and audio inputs
+            const contentArray = [{ text: prompt }, ...audioInputs];
+            
+            console.log(`📤 sending ${audioInputs.length / 2} audio file(s) to gemini...`);
+            const result = await this.geminiFlashModel.generateContent(contentArray);
             
             const response = await result.response;
             const fullOutput = response.text();

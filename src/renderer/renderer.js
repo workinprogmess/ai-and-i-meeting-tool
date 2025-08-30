@@ -19,12 +19,17 @@ ipcRenderer.on('stop-audio-loopback-recording', async (event) => {
     try {
         const result = await window.audioLoopbackRenderer.stopRecording();
         
-        // Handle audio blob conversion for IPC
-        if (result.audioBlob) {
-            // Single stream fallback
-            const buffer = Buffer.from(await result.audioBlob.arrayBuffer());
-            result.audioBuffer = buffer;
-            delete result.audioBlob; // Remove blob (can't serialize over IPC)
+        // Handle audio blob conversion for IPC - now with two separate files
+        if (result.microphoneBlob) {
+            const buffer = Buffer.from(await result.microphoneBlob.arrayBuffer());
+            result.microphoneBuffer = buffer;
+            delete result.microphoneBlob; // Remove blob (can't serialize over IPC)
+        }
+        
+        if (result.systemAudioBlob) {
+            const buffer = Buffer.from(await result.systemAudioBlob.arrayBuffer());
+            result.systemAudioBuffer = buffer;
+            delete result.systemAudioBlob; // Remove blob (can't serialize over IPC)
         }
         
         ipcRenderer.send('audio-loopback-recording-stopped', result);

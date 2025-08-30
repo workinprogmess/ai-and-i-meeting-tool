@@ -356,11 +356,14 @@ async function processRecordingWithGemini(recordingResult) {
     }
     
     // Process with gemini end-to-end (audio → transcript + summary)
-    const geminiResult = await summaryGeneration.processAudioEndToEnd(recordingResult.audioFilePath, {
+    // Use two-file approach when both microphone and system audio are available
+    const audioPath = recordingResult.microphoneFilePath || recordingResult.audioFilePath;
+    const geminiResult = await summaryGeneration.processAudioEndToEnd(audioPath, {
       participants: 'v', // hardcoded user name
       expectedDuration: Math.round((recordingResult.duration / 60) * 10) / 10, // convert to minutes with 1 decimal place
       meetingTopic: 'meeting',
-      context: 'personal recording'
+      context: 'personal recording',
+      systemAudioFilePath: recordingResult.systemAudioFilePath // pass system audio if available
     });
     
     if (geminiResult.error) {
@@ -440,36 +443,45 @@ async function startAudioCaptureHandler(data) {
               mainWindow.webContents.send('stop-audio-loopback-recording');
               ipcMain.once('audio-loopback-recording-stopped', async (event, result) => {
                 console.log('📥 Main: Received audio-loopback-recording-stopped:', result.success, result.streamType || result.error);
-                // If we have audio buffer, save it as file
-                if (result.success && result.audioBuffer) {
+                
+                // Save two separate audio files for proper speaker identification
+                if (result.success) {
                   try {
                     const audioTempDir = path.join(process.cwd(), 'audio-temp');
                     await fs.promises.mkdir(audioTempDir, { recursive: true });
                     
-                    // Save the professional multi-track WebM file
-                    const audioFilePath = path.join(audioTempDir, `session_${result.sessionId}.webm`);
-                    await fs.promises.writeFile(audioFilePath, result.audioBuffer);
-                    
-                    result.audioFilePath = audioFilePath;
-                    
-                    // Log file details
-                    if (result.streamType === 'multi-track-webm') {
-                      console.log(`💾 Professional multi-track WebM saved: ${audioFilePath}`);
-                      console.log(`   • File size: ${(result.audioBuffer.length / 1024 / 1024).toFixed(2)} MB`);
-                      console.log(`   • Contains: Track 1 (Microphone) + Track 2 (System Audio)`);
-                      console.log(`   • Duration: ${result.totalDuration}s`);
-                    } else {
-                      console.log(`💾 Audio file saved: ${audioFilePath} (${(result.audioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                    // Save microphone audio file
+                    if (result.microphoneBuffer) {
+                      const micFilePath = path.join(audioTempDir, `session_${result.sessionId}_microphone.webm`);
+                      await fs.promises.writeFile(micFilePath, result.microphoneBuffer);
+                      result.microphoneFilePath = micFilePath;
+                      console.log(`🎤 Microphone audio saved: ${micFilePath} (${(result.microphoneBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                      delete result.microphoneBuffer;
                     }
                     
-                    result.duration = result.totalDuration; // Maintain compatibility
+                    // Save system audio file
+                    if (result.systemAudioBuffer) {
+                      const systemFilePath = path.join(audioTempDir, `session_${result.sessionId}_system.webm`);
+                      await fs.promises.writeFile(systemFilePath, result.systemAudioBuffer);
+                      result.systemAudioFilePath = systemFilePath;
+                      console.log(`🔊 System audio saved: ${systemFilePath} (${(result.systemAudioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                      delete result.systemAudioBuffer;
+                    }
+                    
+                    // Log summary
+                    if (result.streamType === 'dual-file') {
+                      console.log(`✅ Two-file approach: Saved both microphone and system audio separately`);
+                      console.log(`   • Duration: ${result.totalDuration}s`);
+                      console.log(`   • Files will be sent to Gemini for proper speaker identification`);
+                    }
+                    
+                    // Set primary audio file path for backward compatibility
+                    result.audioFilePath = result.microphoneFilePath || result.systemAudioFilePath;
+                    result.duration = result.totalDuration;
                     
                   } catch (error) {
                     console.error('❌ Failed to save audio file(s):', error.message);
                   }
-                  
-                  // Clean up buffer from result
-                  delete result.audioBuffer;
                 }
                 resolve(result);
               });

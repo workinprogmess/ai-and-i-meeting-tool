@@ -280,44 +280,39 @@ class AudioLoopbackRenderer {
                 console.log(`   • Data distribution: ${micPercentage}% mic, ${systemPercentage}% system`);
             }
             
-            // Create mixed audio blob for better transcript accuracy
-            let audioBlob = null;
+            // Create separate audio blobs for two-file approach
+            let microphoneBlob = null;
+            let systemAudioBlob = null;
             let streamType = 'none';
             
-            if (this.micSegments.length > 0 && this.systemSegments.length > 0) {
-                // Both streams available - create proper multi-track WebM
-                console.log(`🎯 Creating professional multi-track WebM file`);
-                
-                // Create a proper multi-track WebM file
-                // Professional approach: interleave segments maintaining temporal relationships
-                const multiTrackBlob = await this.createMultiTrackWebM(
-                    this.micSegments, 
-                    this.systemSegments,
-                    actualDuration
-                );
-                
-                audioBlob = multiTrackBlob;
-                streamType = 'multi-track-webm';
-                
-                console.log(`📦 Professional multi-track WebM created:`);
-                console.log(`   • Track 1 (Microphone): ${this.micSegments.length} segments`);
-                console.log(`   • Track 2 (System Audio): ${this.systemSegments.length} segments`);
-                console.log(`   • Combined file size: ${(multiTrackBlob.size / 1024 / 1024).toFixed(2)} MB`);
-                
-            } else if (this.micSegments.length > 0) {
-                // Only microphone stream available
-                console.log(`🎯 Using microphone-only audio`);
-                audioBlob = new Blob(this.micSegments, { type: 'audio/webm' });
+            if (this.micSegments.length > 0) {
+                // Create microphone audio file
+                console.log(`🎤 Creating microphone audio file`);
+                microphoneBlob = new Blob(this.micSegments, { type: 'audio/webm;codecs=opus' });
+                console.log(`📦 Microphone audio: ${(microphoneBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.micSegments.length} segments`);
+            } else {
+                console.warn(`⚠️  No microphone audio captured`);
+            }
+            
+            if (this.systemSegments.length > 0) {
+                // Create system audio file
+                console.log(`🔊 Creating system audio file`);
+                systemAudioBlob = new Blob(this.systemSegments, { type: 'audio/webm;codecs=opus' });
+                console.log(`📦 System audio: ${(systemAudioBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.systemSegments.length} segments`);
+            } else {
+                console.warn(`⚠️  No system audio captured`);
+            }
+            
+            // Determine stream type for logging
+            if (microphoneBlob && systemAudioBlob) {
+                streamType = 'dual-file';
+                console.log(`✅ Two-file approach: Both microphone and system audio captured separately`);
+            } else if (microphoneBlob) {
                 streamType = 'microphone-only';
-                console.log(`📦 Microphone audio blob: ${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`);
-                
-            } else if (this.systemSegments.length > 0) {
-                // Only system audio available (fallback)
-                console.log(`⚠️  Using system-audio-only (microphone failed to capture)`);
-                audioBlob = new Blob(this.systemSegments, { type: 'audio/webm' });
-                streamType = 'system-fallback';
-                console.log(`📦 System audio blob: ${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`);
-                
+                console.log(`🎯 Microphone-only recording`);
+            } else if (systemAudioBlob) {
+                streamType = 'system-only';
+                console.log(`🔊 System-audio-only recording (no microphone)`);
             } else {
                 console.error(`❌ No audio streams captured!`);
             }
@@ -326,12 +321,13 @@ class AudioLoopbackRenderer {
                 success: true,
                 message: 'Dual-stream recording completed',
                 sessionId: this.sessionId,
-                audioBlob: audioBlob,
+                microphoneBlob: microphoneBlob,
+                systemAudioBlob: systemAudioBlob,
                 totalDuration: actualDuration,
                 micSegments: this.micSegments.length,
                 systemSegments: this.systemSegments.length,
                 streamType: streamType,
-                isMultiChannel: streamType === 'multi-channel-audio'
+                isDualFile: streamType === 'dual-file'
             };
             
             // Clean up
@@ -396,8 +392,8 @@ class AudioLoopbackRenderer {
                         console.log('🔌 Microphone disconnected, attempting to switch to available device');
                         switchInProgress = true;
                         await this.switchMicrophoneDevice();
-                        // Debounce: wait before allowing another switch
-                        setTimeout(() => { switchInProgress = false; }, 2000);
+                        // Debounce: shorter wait for more responsive switching
+                        setTimeout(() => { switchInProgress = false; }, 500);
                     }
                 }
             } catch (error) {
@@ -466,63 +462,6 @@ class AudioLoopbackRenderer {
         }
     }
 
-    async createMultiTrackWebM(micSegments, systemSegments, duration) {
-        console.log('🎬 Creating professional multi-track WebM container');
-        
-        // For true multi-track WebM, we need to properly mux the streams
-        // This is a simplified approach that creates an interleaved WebM
-        // Future enhancement: Use webm-muxer library for proper multi-track muxing
-        
-        try {
-            // Create a combined array with timing metadata
-            const combinedSegments = [];
-            const segmentDuration = this.segmentDuration / 1000; // Convert to seconds
-            
-            // Add microphone segments with track identifier
-            micSegments.forEach((segment, index) => {
-                combinedSegments.push({
-                    data: segment,
-                    track: 1, // Track 1 = Microphone
-                    timestamp: index * segmentDuration
-                });
-            });
-            
-            // Add system segments with track identifier  
-            systemSegments.forEach((segment, index) => {
-                combinedSegments.push({
-                    data: segment,
-                    track: 2, // Track 2 = System Audio
-                    timestamp: index * segmentDuration
-                });
-            });
-            
-            // Sort by timestamp to maintain temporal order
-            combinedSegments.sort((a, b) => a.timestamp - b.timestamp);
-            
-            // Create the multi-track blob
-            // Note: This is a simplified version. For production, use proper WebM muxer
-            const segmentData = combinedSegments.map(item => item.data);
-            const multiTrackBlob = new Blob(segmentData, { 
-                type: 'audio/webm;codecs=opus' 
-            });
-            
-            // Add metadata for track identification
-            // In a production implementation, this would be embedded in the WebM container
-            multiTrackBlob.tracks = {
-                1: { label: 'Microphone', type: 'audio', language: 'en' },
-                2: { label: 'System Audio', type: 'audio', language: 'en' }
-            };
-            
-            console.log('✅ Multi-track WebM created with proper temporal alignment');
-            return multiTrackBlob;
-            
-        } catch (error) {
-            console.error('❌ Failed to create multi-track WebM:', error);
-            // Fallback to simple concatenation
-            const allSegments = [...micSegments, ...systemSegments];
-            return new Blob(allSegments, { type: 'audio/webm' });
-        }
-    }
 
     getRecordingStatus() {
         return {
