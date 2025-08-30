@@ -489,6 +489,18 @@ transcribe the full ${expectedDuration} minutes.`;
         };
 
         try {
+            // check if this is our simplified format (starts with timestamp like [00:00])
+            const simpleTimestampPattern = /^\[?\d{1,2}:\d{2}\]?\s*@/;
+            if (simpleTimestampPattern.test(fullOutput)) {
+                // this is our simplified transcript format - use it as-is
+                sections.transcript = fullOutput;
+                sections.summary = 'transcript-only mode (no summary requested)';
+                sections.speakerAnalysis = 'integrated into transcript';
+                sections.emotionalDynamics = 'simplified format';
+                return sections;
+            }
+            
+            // otherwise try to parse complex format
             // extract transcript section - everything after first timestamp pattern
             const transcriptStartMatch = fullOutput.match(/\*\*\[[\d:\-]+\]/);
             if (transcriptStartMatch) {

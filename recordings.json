@@ -1,5 +1,24 @@
 [
   {
+    "sessionId": "1756573278512",
+    "title": "meeting 30/8/2025",
+    "startTime": "2025-08-30T17:01:18.514Z",
+    "status": "recording",
+    "id": "1756573278512",
+    "date": "30/8/2025",
+    "time": "10:44 pm",
+    "duration": 728,
+    "timestamp": "2025-08-30T17:14:02.025Z",
+    "audioFilePath": "/Users/workinprogmess/ai-and-i/audio-temp/session_1756573278512_microphone.webm",
+    "transcript": "enhanced transcript parsing failed",
+    "summary": "enhanced summary parsing failed",
+    "speakerAnalysis": "integrated into summary",
+    "emotionalDynamics": "integrated into summary",
+    "cost": 0.015832500000000003,
+    "processingTime": 35124,
+    "provider": "gemini-2.5-flash-end-to-end"
+  },
+  {
     "sessionId": "1756569232597",
     "title": "meeting 30/8/2025",
     "startTime": "2025-08-30T15:53:52.598Z",
