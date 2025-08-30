@@ -1,5 +1,41 @@
 const { ipcRenderer } = require('electron');
 
+// MILESTONE 3.2: IPC handlers for electron-audio-loopback communication
+ipcRenderer.on('start-audio-loopback-recording', async (event, sessionId) => {
+    console.log('📨 IPC: Received start-audio-loopback-recording request:', sessionId);
+    try {
+        const result = await window.audioLoopbackRenderer.startRecording(sessionId);
+        ipcRenderer.send('audio-loopback-recording-started', result);
+    } catch (error) {
+        ipcRenderer.send('audio-loopback-recording-started', {
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+ipcRenderer.on('stop-audio-loopback-recording', async (event) => {
+    console.log('📨 IPC: Received stop-audio-loopback-recording request');
+    try {
+        const result = await window.audioLoopbackRenderer.stopRecording();
+        
+        // Handle audio blob conversion for IPC
+        if (result.audioBlob) {
+            // Single stream fallback
+            const buffer = Buffer.from(await result.audioBlob.arrayBuffer());
+            result.audioBuffer = buffer;
+            delete result.audioBlob; // Remove blob (can't serialize over IPC)
+        }
+        
+        ipcRenderer.send('audio-loopback-recording-stopped', result);
+    } catch (error) {
+        ipcRenderer.send('audio-loopback-recording-stopped', {
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 class AIAndIApp {
     constructor() {
         this.isRecording = false;

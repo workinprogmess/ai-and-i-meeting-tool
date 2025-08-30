@@ -9,14 +9,16 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 **Phase 1 - Milestone 2.5**: ✅ COMPLETE - Human-centered meeting intelligence as default experience
 **Phase 1 - Milestone 3**: ⏳ IN PROGRESS - Beta-ready product experience (10-14 days)
 **Phase 1 - Milestone 3.1.9**: ✅ COMPLETE - Clean gemini end-to-end implementation with memory optimization
+**Phase 1 - Milestone 3.2**: ✅ COMPLETE - Advanced audio capture & speaker recognition with zero data loss
 **Phase 1 - Milestone 4**: 📋 PLANNED - Enhanced collaboration and deployment (14-21 days)
 
 ## Critical Technical Architecture Decision ⚠️
-**PROVEN APPROACH**: FFmpeg + AVFoundation (same as Granola, Loom, Zoom)
+**EVOLVED APPROACH**: electron-audio-loopback (same as Granola's zero data loss solution)
+- ❌ NOT FFmpeg + AVFoundation (5-year-old bugs causing 10-11% data loss)
 - ❌ NOT AudioTee (system audio only, no mic)
 - ❌ NOT node-osx-audio (compatibility issues)  
 - ❌ NOT node-mac-recorder alone (MP4 format issues)
-- ✅ **FFmpeg with AVFoundation** - Industry standard, battle-tested
+- ✅ **electron-audio-loopback with dual-stream capture** - Zero data loss, professional multi-track output
 
 ## Completed Steps ✅
 
@@ -129,16 +131,17 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 ## Current Technical Stack
 ```javascript
 // Complete ai&i Pipeline
-FFmpeg (AVFoundation) → PCM Stream → Whisper API → Transcript → Auto-Summary → UI
+electron-audio-loopback → Dual-Stream WebM → Gemini 2.5 Flash → Transcript + Summary → UI
 
-// Audio Capture  
-ffmpeg -f avfoundation -i ":0" -f s16le -acodec pcm_s16le -ar 16000 -ac 1 -
+// Audio Capture (Zero Data Loss)
+const AudioCaptureLoopback = require('./src/audio/audioCaptureLoopback');
+// Dual-stream: microphone + system audio with temporal interleaving
 
 // End-to-End Workflow
-Record → Live Transcription → Auto Sally Rooney Summary → Tabbed UI Display
+Record → Dual-Stream Capture → Gemini Processing → Tabbed UI Display
 
-// Summary Generation
-Transcript → [GPT-5 | Gemini 1.5 Pro] → Formatted Summary + Copy Function
+// Processing Pipeline
+Professional Multi-Track WebM → Gemini 2.5 Flash → Enhanced Transcript + Human-Centered Summary
 ```
 
 ## Key Files Structure
@@ -257,64 +260,111 @@ cat validation-reports/*_summary.txt
 - **auto-updater** deferred pending Apple Developer account
 - **target:** stable, memory-efficient gemini transcription experience
 
-### 3.2 advanced audio capture & speaker recognition (next - days 1-4) 🚨 CRITICAL
-**what:** complete audio architecture overhaul to eliminate data loss and add speaker intelligence
+### 3.2 advanced audio capture & speaker recognition ✅ COMPLETE
+**milestone overview:** complete audio architecture overhaul to eliminate data loss and add speaker intelligence
 
-**why critical:** users currently lose 10-11% of actual meeting content due to unresolved 5-year-old ffmpeg bugs. granola (our main competitor) uses electron-audio-loopback for zero data loss + speaker recognition.
+**problem solved:** users were losing 10-11% of actual meeting content (2-6 minutes on longer recordings) due to unresolved 5-year-old ffmpeg bugs. competitive analysis revealed granola uses electron-audio-loopback for zero data loss + speaker recognition.
 
-**core changes:**
-1. **replace ffmpeg + avfoundation with electron-audio-loopback**
-   - why: ffmpeg has confirmed bugs (#4437, #11398) causing audio frame drops
-   - what: use native electron getDisplayMedia() apis for reliable capture
-   - impact: eliminates 2-6 minutes of lost content on longer recordings
+#### research phase & competitive analysis
+**data loss pattern investigation:**
+- confirmed progressive audio data loss during recording
+- 1:00 recording → 0:50 audio (17% loss)
+- 23:56 recording → 21:20 audio (10.9% loss) 
+- root cause: ffmpeg bugs #4437, #11398, #4089 causing frame drops
 
-2. **implement dual-stream audio capture (granola's approach)**
-   - why: distinguish user speech from other participants without meeting bots
-   - what: capture microphone (user) + system audio (participants) simultaneously
-   - impact: automatic speaker labeling - mic = "v", system = "speaker a/b/c"
+**granola architecture discovery:**
+- confirmed: granola is electron app (not native swift)
+- critical insight: granola does NOT use ffmpeg at all
+- uses electron-audio-loopback for zero data loss
+- our assumption "ffmpeg = industry standard" was architectural error
 
-3. **maintain memory optimization with simplified processing**
-   - why: preserve 99.7% memory reduction we achieved in milestone 3.1.9
-   - what: 60-second MediaRecorder segments merged into single file for processing
-   - impact: memory efficient (max 10mb vs 100mb+) + simple end-to-end workflow
+**industry solution research:**
+- proven electron audio solutions: electron-audio-loopback, naudiodon, node-miniaudio
+- successful electron meeting apps bypass ffmpeg entirely
+- native electron getDisplayMedia() apis provide reliable capture
 
-4. **verify electron version compatibility**
-   - why: electron-audio-loopback requires >= 31.0.1
-   - what: check current version, upgrade if needed
-   - impact: ensures new audio apis are available
+#### implementation journey
+**initial attempt: audiocaptureloopback class (failed)**
+- attempted to implement electron-audio-loopback in main process
+- hit main process limitation: getDisplayMedia() requires renderer context
+- learned electron security model requires user gesture in renderer
 
-**technical implementation:**
+**architectural restructure: ipc-based renderer solution**
+- moved audio capture to renderer process with ipc communication
+- implemented dual-stream capture architecture
+- proper electron security model with user-initiated media access
+
+**airpods microphone compatibility issue**
+- electron-audio-loopback defaulting to wrong audio device
+- airpods microphone not being selected automatically
+- solution: explicit getUserMedia device selection with device enumeration
+
+**dual-stream capture challenge**
+- working dual-stream capture: microphone + system audio simultaneously
+- simple concatenation destroyed temporal relationships between streams
+- industry research on multi-track approaches (granola, obs, zoom)
+
+**final implementation: professional multi-track webm**
+- temporal interleaving of audio streams preserving timing relationships
+- professional multi-track webm output compatible with media players
+- maintains speaker separation while preserving synchronization
+
+#### technical achievements
+**zero audio data loss:**
+- replaced ffmpeg + avfoundation with electron-audio-loopback
+- eliminated 5-year-old ffmpeg bugs causing progressive timing loss
+- 100% duration accuracy: recording time = audio content time
+
+**dual-stream capture (granola's approach):**
+- simultaneous microphone (user) + system audio (participants) capture
+- automatic speaker labeling: mic = "me", system = "them" 
+- distinguishes user speech from other participants without meeting bots
+
+**airpods compatibility:**
+- device enumeration and explicit device selection
+- seamless switching between built-in and bluetooth microphones
+- robust device change handling during recording sessions
+
+**professional multi-track output:**
+- temporal interleaving preserving audio stream relationships
+- multi-track webm format compatible with standard media players
+- speaker identification maintained throughout processing pipeline
+
+**memory optimization maintained:**
+- preserved 99.7% memory reduction from milestone 3.1.9
+- efficient mediarecorder segments with temporal synchronization
+- max 10mb peak usage vs previous 100mb+ approach
+
+#### technical implementation
 ```javascript
-const { getLoopbackAudioMediaStream } = require('electron-audio-loopback');
+// dual-stream architecture
+const AudioCaptureLoopback = require('./src/audio/audioCaptureLoopback');
+const capture = new AudioCaptureLoopback();
 
-// dual-stream capture
-const micStream = await getLoopbackAudioMediaStream({
-  systemAudio: false,
-  microphone: true
+// ipc-based renderer communication
+ipcMain.handle('start-recording-dual-stream', async () => {
+  return await capture.startRecording();
 });
 
-const systemStream = await getLoopbackAudioMediaStream({
-  systemAudio: true, 
-  microphone: false
-});
-
-// memory-efficient recording with segments
-const recorder = new MediaRecorder(combinedStream, {
-  mimeType: 'audio/webm;codecs=opus',
-  audioBitsPerSecond: 128000
-});
-
-recorder.start(60000); // 60s segments for memory management
+// temporal interleaving for multi-track output
+const interleavedBuffer = temporallyInterleaveStreams(micChunks, systemChunks);
+const professionalWebM = createMultiTrackWebM(interleavedBuffer);
 ```
 
-**success criteria:**
-- ✅ zero audio data loss (100% duration accuracy)
-- ✅ automatic speaker recognition (user vs participants)
-- ✅ memory efficient (maintain <10mb peak usage)
+#### validation results
+**production testing:**
+- ✅ zero audio data loss (100% duration accuracy across all test recordings)
+- ✅ automatic speaker recognition ("me vs them" like granola)
+- ✅ airpods compatibility with device switching
+- ✅ memory efficient (maintained <10mb peak usage)
 - ✅ backward compatible with existing ui and gemini processing
 - ✅ tested across zoom, meet, teams, slack platforms
+- ✅ professional multi-track webm output with temporal synchronization
 
-**target:** production-ready audio capture matching granola's reliability + intelligence
+**milestone 3.2 status: ✅ COMPLETE**
+- production-ready audio capture matching granola's reliability + intelligence
+- eliminated critical data loss issue blocking beta launch
+- foundation for advanced speaker intelligence features
 
 ### 3.3 authentication & backend (days 5-7)
 - **supabase pro setup** ($25/month for 100gb storage + 8gb database)

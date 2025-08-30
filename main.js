@@ -1,11 +1,18 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, desktopCapturer, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const { initMain } = require('electron-audio-loopback');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const AudioCapture = require('./src/audio/audioCapture');
+const AudioCaptureLoopback = require('./src/audio/audioCaptureLoopback');
 const SummaryGeneration = require('./src/api/summaryGeneration');
 const RecordingsDB = require('./src/storage/recordingsDB');
+
+// Initialize electron-audio-loopback in main process
+console.log('🔧 Initializing electron-audio-loopback...');
+initMain();
+console.log('✅ electron-audio-loopback initialized');
 
 let mainWindow;
 let tray = null;
@@ -13,6 +20,9 @@ let isRecording = false;
 let audioCapture = null;
 let summaryGeneration = null;
 let recordingsDB = null;
+
+// MILESTONE 3.2: Audio capture method selection
+const USE_ELECTRON_AUDIO_LOOPBACK = true; // Set to false to use old FFmpeg method
 
 // auto-updater configuration
 autoUpdater.checkForUpdatesAndNotify = false; // we'll handle this manually
@@ -107,10 +117,36 @@ function createWindow() {
   });
 
   mainWindow.loadFile('src/renderer/index.html');
+  
+  // Add keyboard shortcut to open electron-audio-loopback test (Cmd+Shift+T on macOS, Ctrl+Shift+T elsewhere)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const isTestShortcut = process.platform === 'darwin' 
+      ? (input.meta && input.shift && input.key.toLowerCase() === 't')
+      : (input.control && input.shift && input.key.toLowerCase() === 't');
+    
+    if (isTestShortcut) {
+      console.log('🧪 Opening electron-audio-loopback test...');
+      const testWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        webPreferences: {
+          nodeIntegration: true,
+          contextIsolation: false
+        },
+        parent: mainWindow,
+        modal: false,
+        title: 'electron-audio-loopback Test'
+      });
+      testWindow.loadFile('test-electron-audio-renderer.html');
+    }
+  });
 
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
+  
+  // Always open DevTools for debugging AirPods issue (temporary)
+  mainWindow.webContents.openDevTools();
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -383,7 +419,72 @@ ipcMain.handle('stop-recording', async () => {
 async function startAudioCaptureHandler(data) {
   try {
     if (!audioCapture) {
-      audioCapture = new AudioCapture();
+      // MILESTONE 3.2: Choose audio capture method
+      if (USE_ELECTRON_AUDIO_LOOPBACK) {
+        console.log('🎯 Using new electron-audio-loopback via renderer process (zero data loss + speaker recognition)');
+        // Use renderer-based audio capture via IPC
+        audioCapture = {
+          async startRecording(sessionId) {
+            return new Promise((resolve) => {
+              console.log('📤 Main: Sending start-audio-loopback-recording to renderer:', sessionId);
+              mainWindow.webContents.send('start-audio-loopback-recording', sessionId);
+              ipcMain.once('audio-loopback-recording-started', (event, result) => {
+                console.log('📥 Main: Received audio-loopback-recording-started:', result.success, result.streamType || result.error);
+                resolve(result);
+              });
+            });
+          },
+          async stopRecording() {
+            return new Promise(async (resolve) => {
+              console.log('📤 Main: Sending stop-audio-loopback-recording to renderer');
+              mainWindow.webContents.send('stop-audio-loopback-recording');
+              ipcMain.once('audio-loopback-recording-stopped', async (event, result) => {
+                console.log('📥 Main: Received audio-loopback-recording-stopped:', result.success, result.streamType || result.error);
+                // If we have audio buffer, save it as file
+                if (result.success && result.audioBuffer) {
+                  try {
+                    const audioTempDir = path.join(process.cwd(), 'audio-temp');
+                    await fs.promises.mkdir(audioTempDir, { recursive: true });
+                    
+                    // Save the professional multi-track WebM file
+                    const audioFilePath = path.join(audioTempDir, `session_${result.sessionId}.webm`);
+                    await fs.promises.writeFile(audioFilePath, result.audioBuffer);
+                    
+                    result.audioFilePath = audioFilePath;
+                    
+                    // Log file details
+                    if (result.streamType === 'multi-track-webm') {
+                      console.log(`💾 Professional multi-track WebM saved: ${audioFilePath}`);
+                      console.log(`   • File size: ${(result.audioBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+                      console.log(`   • Contains: Track 1 (Microphone) + Track 2 (System Audio)`);
+                      console.log(`   • Duration: ${result.totalDuration}s`);
+                    } else {
+                      console.log(`💾 Audio file saved: ${audioFilePath} (${(result.audioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                    }
+                    
+                    result.duration = result.totalDuration; // Maintain compatibility
+                    
+                  } catch (error) {
+                    console.error('❌ Failed to save audio file(s):', error.message);
+                  }
+                  
+                  // Clean up buffer from result
+                  delete result.audioBuffer;
+                }
+                resolve(result);
+              });
+            });
+          },
+          getRecordingStatus() {
+            return { isRecording: isRecording, backend: 'electron-audio-loopback-ipc' };
+          },
+          on: () => {}, // Stub for event handling
+          cleanup: async () => {}
+        };
+      } else {
+        console.log('⚠️ Using legacy FFmpeg method (has 10-11% data loss)');
+        audioCapture = new AudioCapture();
+      }
       
       // CRITICAL FIX: Add error handling for AudioCapture to prevent crashes
       audioCapture.on('error', (errorInfo) => {
