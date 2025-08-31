@@ -434,6 +434,7 @@ simple requirements:
 - include timestamps [MM:SS] at speaker changes
 - maximum timestamp allowed: [${maxTimestamp}]
 - maintain proper formatting throughout (new line after each statement)
+- if microphone audio stops unexpectedly, note: "[microphone disconnected MM:SS-MM:SS, @me voice not captured]"
 - just accurate transcription - no analysis or emotions
 
 format example:

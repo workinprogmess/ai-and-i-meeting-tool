@@ -27,6 +27,10 @@ class AudioLoopbackRenderer {
         // Device change monitoring
         this.deviceChangeHandler = null;
         
+        // Silent persistent recovery
+        this.microphoneRecoveryInterval = null;
+        this.microphoneFailureStart = null;
+        
         console.log('✅ AudioLoopbackRenderer initialized');
     }
 
@@ -194,6 +198,9 @@ class AudioLoopbackRenderer {
             // Set up device change monitoring for seamless switching
             this.setupDeviceChangeMonitoring();
             
+            // Setup silent persistent microphone recovery
+            this.setupSilentMicrophoneRecovery();
+            
             this.isRecording = true;
             
             console.log(`✅ Dual-stream recording started for session ${sessionId}`);
@@ -354,6 +361,13 @@ class AudioLoopbackRenderer {
             console.log('👂 Device change monitoring disabled');
         }
         
+        // Stop silent recovery
+        if (this.microphoneRecoveryInterval) {
+            clearInterval(this.microphoneRecoveryInterval);
+            this.microphoneRecoveryInterval = null;
+            console.log('🔄 Silent microphone recovery disabled');
+        }
+        
         // Stop streams
         if (this.micStream) {
             this.micStream.getTracks().forEach(track => track.stop());
@@ -370,6 +384,7 @@ class AudioLoopbackRenderer {
         this.sessionId = null;
         this.micSegments = [];
         this.systemSegments = [];
+        this.microphoneFailureStart = null;
         
         console.log('🧹 AudioLoopbackRenderer cleaned up');
     }
@@ -418,6 +433,98 @@ class AudioLoopbackRenderer {
         
         navigator.mediaDevices.addEventListener('devicechange', this.deviceChangeHandler);
         console.log('👂 Device change monitoring enabled (AirPods removal detection)');
+    }
+
+    setupSilentMicrophoneRecovery() {
+        // Silent background recovery - keep trying to restore microphone without UI distraction
+        this.microphoneRecoveryInterval = setInterval(async () => {
+            if (!this.isRecording) return;
+            
+            // Check if microphone is working
+            const isMicWorking = this.isMicrophoneWorking();
+            
+            if (!isMicWorking) {
+                // Track when failure started (for transcript annotation)
+                if (!this.microphoneFailureStart) {
+                    this.microphoneFailureStart = Date.now();
+                    console.log('🔇 Microphone failure detected - starting silent recovery attempts');
+                }
+                
+                // Attempt silent recovery
+                await this.attemptSilentMicrophoneRecovery();
+                
+            } else if (this.microphoneFailureStart) {
+                // Microphone recovered - log success
+                const failureDuration = (Date.now() - this.microphoneFailureStart) / 1000;
+                console.log(`✅ Microphone recovered after ${failureDuration.toFixed(1)}s silence`);
+                this.microphoneFailureStart = null;
+            }
+            
+        }, 3000); // Check every 3 seconds
+        
+        console.log('🔄 Silent microphone recovery enabled (3s intervals)');
+    }
+
+    isMicrophoneWorking() {
+        if (!this.micStream || !this.micRecorder) return false;
+        
+        const tracks = this.micStream.getAudioTracks();
+        const hasLiveTrack = tracks.some(track => track.readyState === 'live');
+        const recorderActive = this.micRecorder.state === 'recording';
+        
+        return hasLiveTrack && recorderActive;
+    }
+
+    async attemptSilentMicrophoneRecovery() {
+        try {
+            console.log('🔧 Silent recovery attempt - no UI distraction');
+            
+            // Stop current mic setup if exists
+            if (this.micRecorder && this.micRecorder.state === 'recording') {
+                this.micRecorder.stop();
+            }
+            if (this.micStream) {
+                this.micStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Try to get new microphone (built-in should be available)
+            this.micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false, 
+                    autoGainControl: false,
+                    sampleRate: 48000
+                }
+            });
+            
+            // Create new recorder
+            this.micRecorder = new MediaRecorder(this.micStream, {
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: this.audioBitsPerSecond
+            });
+            
+            // Setup handlers
+            this.micRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    this.micSegments.push(event.data);
+                    const deviceLabel = this.micStream.getAudioTracks()[0]?.label || 'Recovered Device';
+                    console.log(`🎤 [RECOVERED] Mic segment: ${event.data.size} bytes, device: "${deviceLabel}"`);
+                }
+            };
+            
+            this.micRecorder.onerror = (event) => {
+                console.error('❌ Recovered microphone error:', event.error);
+            };
+            
+            // Start recording
+            this.micRecorder.start(this.segmentDuration);
+            
+            const newDevice = this.micStream.getAudioTracks()[0]?.label || 'Unknown Device';
+            console.log(`✅ Silent recovery successful - now using: ${newDevice}`);
+            
+        } catch (error) {
+            console.log('🔇 Silent recovery failed - will try again in 3s');
+        }
     }
 
     async switchMicrophoneDevice() {
