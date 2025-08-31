@@ -413,14 +413,16 @@ write a meeting summary that captures the human story while being genuinely usef
                 });
             }
 
-            // Calculate exact duration bounds for timestamp validation
-            const maxMinutes = Math.floor(expectedDuration);
-            const maxSeconds = Math.floor((expectedDuration % 1) * 60);
+            // Calculate duration bounds with buffer for sync drift
+            const bufferMinutes = 1.0; // 60-second buffer to account for temporal sync issues
+            const maxDurationWithBuffer = expectedDuration + bufferMinutes;
+            const maxMinutes = Math.floor(maxDurationWithBuffer);
+            const maxSeconds = Math.floor((maxDurationWithBuffer % 1) * 60);
             const maxTimestamp = `${maxMinutes.toString().padStart(2, '0')}:${maxSeconds.toString().padStart(2, '0')}`;
             
             const prompt = `transcribe this ${expectedDuration}-minute audio recording.
 
-CRITICAL: recording duration is exactly ${expectedDuration} minutes (${maxTimestamp}). 
+TEMPORAL SYNC BUFFER: recording duration is ${expectedDuration} minutes, but allowing up to [${maxTimestamp}] to account for sync drift. 
 DO NOT generate timestamps beyond [${maxTimestamp}].
 
 TEMPORAL SYNCHRONIZATION: i'm providing ${audioInputs.length / 2} audio file(s) that were recorded SIMULTANEOUSLY:

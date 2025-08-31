@@ -855,10 +855,25 @@ const stream = await getLoopbackAudioMediaStream({
 - ❌ **quality threshold issues discovered**: 33% content loss in 3-min test (1+ min missing)
 - ❌ **speaker identification problems**: rapid speaker transitions misattributed
 
+**milestone 3.3 progress - transcript reliability:**
+
+**diagnostic breakthroughs achieved:**
+- ✅ **root cause identified**: timestamp hard stop + gemini processing drift = content truncation
+- ✅ **timestamp buffer fix**: 60-second buffer prevents artificial cutoff (captures missing voice segments)
+- ✅ **non-deterministic behavior confirmed**: identical inputs produce different outputs (consistency issue)
+- ✅ **community research completed**: identified temperature/seed, system instructions, reasoning approaches
+
+**community insights integration:**
+- **temperature + seed parameters**: for deterministic output consistency
+- **system instructions format**: more effective than regular prompts for steering behavior  
+- **reasoning approach**: having gemini explain timeline merge logic before transcribing
+- **chunking strategy**: 10-minute segments needed for 40-90min production meetings
+- **dual-file advantage**: our approach avoids common dual-channel mono conversion problems
+
 **revised priorities for milestone 3.3:**
-1. fix audio quality preprocessing to prevent content loss
-2. improve speaker identification accuracy for rapid transitions
-3. establish comprehensive reliability testing protocol (10-50 recordings)  
+1. implement deterministic processing (temperature + seed + system instructions + reasoning)
+2. establish comprehensive reliability testing protocol (10-15 recordings across scenarios)
+3. develop chunking strategy for long meetings (40-90 min production use)
 4. achieve zero content loss tolerance across all edge cases
 5. validate 100% transcript reliability before differentiation work
 
