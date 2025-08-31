@@ -423,18 +423,21 @@ write a meeting summary that captures the human story while being genuinely usef
 CRITICAL: recording duration is exactly ${expectedDuration} minutes (${maxTimestamp}). 
 DO NOT generate timestamps beyond [${maxTimestamp}].
 
-i'm providing ${audioInputs.length / 2} audio file(s):
-- audio source 1: microphone input (me speaking)
-${systemAudioFilePath ? '- audio source 2: system audio (other speakers from calls/videos)' : ''}
+TEMPORAL SYNCHRONIZATION: i'm providing ${audioInputs.length / 2} audio file(s) that were recorded SIMULTANEOUSLY:
+- audio source 1: microphone input (me speaking) - SAME TIMELINE as source 2
+${systemAudioFilePath ? '- audio source 2: system audio (other speakers from calls/videos) - SAME TIMELINE as source 1' : ''}
+
+CRITICAL: both audio sources share the EXACT SAME TIMELINE. merge them chronologically by when speech actually occurs, not by audio source.
 
 simple requirements:
-- transcribe exactly what was said chronologically
+- transcribe exactly what was said chronologically across BOTH audio sources
 - use @me for microphone audio (source 1)
-- use @speaker1, @speaker2, etc for system audio (source 2)
+- use @speaker1, @speaker2, etc for system audio (source 2)  
 - include timestamps [MM:SS] at speaker changes
 - maximum timestamp allowed: [${maxTimestamp}]
 - maintain proper formatting throughout (new line after each statement)
 - if microphone audio stops unexpectedly, note: "[microphone disconnected MM:SS-MM:SS, @me voice not captured]"
+- merge both timelines - don't skip audio segments from either source
 - just accurate transcription - no analysis or emotions
 
 format example:

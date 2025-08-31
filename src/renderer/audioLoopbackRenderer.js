@@ -30,6 +30,9 @@ class AudioLoopbackRenderer {
         // Silent persistent recovery
         this.microphoneRecoveryInterval = null;
         this.microphoneFailureStart = null;
+        this.recoveryAttempts = 0;
+        this.maxRecoveryAttempts = 3;
+        this.recoveryInProgress = false;
         
         console.log('✅ AudioLoopbackRenderer initialized');
     }
@@ -184,16 +187,19 @@ class AudioLoopbackRenderer {
                 console.error('❌ System audio recorder error:', event.error);
             };
             
-            // Start recording with segmentation
+            // Start both recorders SIMULTANEOUSLY to maintain temporal sync
+            const syncStartTime = Date.now();
+            console.log(`⏱️  Synchronous start at: ${syncStartTime}`);
+            
             if (this.micRecorder) {
                 this.micRecorder.start(this.segmentDuration);
-                console.log('🎤 Microphone recording started');
+                console.log('🎤 Microphone recording started (synchronized)');
             } else {
                 console.log('⚠️  Microphone recording skipped (recorder unavailable)');
             }
             
             this.systemRecorder.start(this.segmentDuration);
-            console.log('🔊 System audio recording started');
+            console.log('🔊 System audio recording started (synchronized)');
             
             // Set up device change monitoring for seamless switching
             this.setupDeviceChangeMonitoring();
@@ -393,7 +399,7 @@ class AudioLoopbackRenderer {
         // Monitor for audio device changes during recording
         let switchInProgress = false;
         this.deviceChangeHandler = async () => {
-            if (!this.isRecording || switchInProgress) return;
+            if (!this.isRecording || switchInProgress || this.recoveryInProgress) return;
             
             console.log('🔄 Audio device change detected during recording');
             
@@ -436,9 +442,9 @@ class AudioLoopbackRenderer {
     }
 
     setupSilentMicrophoneRecovery() {
-        // Silent background recovery - keep trying to restore microphone without UI distraction
+        // Silent background recovery - limited attempts to avoid system interference
         this.microphoneRecoveryInterval = setInterval(async () => {
-            if (!this.isRecording) return;
+            if (!this.isRecording || this.recoveryInProgress) return;
             
             // Check if microphone is working
             const isMicWorking = this.isMicrophoneWorking();
@@ -447,22 +453,30 @@ class AudioLoopbackRenderer {
                 // Track when failure started (for transcript annotation)
                 if (!this.microphoneFailureStart) {
                     this.microphoneFailureStart = Date.now();
-                    console.log('🔇 Microphone failure detected - starting silent recovery attempts');
+                    this.recoveryAttempts = 0;
+                    console.log('🔇 Microphone failure detected - starting limited recovery attempts');
                 }
                 
-                // Attempt silent recovery
-                await this.attemptSilentMicrophoneRecovery();
+                // Only attempt recovery if under limit
+                if (this.recoveryAttempts < this.maxRecoveryAttempts) {
+                    this.recoveryAttempts++;
+                    await this.attemptSilentMicrophoneRecovery();
+                } else if (this.recoveryAttempts === this.maxRecoveryAttempts) {
+                    console.log(`⏸️ Max recovery attempts reached (${this.maxRecoveryAttempts}) - preserving system audio only`);
+                    this.recoveryAttempts++; // Prevent this message from repeating
+                }
                 
             } else if (this.microphoneFailureStart) {
-                // Microphone recovered - log success
+                // Microphone recovered - reset counters
                 const failureDuration = (Date.now() - this.microphoneFailureStart) / 1000;
                 console.log(`✅ Microphone recovered after ${failureDuration.toFixed(1)}s silence`);
                 this.microphoneFailureStart = null;
+                this.recoveryAttempts = 0;
             }
             
-        }, 3000); // Check every 3 seconds
+        }, 5000); // Check every 5 seconds - less aggressive
         
-        console.log('🔄 Silent microphone recovery enabled (3s intervals)');
+        console.log('🔄 Silent microphone recovery enabled (5s intervals, max 3 attempts)');
     }
 
     isMicrophoneWorking() {
@@ -476,10 +490,13 @@ class AudioLoopbackRenderer {
     }
 
     async attemptSilentMicrophoneRecovery() {
+        if (this.recoveryInProgress) return; // Prevent concurrent recovery attempts
+        
         try {
-            console.log('🔧 Silent recovery attempt - no UI distraction');
+            this.recoveryInProgress = true;
+            console.log(`🔧 Silent recovery attempt ${this.recoveryAttempts}/${this.maxRecoveryAttempts} - no UI distraction`);
             
-            // Stop current mic setup if exists
+            // Stop current mic setup if exists (without affecting system audio)
             if (this.micRecorder && this.micRecorder.state === 'recording') {
                 this.micRecorder.stop();
             }
@@ -523,7 +540,9 @@ class AudioLoopbackRenderer {
             console.log(`✅ Silent recovery successful - now using: ${newDevice}`);
             
         } catch (error) {
-            console.log('🔇 Silent recovery failed - will try again in 3s');
+            console.log(`🔇 Silent recovery attempt ${this.recoveryAttempts} failed - will try again in 5s`);
+        } finally {
+            this.recoveryInProgress = false; // Always release the lock
         }
     }
 
