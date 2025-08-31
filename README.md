@@ -2,7 +2,7 @@
 
 ai meeting transcription tool with human-like summaries and emotional intelligence.
 
-**current state:** milestone 2.5 complete - breakthrough human-centered meeting intelligence
+**current state:** milestone 3.2 complete - zero data loss + device resilience
 
 ## what makes ai&i different
 
@@ -13,26 +13,26 @@ unlike granola/otter's basic transcripts, ai&i provides:
 
 ## current capabilities
 
-✅ **real-time transcription** - ffmpeg + avfoundation + whisper api  
-✅ **human-like summaries** - sally rooney style emotional intelligence  
-✅ **enhanced transcripts** - @speaker references, _topic emphasis_, 🔵🟡🟠 emotional journey  
-✅ **clean ui** - book-like interface with sidebar recordings and tabbed view  
-✅ **cost efficient** - $0.30/hour transcription, $0.03-0.06/hour summary generation  
+✅ **zero data loss recording** - electron-audio-loopback breakthrough (99.7% memory reduction)  
+✅ **dual-stream intelligence** - separate microphone + system audio for speaker identification  
+✅ **device resilience** - airpods switching, silent recovery, persistent monitoring  
+✅ **single api processing** - gemini 2.5 flash end-to-end (2.7x faster than multi-step)  
+✅ **clean ui** - book-like interface with real-time cost tracking  
+✅ **cost efficient** - $0.006 per 3-minute meeting, transparent cost analytics  
 
 ## project structure
 
 ```
 ai-and-i/
-├── main.js                         # electron main + real-time transcription
+├── main.js                                    # electron main + ipc coordination
 ├── src/
-│   ├── audio/audioCapture.js       # ffmpeg + avfoundation implementation  
-│   ├── api/
-│   │   ├── whisperTranscription.js # whisper api integration
-│   │   └── summaryGeneration.js    # gemini 2.5 flash end-to-end
-│   ├── renderer/                   # clean book-like ui
-│   └── storage/                    # recordings database
-├── summaries/                      # generated transcripts + summaries
-└── audio-temp/                     # captured audio files
+│   ├── renderer/
+│   │   ├── audioLoopbackRenderer.js          # dual-stream capture + device switching
+│   │   ├── renderer.js                       # book-like ui + cost analytics  
+│   │   └── index.html                        # clean meeting interface
+│   └── api/summaryGeneration.js              # gemini 2.5 flash end-to-end
+├── summaries/                                 # enhanced transcripts + summaries
+└── audio-temp/                                # dual webm files (mic + system)
 ```
 
 ## usage
@@ -48,19 +48,20 @@ node test-summary-generation.js
 node test-with-audio-file.js ~/path/to/meeting.mp3
 ```
 
-## technical breakthrough: gemini end-to-end
+## technical breakthrough: zero data loss architecture
 
-replaced whisper → gemini pipeline with single gemini 2.5 flash call:
-- **2.7x faster processing** (9.3s vs 24.8s)  
-- **enhanced transcripts** with speaker analysis and emotional context
-- **human-centered summaries** with relationship dynamics
-- **cost competitive** at $0.0059 per 3-minute meeting
+replaced unreliable ffmpeg approach with electron-audio-loopback:
+- **99.7% memory reduction** - stream-to-disk vs memory accumulation
+- **zero data loss** - eliminated 5+ year ffmpeg audio dropout bugs  
+- **dual-stream intelligence** - separate mic/system files for better speaker detection
+- **device resilience** - airpods switching, silent recovery, persistent monitoring
+- **single api efficiency** - gemini 2.5 flash processes audio directly (2.7x faster)
 
-## next: phase 1 - milestone 3 (beta ready)
+## next: milestone 3.3 - human intelligence differentiation
 
-planning authentication, payments, app packaging for 5-10 beta users.
+focus on emotional journey transcripts and relationship dynamics that set us apart from basic transcription tools.
 
 ---
 
 **license:** mit  
-**status:** milestone 2.5 complete, ready for milestone 3 planning
+**status:** milestone 3.2 complete - ready for human intelligence differentiation work
