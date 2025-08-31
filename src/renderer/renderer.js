@@ -602,6 +602,25 @@ class AIAndIApp {
     
     formatEnhancedTranscriptForDisplay(transcriptB) {
         if (typeof transcriptB === 'string') {
+            // Check if parsing failed - look for the exact failure message
+            if (transcriptB.includes('parsing failed')) {
+                // Check if we have fullOutput in the recording data
+                if (this.selectedRecording?.fullOutput) {
+                    // Use the fullOutput which contains the raw transcript
+                    transcriptB = this.selectedRecording.fullOutput;
+                    console.log('using fullOutput as fallback for failed transcript parsing');
+                } else {
+                    // Show a more helpful message with action
+                    return `<div class="enhanced-transcript">
+                        <p style="color: #666;">transcript parsing failed</p>
+                        <p style="margin-top: 10px; font-size: 14px;">
+                            the transcript was generated but couldn't be displayed properly.
+                            try re-processing this recording or check the JSON file in summaries folder.
+                        </p>
+                    </div>`;
+                }
+            }
+            
             // Remove prompt leakage from old recordings
             let cleanContent = transcriptB;
             if (cleanContent.includes('### formatting requirements:')) {

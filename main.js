@@ -380,13 +380,18 @@ async function processRecordingWithGemini(recordingResult) {
       time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
       duration: recordingResult.totalDuration || recordingResult.duration || 0,
       audioFilePath: recordingResult.audioFilePath,
-      transcript: geminiResult.transcript,
+      // If transcript parsing failed, use the fullOutput instead
+      transcript: (geminiResult.transcript && !geminiResult.transcript.includes('parsing failed')) 
+        ? geminiResult.transcript 
+        : geminiResult.fullOutput || geminiResult.transcript,
       summary: geminiResult.summary,
       speakerAnalysis: geminiResult.speakerAnalysis,
       emotionalDynamics: geminiResult.emotionalDynamics,
       cost: geminiResult.cost?.totalCost || 0,
       processingTime: geminiResult.processingTime,
-      provider: 'gemini-2.5-flash-end-to-end'
+      provider: 'gemini-2.5-flash-end-to-end',
+      // Also save fullOutput for recovery purposes
+      fullOutput: geminiResult.fullOutput
     };
     
     // Save to database
