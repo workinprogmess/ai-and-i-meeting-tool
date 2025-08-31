@@ -413,7 +413,15 @@ write a meeting summary that captures the human story while being genuinely usef
                 });
             }
 
+            // Calculate exact duration bounds for timestamp validation
+            const maxMinutes = Math.floor(expectedDuration);
+            const maxSeconds = Math.floor((expectedDuration % 1) * 60);
+            const maxTimestamp = `${maxMinutes.toString().padStart(2, '0')}:${maxSeconds.toString().padStart(2, '0')}`;
+            
             const prompt = `transcribe this ${expectedDuration}-minute audio recording.
+
+CRITICAL: recording duration is exactly ${expectedDuration} minutes (${maxTimestamp}). 
+DO NOT generate timestamps beyond [${maxTimestamp}].
 
 i'm providing ${audioInputs.length / 2} audio file(s):
 - audio source 1: microphone input (me speaking)
@@ -424,14 +432,16 @@ simple requirements:
 - use @me for microphone audio (source 1)
 - use @speaker1, @speaker2, etc for system audio (source 2)
 - include timestamps [MM:SS] at speaker changes
+- maximum timestamp allowed: [${maxTimestamp}]
+- maintain proper formatting throughout (new line after each statement)
 - just accurate transcription - no analysis or emotions
 
 format example:
 [0:00] @me: "what they said"
-[0:15] @speaker1: "what they said"
+[0:15] @speaker1: "what they said"  
 [0:23] @me: "what they said"
 
-transcribe the full ${expectedDuration} minutes.`;
+transcribe the full recording up to [${maxTimestamp}] maximum.`;
 
             const startTime = Date.now();
             

@@ -389,12 +389,26 @@ class AudioLoopbackRenderer {
                     const activeTrack = tracks.find(track => track.readyState === 'live');
                     
                     if (!activeTrack) {
-                        console.log('🔌 Microphone disconnected, attempting to switch to available device');
+                        console.log('🔌 Microphone disconnected (likely AirPods removed), switching to built-in mic');
                         switchInProgress = true;
                         await this.switchMicrophoneDevice();
                         // Debounce: shorter wait for more responsive switching
                         setTimeout(() => { switchInProgress = false; }, 500);
                     }
+                }
+                
+                // Also monitor track state changes directly
+                if (this.micStream) {
+                    this.micStream.getAudioTracks().forEach(track => {
+                        if (track.readyState === 'ended') {
+                            console.log('🚨 Microphone track ended unexpectedly, forcing device switch');
+                            if (!switchInProgress) {
+                                switchInProgress = true;
+                                this.switchMicrophoneDevice();
+                                setTimeout(() => { switchInProgress = false; }, 500);
+                            }
+                        }
+                    });
                 }
             } catch (error) {
                 console.error('❌ Error handling device change:', error);
@@ -403,24 +417,38 @@ class AudioLoopbackRenderer {
         };
         
         navigator.mediaDevices.addEventListener('devicechange', this.deviceChangeHandler);
-        console.log('👂 Device change monitoring enabled');
+        console.log('👂 Device change monitoring enabled (AirPods removal detection)');
     }
 
     async switchMicrophoneDevice() {
         try {
-            console.log('🔄 Switching to new microphone device...');
+            console.log('🔄 Switching to new microphone device (AirPods → Built-in mic)...');
             
-            // Stop current microphone recorder
+            // First enumerate available devices to see what we have
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(device => device.kind === 'audioinput');
+            console.log(`📱 Available microphones after AirPods removal:`);
+            audioInputs.forEach((device, index) => {
+                console.log(`   ${index + 1}. ${device.label || 'Unknown Device'}`);
+            });
+            
+            // Stop current microphone recorder gracefully
             if (this.micRecorder && this.micRecorder.state === 'recording') {
+                console.log('⏹️ Stopping current microphone recorder...');
                 this.micRecorder.stop();
             }
             
             // Stop current microphone stream
             if (this.micStream) {
+                console.log('🔌 Disconnecting from current microphone stream...');
                 this.micStream.getTracks().forEach(track => track.stop());
             }
             
-            // Get new microphone stream (will auto-select available device)
+            // Wait a moment for device cleanup
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Get new microphone stream (should auto-select built-in mic)
+            console.log('🎯 Attempting to connect to available microphone device...');
             this.micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: false,
@@ -430,8 +458,9 @@ class AudioLoopbackRenderer {
                 }
             });
             
-            console.log('🎤 New microphone device selected:', 
-                this.micStream.getAudioTracks()[0].label);
+            const newDevice = this.micStream.getAudioTracks()[0];
+            console.log('🎤 Successfully connected to new microphone:', newDevice.label);
+            console.log('📊 New device settings:', newDevice.getSettings());
             
             // Create new recorder
             this.micRecorder = new MediaRecorder(this.micStream, {
@@ -455,10 +484,11 @@ class AudioLoopbackRenderer {
             
             // Start recording with new device
             this.micRecorder.start(this.segmentDuration);
-            console.log('✅ Switched to new microphone device successfully');
+            console.log('✅ Device switch complete - recording resumed with built-in microphone');
             
         } catch (error) {
             console.error('❌ Failed to switch microphone device:', error);
+            console.log('⚠️ Microphone recording will continue with system audio only');
         }
     }
 
