@@ -767,7 +767,18 @@ const stream = await getLoopbackAudioMediaStream({
 
 **original milestone sequence revised to prioritize differentiation:**
 
-### milestone 3.3: human intelligence differentiation (NEW PRIORITY)
+### milestone 3.3: transcript reliability - zero content loss (CRITICAL PRIORITY)
+**foundation trust before differentiation:**
+- fix audio quality threshold issues preventing transcript segments
+- improve speaker identification for rapid speaker transitions  
+- establish comprehensive reliability testing protocol (10-20-30-50 recordings)
+- achieve consistent capture across varying lengths and edge cases
+- zero tolerance for content loss - every word must be captured
+- validate 100% transcript completeness before competitive advantage work
+- **timeline**: reliability first - no compromises on foundation trust
+- **rationale**: 33% content loss (1+ min missing from 3-min recording) destroys user confidence
+
+### milestone 3.4: human intelligence differentiation (moved from 3.3)
 **core competitive advantage work:**
 - enhanced prompts for true emotional journey transcripts
 - sally rooney-style relationship dynamics in summaries  
@@ -775,9 +786,9 @@ const stream = await getLoopbackAudioMediaStream({
 - advanced @speaker references, topic emphasis, emotional indicators
 - ui performance optimization for large transcripts
 - **timeline**: extensive work, quality over speed approach
-- **parallel**: foundation testing by user to ensure stability
+- **prerequisite**: complete confidence in transcript reliability from 3.3
 
-### milestone 3.3.1: testflight preparation 
+### milestone 3.4.1: testflight preparation 
 **professional beta distribution:**
 - apple developer account setup ($99/year)
 - code signing and testflight configuration
@@ -785,33 +796,35 @@ const stream = await getLoopbackAudioMediaStream({
 - user tier implementation (admin vs regular user modes)
 - **outcome**: professional beta testing vs manual .dmg sharing
 
-### milestone 3.4: authentication & backend (previously 3.3)
+### milestone 3.5: authentication & backend (previously 3.4)
 **simplified scope - beta user management:**
 - user accounts foundation with tier differentiation  
 - cloud storage for transcripts/recordings
 - basic sync functionality
 - **focus**: supporting beta users, not full production auth
 
-### milestone 3.5: enhanced ui + beta polish (previously 3.4)
+### milestone 3.6: enhanced ui + beta polish (previously 3.5)
 **showcasing human intelligence capabilities:**
 - onboarding flow highlighting our differentiation
 - better recording management and search
 - settings/account integration
 - **goal**: demonstrate competitive advantage to beta users
 
-### milestone 3.6: payment integration + production ready (previously 3.5)
+### milestone 3.7: payment integration + production ready (previously 3.6)
 **revenue foundation:**
 - stripe setup with usage-based pricing model
 - beta feedback collection and iteration
 - final reliability and polish
 - **target**: production-ready app with proven differentiation
 
-### strategic insights from comprehensive analysis
+### strategic insights from comprehensive analysis + sync testing
 
-**foundation assessment - ready for differentiation:**
+**foundation assessment - reliability concerns identified:**
 - ✅ **fast**: single gemini api (2.7x faster than multi-step)
-- ✅ **reliable**: zero data loss, device switching, recovery systems
-- ⚠️ **smooth**: minor ui performance issue for 60+ min transcripts (address in 3.3)
+- ✅ **capture**: zero data loss at hardware level, dual-stream sync fixed
+- ❌ **processing reliability**: 33% content loss due to audio quality thresholds
+- ❌ **speaker identification**: rapid transitions causing misattribution
+- **conclusion**: not ready for differentiation - reliability must come first
 
 **security considerations (deferred appropriately):**
 - nodeintegration: safe for current local html usage, monitor for external content
@@ -836,11 +849,18 @@ const stream = await getLoopbackAudioMediaStream({
 - quality over speed - get differentiation right first
 - verify/confirm before marking tasks complete
 
-**next steps:**
-1. claude.md update with collaborative learnings
-2. begin milestone 3.3 human intelligence differentiation work
-3. parallel foundation testing for stability assurance
-4. testflight preparation planning
+**milestone 3.2 completion validation:**
+- ✅ **temporal sync fix implemented**: simultaneous recorder starts + explicit gemini timeline instructions
+- ✅ **sync issue resolved**: system audio content now appears in transcripts vs complete loss
+- ❌ **quality threshold issues discovered**: 33% content loss in 3-min test (1+ min missing)
+- ❌ **speaker identification problems**: rapid speaker transitions misattributed
+
+**revised priorities for milestone 3.3:**
+1. fix audio quality preprocessing to prevent content loss
+2. improve speaker identification accuracy for rapid transitions
+3. establish comprehensive reliability testing protocol (10-50 recordings)  
+4. achieve zero content loss tolerance across all edge cases
+5. validate 100% transcript reliability before differentiation work
 
 ---
 
