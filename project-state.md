@@ -863,19 +863,33 @@ const stream = await getLoopbackAudioMediaStream({
 - ✅ **non-deterministic behavior confirmed**: identical inputs produce different outputs (consistency issue)
 - ✅ **community research completed**: identified temperature/seed, system instructions, reasoning approaches
 
-**community insights integration:**
-- **temperature + seed parameters**: for deterministic output consistency
-- **system instructions format**: more effective than regular prompts for steering behavior  
-- **reasoning approach**: having gemini explain timeline merge logic before transcribing
-- **chunking strategy**: 10-minute segments needed for 40-90min production meetings
-- **dual-file advantage**: our approach avoids common dual-channel mono conversion problems
+**timeline expansion investigation & solution:**
+- ✅ **gemini timestamp drift confirmed**: 3:47 recording → 4:18-4:45 timestamps (unpredictable expansion)
+- ✅ **deterministic config implemented**: temperature=0, seed, maxTokens=32768 for consistency
+- ✅ **temporal constraint testing**: explicit duration limits prevent expansion but cause content loss
+- ✅ **fundamental insight discovered**: temporal constraints vs content completeness are incompatible
+
+**critical product realization - timestamps are counterproductive:**
+- **value misalignment**: core product = human intelligence summaries, not forensic timestamps
+- **reliability paradox**: accurate timestamps increase trust marginally, inaccurate ones destroy trust entirely
+- **technical reality**: gemini captures ALL content when unconstrained, timestamp drift is only remaining issue
+- **competitive insight**: granola emphasizes summary, transcript secondary (no timestamp obsession)
+- **user behavior**: people remember "what was decided" not "when it was said at 2:34"
+
+**strategic pivot - timestamp removal approach:**
+- **eliminate timestamps entirely**: focus on natural conversation flow capture
+- **content-first processing**: "speaker by speaker, line by line as it ebbed and flowed"
+- **conversation intelligence**: capture meeting dynamics without artificial time constraints
+- **trust through completeness**: 100% content capture > precise but incomplete timestamps
+- **better summary material**: gemini understands context better without timestamp distractions
 
 **revised priorities for milestone 3.3:**
-1. implement deterministic processing (temperature + seed + system instructions + reasoning)
-2. establish comprehensive reliability testing protocol (10-15 recordings across scenarios)
-3. develop chunking strategy for long meetings (40-90 min production use)
-4. achieve zero content loss tolerance across all edge cases
-5. validate 100% transcript reliability before differentiation work
+1. remove all timestamp logic and constraints from gemini processing
+2. implement natural conversation flow capture (speaker transitions, content completeness)
+3. test transcript accuracy with unconstrained gemini processing
+4. achieve near 100% content capture without temporal limitations
+5. establish reliability testing with content completeness as primary metric
+6. validate foundation trust before human intelligence differentiation work
 
 ---
 
