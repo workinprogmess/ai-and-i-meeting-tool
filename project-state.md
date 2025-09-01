@@ -905,7 +905,27 @@ const stream = await getLoopbackAudioMediaStream({
 - **readability**: superior - clean format without timestamp clutter
 - **trust factor**: high - users see complete content without concerning time drift
 
-**ready for milestone 3.4: human intelligence differentiation**
+**comprehensive reliability investigation completed:**
+- ✅ **confirmed audio capture reliability**: electron-audio-loopback captures complete content in both streams
+- ✅ **verified file integrity**: both microphone.webm and system.webm contain full 12:27 of content 
+- ✅ **identified root cause**: gemini 2.5 flash has fundamental non-deterministic behavior with dual-stream audio
+- ✅ **tested across interfaces**: google ai studio exhibits same inconsistencies with identical files/prompts
+- ✅ **deterministic controls insufficient**: temperature=0, seed provide structural consistency but not content completeness
+- ✅ **ui improvements successful**: clean chronological speaker lines with green labels, improved readability
+
+**reliability patterns discovered:**
+- **content capture**: generally 80-90% complete across attempts
+- **chronological ordering**: systematic dual-stream processing limitations
+- **speaker identification**: device switching causes @me attribution confusion 
+- **missing segments**: inconsistent - same sections appear/disappear between processing attempts
+- **processing consistency**: structural decisions stable, fine-grained transcription varies
+
+**strategic pivot opportunity identified:**
+- **dual-stream complexity hypothesis**: sending two files simultaneously may increase inconsistency
+- **proposed single-stream approach**: process files individually, merge outputs programmatically
+- **potential benefits**: simpler gemini processing, more predictable behavior, maintained content sources
+
+**milestone 3.3 status: foundation established, ready for reliability optimization or human intelligence differentiation**
 
 ---
 
