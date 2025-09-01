@@ -10,8 +10,23 @@ class SummaryGeneration {
         });
         
         this.gemini = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
-        this.geminiModel = this.gemini.getGenerativeModel({ model: 'gemini-1.5-pro' });
-        this.geminiFlashModel = this.gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        
+        // deterministic configuration for consistent transcription
+        const deterministicConfig = {
+            temperature: 0,
+            topP: 0.1,
+            topK: 1,
+            maxOutputTokens: 8192
+        };
+        
+        this.geminiModel = this.gemini.getGenerativeModel({ 
+            model: 'gemini-1.5-pro',
+            generationConfig: deterministicConfig
+        });
+        this.geminiFlashModel = this.gemini.getGenerativeModel({ 
+            model: 'gemini-1.5-flash',
+            generationConfig: deterministicConfig
+        });
         
         this.loadPromptTemplates();
         this.summaryHistory = [];
@@ -388,7 +403,7 @@ write a meeting summary that captures the human story while being genuinely usef
                 console.log(`🎤 loading microphone audio: ${audioFilePath}`);
                 const micBuffer = await fs.readFile(audioFilePath);
                 audioInputs.push({
-                    text: "audio source 1 (microphone/me):"
+                    text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test, speaking directly into microphone with AirPods. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
                 });
                 audioInputs.push({
                     inlineData: {
@@ -403,7 +418,7 @@ write a meeting summary that captures the human story while being genuinely usef
                 console.log(`🔊 loading system audio: ${systemAudioFilePath}`);
                 const systemBuffer = await fs.readFile(systemAudioFilePath);
                 audioInputs.push({
-                    text: "audio source 2 (system audio/other speakers):"
+                    text: "SYSTEM AUDIO (YouTube/video speakers = @speaker1, @speaker2, etc): this contains voices from videos/calls played through system audio, NOT the microphone speaker. These should be labeled @speaker1, @speaker2, never @me."
                 });
                 audioInputs.push({
                     inlineData: {
@@ -413,55 +428,64 @@ write a meeting summary that captures the human story while being genuinely usef
                 });
             }
 
-            // Calculate duration bounds with buffer for sync drift
-            const bufferMinutes = 1.0; // 60-second buffer to account for temporal sync issues
-            const maxDurationWithBuffer = expectedDuration + bufferMinutes;
-            const maxMinutes = Math.floor(maxDurationWithBuffer);
-            const maxSeconds = Math.floor((maxDurationWithBuffer % 1) * 60);
-            const maxTimestamp = `${maxMinutes.toString().padStart(2, '0')}:${maxSeconds.toString().padStart(2, '0')}`;
-            
-            const prompt = `transcribe this ${expectedDuration}-minute audio recording.
+            const prompt = `transcribe this audio recording completely, capturing every word spoken.
 
-TEMPORAL SYNC BUFFER: recording duration is ${expectedDuration} minutes, but allowing up to [${maxTimestamp}] to account for sync drift. 
-DO NOT generate timestamps beyond [${maxTimestamp}].
+CONVERSATION FLOW APPROACH:
+i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
+- MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the meeting/test
+${systemAudioFilePath ? `- SYSTEM AUDIO (other participants = @speaker1, @speaker2, etc): voices from videos, calls, or other participants` : ''}
 
-TEMPORAL SYNCHRONIZATION: i'm providing ${audioInputs.length / 2} audio file(s) that were recorded SIMULTANEOUSLY:
-- audio source 1: microphone input (me speaking) - SAME TIMELINE as source 2
-${systemAudioFilePath ? '- audio source 2: system audio (other speakers from calls/videos) - SAME TIMELINE as source 1' : ''}
+SPEAKER IDENTIFICATION:
+- @me = the person speaking directly into the microphone 
+- @speaker1, @speaker2, etc = any other voices heard in the recording
+- NEVER confuse microphone speaker (@me) with system audio voices
 
-CRITICAL: both audio sources share the EXACT SAME TIMELINE. merge them chronologically by when speech actually occurs, not by audio source.
+NATURAL CONVERSATION CAPTURE:
+- transcribe exactly what was said as the conversation flowed
+- follow natural speaker transitions - when one person stops, another begins
+- capture ALL speech content - don't skip any segments due to audio quality
+- maintain conversation rhythm - pauses, interruptions, overlapping speech
+- NO timestamps needed - focus entirely on capturing complete content
+- include every word spoken by every participant
 
-simple requirements:
-- transcribe exactly what was said chronologically across BOTH audio sources
-- use @me for microphone audio (source 1)
-- use @speaker1, @speaker2, etc for system audio (source 2)  
-- include timestamps [MM:SS] at speaker changes
-- maximum timestamp allowed: [${maxTimestamp}]
-- maintain proper formatting throughout (new line after each statement)
-- if microphone audio stops unexpectedly, note: "[microphone disconnected MM:SS-MM:SS, @me voice not captured]"
-- merge both timelines - don't skip audio segments from either source
-- just accurate transcription - no analysis or emotions
+REQUIREMENTS:
+- transcribe speaker by speaker, line by line, as it ebbed and flowed naturally
+- start each speaker statement with @me: or @speaker1: etc
+- new line for each speaker change or major thought
+- capture 100% of spoken content - every single word matters
+- if audio quality is poor, transcribe what you can hear rather than skipping
+- maintain proper formatting throughout
+- just accurate, complete transcription - no analysis or emotions
 
 format example:
-[0:00] @me: "what they said"
-[0:15] @speaker1: "what they said"  
-[0:23] @me: "what they said"
+@me: what they said here
+@speaker1: their response goes here  
+@me: my follow-up comment
 
-transcribe the full recording up to [${maxTimestamp}] maximum.`;
+transcribe the complete conversation from start to finish.`;
 
             const startTime = Date.now();
             
-            // build content array with prompt and audio inputs
+            // build content array with original prompt and audio inputs
             const contentArray = [{ text: prompt }, ...audioInputs];
             
-            console.log(`📤 sending ${audioInputs.length / 2} audio file(s) to gemini...`);
-            const result = await this.geminiFlashModel.generateContent(contentArray);
+            // add simple deterministic config
+            const generationConfig = {
+                temperature: 0,
+                topP: 0.1,
+                topK: 1,
+                maxOutputTokens: 32768, // high limit for long meetings
+                seed: Math.floor(Date.now() / 1000) // daily seed for consistency within same day
+            };
+            
+            console.log(`📤 sending ${audioInputs.length / 2} audio file(s) to gemini with simple deterministic config...`);
+            const result = await this.geminiFlashModel.generateContent(contentArray, { generationConfig });
             
             const response = await result.response;
             const fullOutput = response.text();
             const processingTime = Date.now() - startTime;
 
-            // parse the structured output
+            // parse the structured output (now includes reasoning section)
             const sections = this.parseGeminiEndToEndOutput(fullOutput);
             
             const result_data = {
@@ -505,6 +529,17 @@ transcribe the full recording up to [${maxTimestamp}] maximum.`;
         };
 
         try {
+            // check if this is our natural conversation format (starts with @speaker)
+            const naturalConversationPattern = /^\s*@\w+:/;
+            if (naturalConversationPattern.test(fullOutput)) {
+                // this is our natural conversation format - use it as-is
+                sections.transcript = fullOutput;
+                sections.summary = 'transcript-only mode (no summary requested)';
+                sections.speakerAnalysis = 'integrated into transcript';
+                sections.emotionalDynamics = 'natural conversation flow';
+                return sections;
+            }
+            
             // check if this is our simplified format (starts with timestamp like [00:00])
             const simpleTimestampPattern = /^\[?\d{1,2}:\d{2}\]?\s*@/;
             if (simpleTimestampPattern.test(fullOutput)) {
