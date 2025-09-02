@@ -5,11 +5,15 @@ const path = require('path');
 
 class SummaryGeneration {
     constructor() {
-        this.openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY
-        });
-        
+        // Only initialize what we actually use
         this.gemini = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
+        
+        // Initialize OpenAI only if we have the key (for backward compatibility)
+        if (process.env.OPENAI_API_KEY) {
+            this.openai = new OpenAI({
+                apiKey: process.env.OPENAI_API_KEY
+            });
+        }
         
         // deterministic configuration for consistent transcription
         const deterministicConfig = {
@@ -380,6 +384,212 @@ write a meeting summary that captures the human story while being genuinely usef
         return gpt5Score >= geminiScore ? 'gpt-5' : 'gemini-2.5-pro';
     }
 
+    async processSingleStreamAudio(microphoneFilePath, systemAudioFilePath, context) {
+        console.log('🎯 using single-stream processing approach...');
+        const startTime = Date.now();
+        
+        try {
+            // Process microphone and system audio separately
+            const [micResult, systemResult] = await Promise.all([
+                this.processIndividualStream(microphoneFilePath, '@me', 'microphone'),
+                this.processIndividualStream(systemAudioFilePath, '@speaker', 'system')
+            ]);
+            
+            console.log('🔍 micResult:', micResult ? 'exists' : 'missing');
+            console.log('🔍 systemResult:', systemResult ? 'exists' : 'missing');
+            
+            // Merge the two transcripts chronologically
+            const mergedTranscript = this.mergeTranscripts(micResult.transcript, systemResult.transcript);
+            
+            const processingTime = Date.now() - startTime;
+            const totalCost = (micResult.cost || 0) + (systemResult.cost || 0);
+            
+            // Save individual streams and merged result for review
+            const timestamp = Date.now();
+            await this.saveSingleStreamResults({
+                microphoneTranscript: micResult.transcript,
+                systemTranscript: systemResult.transcript,
+                mergedTranscript,
+                timestamp,
+                processingTime,
+                totalCost
+            });
+            
+            console.log(`✅ single-stream processing complete: ${processingTime}ms, $${totalCost.toFixed(4)}`);
+            
+            return {
+                transcript: mergedTranscript,
+                summary: 'single-stream processing (no summary generated)',
+                speakerAnalysis: 'integrated into transcript',
+                emotionalDynamics: 'single-stream approach',
+                cost: { totalCost },
+                processingTime,
+                timestamp: Date.now(),
+                provider: 'gemini-2.5-flash-single-stream'
+            };
+            
+        } catch (error) {
+            console.error('❌ single-stream processing failed:', error.message);
+            throw error;
+        }
+    }
+
+    async processIndividualStream(audioFilePath, speakerPrefix, streamType) {
+        console.log(`🎤 processing ${streamType} stream:`, audioFilePath);
+        
+        try {
+            const audioBuffer = await fs.promises.readFile(audioFilePath);
+            const prompt = `transcribe this ${streamType} audio completely with timestamps.
+
+REQUIREMENTS:
+- add timestamp [MM:SS] at every speaker change or natural pause
+- use ${speakerPrefix} for all speakers (${streamType === 'system' ? 'if multiple speakers, use @speaker1, @speaker2, etc' : ''})
+- format: [MM:SS] ${speakerPrefix}: what was said
+- capture every single word spoken
+- maintain chronological order
+
+example output:
+[00:00] ${speakerPrefix}: opening statement here
+[01:30] ${speakerPrefix}: continuing the conversation
+[02:15] ${speakerPrefix}: final thoughts
+
+transcribe from start to finish.`;
+
+            const contentArray = [
+                { text: prompt },
+                {
+                    inlineData: {
+                        data: audioBuffer.toString('base64'),
+                        mimeType: 'audio/webm'
+                    }
+                }
+            ];
+
+            const generationConfig = {
+                temperature: 0,
+                topP: 0.1,
+                topK: 1,
+                maxOutputTokens: 32768,
+                seed: Math.floor(Date.now() / 1000)
+            };
+
+            const startTime = Date.now();
+            const result = await this.geminiModel.generateContent({
+                contents: [{ parts: contentArray }],
+                generationConfig
+            });
+
+            const response = result.response;
+            const transcript = response.text();
+            const processingTime = Date.now() - startTime;
+            
+            console.log(`✅ ${streamType} stream complete: ${processingTime}ms`);
+            
+            // Calculate cost from usage metadata
+            const inputTokens = response.usageMetadata?.promptTokenCount || 0;
+            const outputTokens = response.usageMetadata?.candidatesTokenCount || 0;
+            const cost = (inputTokens * 0.000000125) + (outputTokens * 0.000000375); // Gemini Flash pricing
+            
+            return {
+                transcript: transcript.trim(),
+                cost: cost,
+                processingTime
+            };
+        } catch (error) {
+            console.error(`❌ ${streamType} stream failed:`, error.message);
+            throw error;
+        }
+    }
+
+    mergeTranscripts(micTranscript, systemTranscript) {
+        console.log('🔄 merging transcripts chronologically...');
+        
+        // Parse timestamps from both transcripts
+        const micEntries = this.parseTimestampEntries(micTranscript);
+        const systemEntries = this.parseTimestampEntries(systemTranscript);
+        
+        // Combine and sort by timestamp
+        const allEntries = [...micEntries, ...systemEntries];
+        allEntries.sort((a, b) => a.seconds - b.seconds);
+        
+        // Rebuild transcript
+        const merged = allEntries.map(entry => `${entry.timestamp} ${entry.speaker}: ${entry.content}`).join('\n\n');
+        
+        console.log(`✅ merged ${micEntries.length + systemEntries.length} entries`);
+        return merged;
+    }
+
+    parseTimestampEntries(transcript) {
+        const entries = [];
+        if (!transcript || typeof transcript !== 'string') {
+            console.log('⚠️  empty or invalid transcript provided');
+            return entries;
+        }
+        const lines = transcript.split('\n');
+        
+        for (const line of lines) {
+            const match = line.match(/\[(\d{1,2}):(\d{2})\]\s*(@\w+):\s*(.+)/);
+            if (match) {
+                const [, minutes, seconds, speaker, content] = match;
+                const totalSeconds = parseInt(minutes) * 60 + parseInt(seconds);
+                entries.push({
+                    timestamp: `[${minutes.padStart(2, '0')}:${seconds}]`,
+                    speaker: speaker,
+                    content: content.trim(),
+                    seconds: totalSeconds
+                });
+            }
+        }
+        
+        return entries;
+    }
+
+    async saveSingleStreamResults(results) {
+        const { microphoneTranscript, systemTranscript, mergedTranscript, timestamp, processingTime, totalCost } = results;
+        
+        // Save individual stream transcripts
+        const micFile = path.join(__dirname, '../../summaries', `microphone-stream-${timestamp}.md`);
+        const systemFile = path.join(__dirname, '../../summaries', `system-stream-${timestamp}.md`);
+        const mergedFile = path.join(__dirname, '../../summaries', `single-stream-merged-${timestamp}.md`);
+        
+        const micContent = `# microphone stream transcript - single-stream processing
+
+**processing time:** ${processingTime}ms
+**cost:** $${totalCost.toFixed(4)}
+**timestamp:** ${timestamp}
+
+---
+
+${microphoneTranscript}`;
+
+        const systemContent = `# system stream transcript - single-stream processing
+
+**processing time:** ${processingTime}ms
+**cost:** $${totalCost.toFixed(4)}
+**timestamp:** ${timestamp}
+
+---
+
+${systemTranscript}`;
+
+        const mergedContent = `# merged transcript - single-stream processing
+
+**processing time:** ${processingTime}ms
+**cost:** $${totalCost.toFixed(4)}
+**timestamp:** ${timestamp}
+**entries merged:** ${mergedTranscript.split('\n\n').length}
+
+---
+
+${mergedTranscript}`;
+
+        await fs.promises.writeFile(micFile, micContent);
+        await fs.promises.writeFile(systemFile, systemContent);
+        await fs.promises.writeFile(mergedFile, mergedContent);
+        
+        console.log(`💾 single-stream files saved: microphone-stream-${timestamp}.md, system-stream-${timestamp}.md, single-stream-merged-${timestamp}.md`);
+    }
+
     // gemini 2.5 flash end-to-end: audio → transcript + summary + speaker labels
     async processAudioEndToEnd(audioFilePath, options = {}) {
         const {
@@ -428,17 +638,27 @@ write a meeting summary that captures the human story while being genuinely usef
                 });
             }
 
-            const prompt = `transcribe this audio recording completely, capturing every word spoken.
+        // Check if we should use single-stream processing
+        if (systemAudioFilePath && process.env.USE_SINGLE_STREAM_PROCESSING === 'true') {
+            console.log('🔄 switching to single-stream processing...');
+            return await this.processSingleStreamAudio(audioFilePath, systemAudioFilePath, context);
+        }
+
+        // Original dual-stream processing
+        const prompt = `transcribe this audio recording completely, capturing every word spoken.
 
 CONVERSATION FLOW APPROACH:
 i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
 - MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the meeting/test
 ${systemAudioFilePath ? `- SYSTEM AUDIO (other participants = @speaker1, @speaker2, etc): voices from videos, calls, or other participants` : ''}
 
-SPEAKER IDENTIFICATION:
-- @me = the person speaking directly into the microphone 
-- @speaker1, @speaker2, etc = any other voices heard in the recording
-- NEVER confuse microphone speaker (@me) with system audio voices
+CRITICAL SPEAKER IDENTIFICATION:
+- @me = ALWAYS the person conducting the meeting/test (the primary user)
+- This voice should ALWAYS be labeled @me throughout the entire recording
+- Even if audio device changes (AirPods on/off, microphone switching), the same person = @me
+- @speaker1, @speaker2, etc = any OTHER people's voices (from calls, videos, other participants)
+- NEVER change @me to @speaker1 or @speaker2 during the conversation
+- The person who started the recording remains @me for the full duration
 
 NATURAL CONVERSATION CAPTURE:
 - transcribe exactly what was said as the conversation flowed
@@ -691,6 +911,303 @@ transcribe the complete conversation from start to finish.`;
         }
         
         return 'pipeline a (whisper → gemini) - proven approach';
+    }
+
+    // deepgram nova-3 separate file processing (like gemini approach)
+    async processWithDeepgramSeparate(microphoneFilePath, systemAudioFilePath, context = {}) {
+        console.log('🎯 using deepgram nova-3 with separate file processing...');
+        const startTime = Date.now();
+        
+        try {
+            // process each file separately
+            console.log('🎤 processing microphone audio...');
+            const micResult = await this.callDeepgramAPI(microphoneFilePath, {
+                model: 'nova-3',
+                smart_format: true,
+                diarize: true,
+                punctuate: true,
+                profanity_filter: false,
+                redact: false
+            });
+            
+            console.log('🔊 processing system audio...');
+            const systemResult = await this.callDeepgramAPI(systemAudioFilePath, {
+                model: 'nova-3', 
+                smart_format: true,
+                diarize: true,
+                punctuate: true,
+                profanity_filter: false,
+                redact: false
+            });
+            
+            const processingTime = Date.now() - startTime;
+            
+            // calculate combined cost
+            const micCost = this.calculateDeepgramCost(micResult.metadata.duration);
+            const systemCost = this.calculateDeepgramCost(systemResult.metadata.duration);
+            const totalCost = micCost + systemCost;
+            
+            // format transcripts with proper speaker labels
+            const micTranscript = this.formatDeepgramTranscript(micResult, '@me');
+            const systemTranscript = this.formatDeepgramTranscript(systemResult, '@speaker');
+            
+            // simple sequential merge (like early gemini approach)
+            const combinedTranscript = `${micTranscript}\n\n---\n\n${systemTranscript}`;
+            
+            const result = {
+                transcript: combinedTranscript,
+                processingTime,
+                cost: {
+                    totalCost: totalCost,
+                    microphoneCost: micCost,
+                    systemCost: systemCost,
+                    service: 'deepgram-nova-3-separate'
+                },
+                metadata: {
+                    microphoneDuration: micResult.metadata.duration,
+                    systemDuration: systemResult.metadata.duration,
+                    model: 'nova-3'
+                },
+                sourceFiles: {
+                    microphone: microphoneFilePath,
+                    system: systemAudioFilePath
+                },
+                rawResults: {
+                    microphone: micResult,
+                    system: systemResult
+                }
+            };
+            
+            // save result
+            await this.saveDeepgramResult(result, context);
+            
+            console.log(`✅ deepgram separate processing completed in ${processingTime}ms, total cost: $${totalCost.toFixed(4)}`);
+            return result;
+            
+        } catch (error) {
+            console.error('❌ deepgram separate processing failed:', error.message);
+            throw error;
+        }
+    }
+
+    // deepgram nova-3 stereo multichannel transcription integration
+    async processWithDeepgramNova3(microphoneFilePath, systemAudioFilePath, context = {}) {
+        console.log('🎯 using deepgram nova-3 with stereo multichannel audio...');
+        const startTime = Date.now();
+        
+        try {
+            // create stereo webm file: left=mic, right=system
+            const stereoAudioPath = await this.createMultiChannelAudio(microphoneFilePath, systemAudioFilePath);
+            
+            // transcribe with deepgram nova-3 multichannel
+            const transcriptResult = await this.callDeepgramAPI(stereoAudioPath, {
+                model: 'nova-3',
+                smart_format: true,
+                diarize: true,
+                multichannel: true,  // enable multichannel processing
+                punctuate: true,
+                profanity_filter: false,
+                redact: false
+            });
+            
+            const processingTime = Date.now() - startTime;
+            const cost = this.calculateDeepgramCost(transcriptResult.metadata.duration);
+            
+            // format transcript in our natural conversation format
+            const formattedTranscript = this.formatDeepgramTranscript(transcriptResult);
+            
+            const result = {
+                transcript: formattedTranscript,
+                processingTime,
+                cost: {
+                    totalCost: cost,
+                    service: 'deepgram-nova-3-stereo'
+                },
+                metadata: {
+                    duration: transcriptResult.metadata.duration,
+                    channels: transcriptResult.metadata.channels,
+                    model: 'nova-3'
+                },
+                audioFilePath: stereoAudioPath,
+                sourceFiles: {
+                    microphone: microphoneFilePath,
+                    system: systemAudioFilePath
+                }
+            };
+            
+            // save result
+            await this.saveDeepgramResult(result, context);
+            
+            console.log(`✅ deepgram nova-3 completed in ${processingTime}ms, cost: $${cost.toFixed(4)}`);
+            return result;
+            
+        } catch (error) {
+            console.error('❌ deepgram nova-3 processing failed:', error.message);
+            throw error;
+        }
+    }
+    
+    async createMultiChannelAudio(microphoneFilePath, systemAudioFilePath) {
+        const ffmpeg = require('fluent-ffmpeg');
+        const outputPath = microphoneFilePath.replace('.webm', '_stereo.webm');
+        
+        return new Promise((resolve, reject) => {
+            ffmpeg()
+                .input(microphoneFilePath)
+                .input(systemAudioFilePath)
+                .complexFilter([
+                    '[0:a]pan=mono|c0=0.5*c0+0.5*c1[left]',   // mic to left channel
+                    '[1:a]pan=mono|c0=0.5*c0+0.5*c1[right]',  // system to right channel  
+                    '[left][right]amerge=inputs=2[out]'       // combine to stereo
+                ])
+                .outputOptions(['-map', '[out]'])
+                .audioCodec('libopus')
+                .audioChannels(2)
+                .format('webm')
+                .output(outputPath)
+                .on('end', () => {
+                    console.log(`✅ created stereo webm: ${outputPath}`);
+                    resolve(outputPath);
+                })
+                .on('error', (error) => {
+                    console.error('❌ ffmpeg stereo creation failed:', error);
+                    reject(error);
+                })
+                .run();
+        });
+    }
+    
+    async callDeepgramAPI(audioFilePath, options = {}) {
+        const fs = require('fs').promises;
+        
+        if (!process.env.DEEPGRAM_API_KEY) {
+            throw new Error('DEEPGRAM_API_KEY environment variable is required');
+        }
+        
+        const audioBuffer = await fs.readFile(audioFilePath);
+        
+        // build query parameters
+        const params = new URLSearchParams({
+            model: options.model || 'nova-3',
+            smart_format: options.smart_format || true,
+            diarize: options.diarize || true,
+            multichannel: options.multichannel || true,
+            punctuate: options.punctuate || true,
+            profanity_filter: options.profanity_filter || false,
+            redact: options.redact || false
+        });
+        
+        const url = `https://api.deepgram.com/v1/listen?${params}`;
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+                'Content-Type': 'audio/wav',
+            },
+            body: audioBuffer
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`deepgram api error: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log(`✅ deepgram api success: ${result.metadata.duration}s, ${result.metadata.channels} channels`);
+        
+        return result;
+    }
+    
+    formatDeepgramTranscript(deepgramResult, defaultSpeaker = null) {
+        const alternatives = deepgramResult.results?.channels?.[0]?.alternatives?.[0];
+        if (!alternatives) {
+            throw new Error('no transcript alternatives found in deepgram response');
+        }
+        
+        const words = alternatives.words || [];
+        const transcript = alternatives.transcript;
+        
+        // if we have speaker diarization, format with speakers
+        if (words.some(word => word.speaker !== undefined)) {
+            return this.formatWithSpeakers(words, defaultSpeaker);
+        }
+        
+        // fallback to simple transcript with default speaker if provided
+        if (defaultSpeaker && transcript) {
+            return `${defaultSpeaker}: ${transcript}`;
+        }
+        
+        return transcript;
+    }
+    
+    formatWithSpeakers(words, defaultSpeaker = null) {
+        const lines = [];
+        let currentSpeaker = null;
+        let currentLine = '';
+        
+        for (const word of words) {
+            const speaker = word.speaker;
+            let speakerLabel;
+            
+            if (defaultSpeaker) {
+                speakerLabel = defaultSpeaker;
+            } else {
+                speakerLabel = speaker === 0 ? '@me' : `@speaker${speaker}`;
+            }
+            
+            if (currentSpeaker !== speaker) {
+                // new speaker, finish previous line
+                if (currentLine.trim()) {
+                    const previousLabel = defaultSpeaker || (currentSpeaker === 0 ? '@me' : `@speaker${currentSpeaker}`);
+                    lines.push(`${previousLabel}: ${currentLine.trim()}`);
+                }
+                
+                // start new line
+                currentSpeaker = speaker;
+                currentLine = word.punctuated_word || word.word;
+            } else {
+                // same speaker, continue line
+                currentLine += ' ' + (word.punctuated_word || word.word);
+            }
+        }
+        
+        // finish final line
+        if (currentLine.trim()) {
+            const finalLabel = defaultSpeaker || (currentSpeaker === 0 ? '@me' : `@speaker${currentSpeaker}`);
+            lines.push(`${finalLabel}: ${currentLine.trim()}`);
+        }
+        
+        return lines.join('\n\n');
+    }
+    
+    calculateDeepgramCost(durationSeconds) {
+        // deepgram nova-3 pricing: $0.26 per hour
+        const pricePerHour = 0.26;
+        const hours = durationSeconds / 3600;
+        return hours * pricePerHour;
+    }
+    
+    async saveDeepgramResult(resultData, context) {
+        const summariesDir = path.join(__dirname, '../../summaries');
+        if (!fs.existsSync(summariesDir)) {
+            fs.mkdirSync(summariesDir, { recursive: true });
+        }
+        
+        const timestamp = Date.now();
+        
+        // save complete result
+        const filename = `deepgram-nova3-${timestamp}.json`;
+        const filepath = path.join(summariesDir, filename);
+        fs.writeFileSync(filepath, JSON.stringify(resultData, null, 2));
+        
+        // save human-readable transcript
+        const transcriptFilename = `deepgram-transcript-${timestamp}.md`;
+        const transcriptPath = path.join(summariesDir, transcriptFilename);
+        const transcriptContent = `# deepgram nova-3 transcript\n\n**processing time:** ${resultData.processingTime}ms\n**cost:** $${resultData.cost.totalCost.toFixed(4)}\n**duration:** ${resultData.metadata.duration}s\n**channels:** ${resultData.metadata.channels}\n\n---\n\n${resultData.transcript}`;
+        fs.writeFileSync(transcriptPath, transcriptContent);
+        
+        console.log(`💾 deepgram result saved: ${filename}, ${transcriptFilename}`);
     }
 }
 

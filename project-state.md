@@ -927,9 +927,71 @@ const stream = await getLoopbackAudioMediaStream({
 
 **milestone 3.3 status: foundation established, ready for reliability optimization or human intelligence differentiation**
 
+### deepgram nova-3 investigation & industry research (2025-09-02)
+
+**comprehensive transcription service evaluation:**
+- **tested deepgram nova-3**: industry-leading 54.2% wer reduction claims, $0.26/hour pricing
+- **implemented multichannel approach**: ffmpeg stereo webm creation (left=mic, right=system)
+- **results disappointing**: similar content loss patterns to gemini, missing system audio segments
+- **file size issues**: wav format created 143mb files (15x larger), webm stereo only 8.8mb
+- **separate file processing tested**: better results (17k vs 8.7k characters) but still incomplete
+- **cost reality**: $0.11 actual vs $0.054 calculated (2x expected cost)
+
+**critical industry research - granola success analysis:**
+- **dual transcription services**: granola uses BOTH deepgram AND assemblyai (redundancy approach)
+- **no audio files created**: streams raw audio directly to services (no compression artifacts)
+- **core audio api**: native macos implementation vs electron abstraction layer
+- **real-time streaming**: eliminates file i/o, compression cycles, timing drift
+- **privacy by design**: no audio/video recording, only transcripts saved
+
+**root cause analysis - why we're struggling:**
+1. **audio intelligibility issue**: content exists in files but services can't understand it
+   - low signal-to-noise ratio when airpods removed
+   - phase cancellation between overlapping audio sources
+   - acoustic coupling: mic picks up speakers → muddy signal
+   - webm compression artifacts masking speech frequencies
+
+2. **architectural differences from granola:**
+   - **us**: electron → record to webm → process files → transcribe
+   - **granola**: core audio → stream raw pcm → real-time transcription
+   - compression/decompression cycle degrades quality
+   - file-based approach introduces timing issues
+
+3. **evidence of fundamental audio quality problem:**
+   - both gemini AND deepgram lose same content
+   - stereo file contains everything when listened to
+   - transcription services can't extract what human ears can hear
+   - consistent 33-50% content loss across all approaches
+
+**airpods switching creates acoustic nightmare:**
+```
+airpods on:  mic → clean signal → good transcription
+             system → via airpods → clean → good
+
+airpods off: mic → picks up speakers → muddy signal + echo
+             system → through speakers → room reverb → phase issues
+             
+result: overlapping audio becomes unintelligible to ai
+```
+
+**immediate action plan - wav format test:**
+- **hypothesis**: webm lossy compression (64-128 kbps) losing critical frequency data
+- **test approach**: switch to uncompressed wav (pcm) format
+- **expected improvement**: 20-40% better accuracy if compression is the issue
+- **diagnostic value**: if wav still loses content, problem is acoustic not digital
+
+**lessons learned:**
+- multichannel processing doesn't solve fundamental audio quality issues
+- both gemini and deepgram struggle with same underlying problems
+- streaming vs file-based is architectural difference, not just optimization
+- redundancy (multiple services) might be necessary for reliability
+- acoustic environment matters more than we realized
+
+**milestone 3.3 status: critical pivot point - must solve audio quality before differentiation**
+
 ---
 
-Last Updated: 2025-08-31 (milestone 3.2 complete, 3.3 roadmap revised)
+Last Updated: 2025-09-02 (deepgram investigation, root cause analysis complete)
 Session Duration: Comprehensive codebase analysis + strategic planning
 Major Achievements:
 - milestone 3.2: zero data loss + device resilience complete

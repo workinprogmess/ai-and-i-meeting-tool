@@ -631,19 +631,43 @@ class AIAndIApp {
                 }
             }
             
-            // format enhanced transcript with emotional context and conversation blocks
-            let formatted = cleanContent
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/\n/g, '<br>')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
-                .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
-                .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
-                .replace(/\[(\d{1,2}:\d{2}[:\d{2}]*(?:-\d{1,2}:\d{2}[:\d{2}]*)?)\]/g, '<span class="timestamp">[$1]</span>')
-                .replace(/^### /gm, '<h3>')
-                .replace(/^## /gm, '<h2>');
+            // format enhanced transcript - handle both timestamp and natural conversation formats
+            let formatted;
             
-            return `<div class="enhanced-transcript"><p>${formatted}</p></div>`;
+            // Check if this is natural conversation format (contains @speaker: at line starts)
+            if (/@\w+:\s/.test(cleanContent)) {
+                // Natural conversation format - clean chronological lines
+                formatted = cleanContent
+                    .split('\n\n') // Split by speaker changes
+                    .map(turn => {
+                        if (turn.trim()) {
+                            return `<div class="speaker-turn">${turn.replace(/^(@\w+):\s*/gm, '<span class="speaker-label">$1:</span> ')}</div>`;
+                        }
+                        return '';
+                    })
+                    .filter(turn => turn.length > 0)
+                    .join('\n')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
+                    .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
+                    .replace(/\n(?!<div)/g, '<br>'); // line breaks within content, not between divs
+            } else {
+                // Legacy format with timestamps
+                formatted = cleanContent
+                    .replace(/\n\n/g, '</p><p>')
+                    .replace(/\n/g, '<br>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/@(\w+)/g, '<span class="speaker-ref">@$1</span>')
+                    .replace(/_([^_]+)_/g, '<em class="topic-emphasis">$1</em>')
+                    .replace(/(🟡|🔴|🔵|🟢|🟠)/g, '<span class="emotion-indicator">$1</span>')
+                    .replace(/\[(\d{1,2}:\d{2}[:\d{2}]*(?:-\d{1,2}:\d{2}[:\d{2}]*)?)\]/g, '<span class="timestamp">[$1]</span>')
+                    .replace(/^### /gm, '<h3>')
+                    .replace(/^## /gm, '<h2>');
+                
+                formatted = `<p>${formatted}</p>`;
+            }
+            
+            return `<div class="enhanced-transcript">${formatted}</div>`;
         }
         
         return '<div class="enhanced-transcript">enhanced transcript content</div>';

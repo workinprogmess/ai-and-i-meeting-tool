@@ -833,3 +833,15 @@ body {
     gap: 12px;
     justify-content: flex-end;
 }
+
+/* natural conversation format styles - clean chronological lines */
+.speaker-turn {
+    margin-bottom: 8px;
+    padding: 4px 0;
+    line-height: 1.6;
+}
+.speaker-label {
+    color: #059669;
+    font-weight: 600;
+    margin-right: 8px;
+}
