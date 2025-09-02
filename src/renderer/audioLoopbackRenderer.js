@@ -20,8 +20,8 @@ class AudioLoopbackRenderer {
         // Recording timing
         this.recordingStartTime = null;
         
-        // Audio configuration
-        this.audioBitsPerSecond = 128000;
+        // Audio configuration - increased bitrate for better quality
+        this.audioBitsPerSecond = 256000; // doubled from 128000 for higher quality
         this.segmentDuration = 60000; // 60-second segments
         
         // Device change monitoring
