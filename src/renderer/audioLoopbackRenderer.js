@@ -167,11 +167,11 @@ class AudioLoopbackRenderer {
                             this.micSegments.push(event.data);
                             console.log(`🎤 [${timestamp}] Mic segment: ${event.data.size} bytes, device: "${deviceLabel}" (${this.micSegments.length} total segments)`);
                             
-                            // Memory warning
-                            const totalMicSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
-                            if (totalMicSize > 100 * 1024 * 1024) { // 100MB warning
-                                console.warn(`⚠️ Mic segments using ${(totalMicSize / 1024 / 1024).toFixed(1)}MB of memory`);
-                            }
+                            // Memory warning - DISABLED to test if this causes crash
+                            // const totalMicSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
+                            // if (totalMicSize > 100 * 1024 * 1024) { // 100MB warning
+                            //     console.warn(`⚠️ Mic segments using ${(totalMicSize / 1024 / 1024).toFixed(1)}MB of memory`);
+                            // }
                         }
                     } catch (error) {
                         console.error('❌ Error handling mic data:', error);
@@ -193,11 +193,11 @@ class AudioLoopbackRenderer {
                         this.systemSegments.push(event.data);
                         console.log(`🔊 [${timestamp}] System segment: ${event.data.size} bytes, source: "${deviceLabel}" (${this.systemSegments.length} total segments)`);
                         
-                        // Memory warning
-                        const totalSysSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
-                        if (totalSysSize > 100 * 1024 * 1024) { // 100MB warning
-                            console.warn(`⚠️ System segments using ${(totalSysSize / 1024 / 1024).toFixed(1)}MB of memory`);
-                        }
+                        // Memory warning - DISABLED to test if this causes crash
+                        // const totalSysSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
+                        // if (totalSysSize > 100 * 1024 * 1024) { // 100MB warning
+                        //     console.warn(`⚠️ System segments using ${(totalSysSize / 1024 / 1024).toFixed(1)}MB of memory`);
+                        // }
                     }
                 } catch (error) {
                     console.error('❌ Error handling system data:', error);
@@ -214,6 +214,46 @@ class AudioLoopbackRenderer {
             console.log(`⏱️  Synchronous start at: ${syncStartTime}`);
             console.log(`📊 Segment duration: ${this.segmentDuration}ms (${this.segmentDuration/1000}s)`);
             console.log(`🎚️  Audio bitrate: ${this.audioBitsPerSecond}bps`);
+            
+            // EXPERIMENTAL: Stop and restart recorders every 90 seconds to prevent 2-minute crash
+            this.recorderRestartInterval = setInterval(async () => {
+                console.log('🔄 Restarting MediaRecorders to prevent 2-minute crash...');
+                try {
+                    // Stop current recorders
+                    if (this.micRecorder && this.micRecorder.state === 'recording') {
+                        this.micRecorder.stop();
+                    }
+                    if (this.systemRecorder && this.systemRecorder.state === 'recording') {
+                        this.systemRecorder.stop();
+                    }
+                    
+                    // Wait for final data
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Create new recorders with same streams
+                    if (this.micStream) {
+                        this.micRecorder = new MediaRecorder(this.micStream, {
+                            mimeType: 'audio/webm;codecs=opus',
+                            audioBitsPerSecond: this.audioBitsPerSecond
+                        });
+                        this.setupMicRecorderHandlers();
+                        this.micRecorder.start(this.segmentDuration);
+                        console.log('🎤 Mic recorder restarted');
+                    }
+                    
+                    if (this.systemStream) {
+                        this.systemRecorder = new MediaRecorder(this.systemStream, {
+                            mimeType: 'audio/webm;codecs=opus',
+                            audioBitsPerSecond: this.audioBitsPerSecond
+                        });
+                        this.setupSystemRecorderHandlers();
+                        this.systemRecorder.start(this.segmentDuration);
+                        console.log('🔊 System recorder restarted');
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to restart recorders:', error);
+                }
+            }, 90000); // Every 90 seconds
             
             if (this.micRecorder) {
                 this.micRecorder.start(this.segmentDuration);
@@ -241,12 +281,13 @@ class AudioLoopbackRenderer {
             this.healthCheckInterval = setInterval(() => {
                 try {
                     const elapsed = Math.round((Date.now() - this.recordingStartTime) / 1000);
-                    const micSegmentSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
-                    const sysSegmentSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
+                    // DISABLED reduce operations to test if they cause crash
+                    // const micSegmentSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
+                    // const sysSegmentSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
                     
                     console.log(`📊 Recording health check at ${elapsed}s:`);
-                    console.log(`   • Mic segments: ${this.micSegments.length} (${(micSegmentSize/1024/1024).toFixed(1)}MB)`);
-                    console.log(`   • Sys segments: ${this.systemSegments.length} (${(sysSegmentSize/1024/1024).toFixed(1)}MB)`);
+                    console.log(`   • Mic segments: ${this.micSegments.length} segments`);
+                    console.log(`   • Sys segments: ${this.systemSegments.length} segments`);
                     console.log(`   • Mic recorder: ${this.micRecorder?.state || 'none'}`);
                     console.log(`   • Sys recorder: ${this.systemRecorder?.state || 'none'}`);
                     console.log(`   • Memory usage: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)}MB`);
