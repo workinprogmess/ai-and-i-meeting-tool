@@ -989,9 +989,103 @@ result: overlapping audio becomes unintelligible to ai
 
 **milestone 3.3 status: critical pivot point - must solve audio quality before differentiation**
 
+### milestone 3.3(a): improvement plan - achieving 90% accuracy with current architecture
+
+**approach**: incremental improvements without architectural changes
+**timeline**: 6-9 days total
+**cost**: same as current ($0.054/hour)
+
+**phase 1: immediate improvements (1-2 days)**
+1. stereo merge at capture time (highest priority)
+   - single file with left=mic, right=system
+   - perfect temporal alignment
+   - expected: 20-30% accuracy improvement
+
+2. audio preprocessing pipeline
+   - noise gate, normalization
+   - wav conversion if needed
+   - expected: 10-15% improvement
+
+3. intelligent device detection
+   - monitor airpods removal
+   - handle switching gracefully
+   - expected: prevent 30% loss from device changes
+
+**phase 2: dual-service redundancy (2-3 days)**
+- parallel gemini + deepgram processing
+- confidence-based merging
+- expected: 15-20% better completeness
+
+**phase 3: advanced audio (3-4 days)**
+- voice activity detection (vad)
+- echo cancellation
+- spectral noise reduction
+- expected: 10-15% improvement
+
+**success metrics:**
+- target: 85-90% accuracy (up from 50-70%)
+- acceptable threshold: 85%
+
+### milestone 3.3(b): architectural pivot - core audio with file-based or streaming
+
+**approach**: native core audio apis for pristine capture
+**timeline**: 7-10 days for file-based
+**cost**: same for files ($0.054/hour), 28x for streaming ($1.52/hour)
+
+**two implementation options:**
+1. **file-based (recommended)**: core audio → wav files → batch transcription
+2. **streaming (if needed)**: core audio → stream to services → real-time
+
+**collaborative development approach:**
+- no xcode ide needed (just command line tools)
+- no c++ learning required (assistant writes it)
+- same electron packaging
+- we build together
+
+**implementation phases:**
+1. core audio capture module (3-4 days)
+2a. file-based processing (2 days) OR
+2b. streaming implementation (3-4 days)
+
+**when to choose:**
+- 3.3(a) if quick results needed (2-3 days)
+- 3.3(b) if 3.3(a) achieves <80% accuracy
+
+### milestone 3.3(a) implementation progress (2025-09-02)
+
+**attempted implementations:**
+1. ✅ increased bitrate to 256kbps (completed)
+2. ❌ stereo merge at capture - attempted wrong approach (see below)
+3. ✅ disabled device switching (prevented crashes)
+4. ✅ reduced segment duration to 5s (memory management)
+5. ✅ fixed terminal timeout confusion (not app crash)
+
+**stereo merge confusion - critical learning:**
+- **what we tried**: post-processing merge after recording stops
+- **why it failed**: web audio api cannot decode webm/opus
+- **what actually happened**: function always returns null, no stereo file created
+- **correct approach**: real-time stream merging before recording
+
+**diagnostic discoveries:**
+- app wasn't crashing, terminal was timing out after 2 minutes
+- single-stream processing was accidentally enabled (caused bad transcripts)
+- reduce() operations on blobs not causing issues
+
+**current working state:**
+- dual-file approach: 67-100% accuracy when properly configured
+- recording 3+ minutes successfully
+- ready for real-time stereo implementation
+
+**next steps:**
+- implement real-time stream merging (the correct way)
+- test with airpods switching scenarios
+- measure accuracy improvements
+
+**milestone 3.3 status: critical pivot point - must solve audio quality before differentiation**
+
 ---
 
-Last Updated: 2025-09-02 (deepgram investigation, root cause analysis complete)
+Last Updated: 2025-09-02 (3.3a/b plans documented, implementation progress recorded)
 Session Duration: Comprehensive codebase analysis + strategic planning
 Major Achievements:
 - milestone 3.2: zero data loss + device resilience complete

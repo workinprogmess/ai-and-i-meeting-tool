@@ -1,5 +1,24 @@
 [
   {
+    "sessionId": "1756835829527",
+    "title": "meeting 2/9/2025",
+    "startTime": "2025-09-02T17:57:09.529Z",
+    "status": "recording",
+    "id": "1756835829527",
+    "date": "2/9/2025",
+    "time": "11:30 pm",
+    "duration": 199,
+    "timestamp": "2025-09-02T18:00:39.431Z",
+    "audioFilePath": "/Users/workinprogmess/ai-and-i/audio-temp/session_1756835829527_microphone.webm",
+    "transcript": "[00:00] @me: and I'm going to test the create studio file function.\n\n[00:05] @speaker: Five years ago, I was a prisoner in my own life.\n\n[00:06] @me: Uh just to force the two file functions in the model to transcribe and generate deep grammars. I hope that should work.\n\n[00:11] @speaker: I was hopelessly addicted to drugs.\n\n[00:18] @me: Ideally, I hope for at least decent improvement in the quality of transcription. Should be able to capture all four segments by default. What's my volume at? What's my volume at? Let's listen to the audio.\n\n[00:19] @speaker: Every morning, I would get up, go buy drugs, and then spend the rest of the day using, barely conscious until I passed out again at the end of the night.\n\n[00:35] @me: Let's bounce this to mono without and the order it happens.\n\n[00:38] @speaker: I spent months at a time like that.\n\n[00:41] @me: I'm going to quickly play a YouTube video. I might speak a few things in between.\n\n[00:48] @me: The dead.\n\n[01:00] @me: Okay.\n\n[01:05] @me: What are they saying?\n\n[01:11] @me: Okay.\n\n[01:30] @me: What the color?\n\n[01:35] @me: Crazy.\n\n[01:37] @me: Anyways, so this is supposed to YouTube video. Now I'm going to take my AirPods off.\n\n[01:50] @me: And um\n\n[02:58] @me: almost sure it called that.",
+    "summary": "single-stream processing (no summary generated)",
+    "speakerAnalysis": "integrated into transcript",
+    "emotionalDynamics": "single-stream approach",
+    "cost": 0.00019275,
+    "processingTime": 10476,
+    "provider": "gemini-2.5-flash-end-to-end"
+  },
+  {
     "sessionId": "1756834737044",
     "title": "new meeting",
     "startTime": "2025-09-02T17:38:57.045Z",
