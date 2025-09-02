@@ -231,10 +231,15 @@ class AudioLoopbackRenderer {
         try {
             console.log('🎵 Creating single stereo file with perfect channel alignment...');
             
-            // Create audio context for processing
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ 
-                sampleRate: 48000 
-            });
+            // Validate inputs
+            if (!micSegments || micSegments.length === 0) {
+                console.warn('⚠️ No microphone segments to merge');
+                return null;
+            }
+            if (!systemSegments || systemSegments.length === 0) {
+                console.warn('⚠️ No system segments to merge');
+                return null;
+            }
             
             // Convert segment blobs to array buffers
             const micBlob = new Blob(micSegments, { type: 'audio/webm;codecs=opus' });
@@ -242,11 +247,24 @@ class AudioLoopbackRenderer {
             
             console.log('📊 Source sizes - Mic: ' + (micBlob.size/1024/1024).toFixed(2) + 'MB, System: ' + (sysBlob.size/1024/1024).toFixed(2) + 'MB');
             
-            // Decode both audio streams
+            // TEMPORARY: Skip stereo merge for now to prevent crashes
+            // TODO: Implement proper WebM decoding or use different approach
+            console.log('⚠️ Stereo merge temporarily disabled due to WebM decoding issues');
+            console.log('📝 Falling back to dual-file approach');
+            return null;
+            
+            /* DISABLED UNTIL WE FIX DECODING ISSUE:
+            // Create audio context for processing
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ 
+                sampleRate: 48000 
+            });
+            
+            // Decode both audio streams - THIS IS WHERE IT CRASHES
             const micArrayBuffer = await micBlob.arrayBuffer();
             const sysArrayBuffer = await sysBlob.arrayBuffer();
             
             console.log('🔄 Decoding audio streams...');
+            // Web Audio API cannot decode WebM/Opus directly - need different approach
             const micBuffer = await audioContext.decodeAudioData(micArrayBuffer);
             const sysBuffer = await audioContext.decodeAudioData(sysArrayBuffer);
             
@@ -297,9 +315,11 @@ class AudioLoopbackRenderer {
                     source.stop();
                 }, stereoBuffer.duration * 1000 + 100);
             });
+            */
             
         } catch (error) {
             console.error('❌ Failed to create stereo file:', error);
+            console.error('Error details:', error.message, error.stack);
             // Fallback to separate files
             return null;
         }
