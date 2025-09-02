@@ -22,7 +22,7 @@ class AudioLoopbackRenderer {
         
         // Audio configuration - increased bitrate for better quality
         this.audioBitsPerSecond = 256000; // doubled from 128000 for higher quality
-        this.segmentDuration = 60000; // 60-second segments
+        this.segmentDuration = 5000; // 5-second segments (reduced from 60s to prevent memory issues)
         
         // Device change monitoring
         this.deviceChangeHandler = null;
@@ -212,16 +212,20 @@ class AudioLoopbackRenderer {
             // Start both recorders SIMULTANEOUSLY to maintain temporal sync
             const syncStartTime = Date.now();
             console.log(`⏱️  Synchronous start at: ${syncStartTime}`);
+            console.log(`📊 Segment duration: ${this.segmentDuration}ms (${this.segmentDuration/1000}s)`);
+            console.log(`🎚️  Audio bitrate: ${this.audioBitsPerSecond}bps`);
             
             if (this.micRecorder) {
                 this.micRecorder.start(this.segmentDuration);
                 console.log('🎤 Microphone recording started (synchronized)');
+                console.log(`   MediaRecorder state: ${this.micRecorder.state}`);
             } else {
                 console.log('⚠️  Microphone recording skipped (recorder unavailable)');
             }
             
             this.systemRecorder.start(this.segmentDuration);
             console.log('🔊 System audio recording started (synchronized)');
+            console.log(`   MediaRecorder state: ${this.systemRecorder.state}`);
             
             // Set up device change monitoring for seamless switching
             // TEMPORARILY DISABLED: May be causing crashes during recording
@@ -232,6 +236,24 @@ class AudioLoopbackRenderer {
             // this.setupSilentMicrophoneRecovery();
             
             console.log('⚠️ Device switching and recovery temporarily disabled to prevent crashes');
+            
+            // Add periodic health check
+            this.healthCheckInterval = setInterval(() => {
+                try {
+                    const elapsed = Math.round((Date.now() - this.recordingStartTime) / 1000);
+                    const micSegmentSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
+                    const sysSegmentSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
+                    
+                    console.log(`📊 Recording health check at ${elapsed}s:`);
+                    console.log(`   • Mic segments: ${this.micSegments.length} (${(micSegmentSize/1024/1024).toFixed(1)}MB)`);
+                    console.log(`   • Sys segments: ${this.systemSegments.length} (${(sysSegmentSize/1024/1024).toFixed(1)}MB)`);
+                    console.log(`   • Mic recorder: ${this.micRecorder?.state || 'none'}`);
+                    console.log(`   • Sys recorder: ${this.systemRecorder?.state || 'none'}`);
+                    console.log(`   • Memory usage: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)}MB`);
+                } catch (err) {
+                    console.error('❌ Health check error:', err);
+                }
+            }, 10000); // Every 10 seconds
             
             this.isRecording = true;
             
@@ -509,6 +531,13 @@ class AudioLoopbackRenderer {
     }
 
     async cleanup() {
+        // Stop health check
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = null;
+            console.log('📊 Health check disabled');
+        }
+        
         // Remove device change listener
         if (this.deviceChangeHandler) {
             navigator.mediaDevices.removeEventListener('devicechange', this.deviceChangeHandler);
