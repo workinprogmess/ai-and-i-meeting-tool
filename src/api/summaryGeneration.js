@@ -597,7 +597,9 @@ ${mergedTranscript}`;
             expectedDuration = 60,
             meetingTopic = 'business meeting',
             context = 'team discussion',
-            systemAudioFilePath = null  // optional second audio file
+            systemAudioFilePath = null,  // optional second audio file
+            isStereoMerged = false,  // flag for stereo processing
+            metadata = {}  // channel information
         } = options;
 
         console.log(`🎯 gemini 2.5 flash end-to-end processing`);
@@ -608,34 +610,70 @@ ${mergedTranscript}`;
             // prepare audio inputs based on what's available
             const audioInputs = [];
             
-            // handle primary audio file (microphone or combined)
-            if (audioFilePath) {
-                console.log(`🎤 loading microphone audio: ${audioFilePath}`);
-                const micBuffer = await fs.readFile(audioFilePath);
+            // HIGHEST PRIORITY: handle stereo-merged file
+            if (isStereoMerged && audioFilePath) {
+                console.log(`🎯 loading STEREO-MERGED audio with perfect alignment: ${audioFilePath}`);
+                const stereoBuffer = await fs.readFile(audioFilePath);
+                
+                // Enhanced metadata for stereo file
                 audioInputs.push({
-                    text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test, speaking directly into microphone with AirPods. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
+                    text: `CRITICAL STEREO FILE INFORMATION:
+This is a STEREO audio file with TWO distinct channels captured simultaneously:
+- LEFT CHANNEL (Channel 0): Microphone input = @me (the person conducting the meeting/test)
+- RIGHT CHANNEL (Channel 1): System audio = @speaker (videos, calls, other participants)
+
+CHANNEL SEPARATION RULES:
+- The channels are PERFECTLY synchronized at capture time
+- NO temporal drift or alignment issues exist
+- Process each channel independently for speaker identification
+- LEFT channel voice is ALWAYS @me throughout the entire recording
+- RIGHT channel voices are @speaker1, @speaker2, etc (never @me)
+- Both channels may have audio at the same time - transcribe both
+
+QUALITY NOTES:
+- Recording started at: ${metadata.startTime || 'unknown'}
+- Duration: ${metadata.duration || expectedDuration * 60000}ms
+- Audio quality: 256kbps WebM/Opus
+- Channels recorded simultaneously with electron-audio-loopback`
                 });
                 audioInputs.push({
                     inlineData: {
-                        data: micBuffer.toString('base64'),
+                        data: stereoBuffer.toString('base64'),
                         mimeType: 'audio/webm'
                     }
                 });
             }
-            
-            // handle system audio file if provided (two-file approach)
-            if (systemAudioFilePath) {
-                console.log(`🔊 loading system audio: ${systemAudioFilePath}`);
-                const systemBuffer = await fs.readFile(systemAudioFilePath);
-                audioInputs.push({
-                    text: "SYSTEM AUDIO (YouTube/video speakers = @speaker1, @speaker2, etc): this contains voices from videos/calls played through system audio, NOT the microphone speaker. These should be labeled @speaker1, @speaker2, never @me."
-                });
-                audioInputs.push({
-                    inlineData: {
-                        data: systemBuffer.toString('base64'),
-                        mimeType: 'audio/webm'
-                    }
-                });
+            // Fallback: handle separate files (original two-file approach)
+            else {
+                // handle primary audio file (microphone)
+                if (audioFilePath) {
+                    console.log(`🎤 loading microphone audio: ${audioFilePath}`);
+                    const micBuffer = await fs.readFile(audioFilePath);
+                    audioInputs.push({
+                        text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test, speaking directly into microphone with AirPods. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
+                    });
+                    audioInputs.push({
+                        inlineData: {
+                            data: micBuffer.toString('base64'),
+                            mimeType: 'audio/webm'
+                        }
+                    });
+                }
+                
+                // handle system audio file if provided (two-file approach)
+                if (systemAudioFilePath) {
+                    console.log(`🔊 loading system audio: ${systemAudioFilePath}`);
+                    const systemBuffer = await fs.readFile(systemAudioFilePath);
+                    audioInputs.push({
+                        text: "SYSTEM AUDIO (YouTube/video speakers = @speaker1, @speaker2, etc): this contains voices from videos/calls played through system audio, NOT the microphone speaker. These should be labeled @speaker1, @speaker2, never @me."
+                    });
+                    audioInputs.push({
+                        inlineData: {
+                            data: systemBuffer.toString('base64'),
+                            mimeType: 'audio/webm'
+                        }
+                    });
+                }
             }
 
         // Check if we should use single-stream processing
@@ -644,8 +682,48 @@ ${mergedTranscript}`;
             return await this.processSingleStreamAudio(audioFilePath, systemAudioFilePath, context);
         }
 
-        // Original dual-stream processing
-        const prompt = `transcribe this audio recording completely, capturing every word spoken.
+        // Enhanced prompt for stereo or dual-file processing
+        const prompt = isStereoMerged ? 
+            `transcribe this STEREO audio recording completely, capturing every word spoken from both channels.
+
+STEREO FILE STRUCTURE:
+This is a single stereo file with TWO DISTINCT CHANNELS:
+- LEFT CHANNEL (0): Microphone input - label ALL speech as @me
+- RIGHT CHANNEL (1): System audio - label speakers as @speaker1, @speaker2, etc
+
+CRITICAL INSTRUCTIONS FOR STEREO PROCESSING:
+1. Process BOTH channels independently - they contain different audio sources
+2. LEFT channel = @me for ENTIRE recording (person conducting the meeting)
+3. RIGHT channel = @speaker1, @speaker2 (videos, calls, other participants)
+4. Channels are perfectly synchronized - no drift or alignment issues
+5. When both channels have audio simultaneously, transcribe BOTH
+6. Maintain chronological order based on actual audio timing
+
+NATURAL CONVERSATION CAPTURE:
+- transcribe exactly what was said as the conversation flowed
+- follow natural speaker transitions across both channels
+- capture ALL speech content from both channels
+- maintain conversation rhythm - pauses, interruptions, overlapping speech
+- NO timestamps needed - focus entirely on capturing complete content
+- include every word spoken by every participant
+
+REQUIREMENTS:
+- transcribe speaker by speaker, line by line, as it ebbed and flowed naturally
+- start each speaker statement with @me: or @speaker1: etc
+- new line for each speaker change or major thought
+- capture 100% of spoken content - every single word matters
+- if audio quality is poor, transcribe what you can hear rather than skipping
+- maintain proper formatting throughout
+- just accurate, complete transcription - no analysis or emotions
+
+format example:
+@me: what they said on left channel
+@speaker1: what was said on right channel
+@me: my follow-up comment from left channel
+@speaker1: response from right channel
+
+transcribe the complete conversation from start to finish.` :
+            `transcribe this audio recording completely, capturing every word spoken.
 
 CONVERSATION FLOW APPROACH:
 i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:

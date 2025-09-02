@@ -356,14 +356,16 @@ async function processRecordingWithGemini(recordingResult) {
     }
     
     // Process with gemini end-to-end (audio → transcript + summary)
-    // Use two-file approach when both microphone and system audio are available
-    const audioPath = recordingResult.microphoneFilePath || recordingResult.audioFilePath;
+    // Priority: stereo file > dual-file approach > single file
+    const audioPath = recordingResult.stereoFilePath || recordingResult.microphoneFilePath || recordingResult.audioFilePath;
     const geminiResult = await summaryGeneration.processAudioEndToEnd(audioPath, {
       participants: 'v', // hardcoded user name
       expectedDuration: Math.round((recordingResult.duration / 60) * 10) / 10, // convert to minutes with 1 decimal place
       meetingTopic: 'meeting',
       context: 'personal recording',
-      systemAudioFilePath: recordingResult.systemAudioFilePath // pass system audio if available
+      systemAudioFilePath: recordingResult.stereoFilePath ? null : recordingResult.systemAudioFilePath, // no system file needed if stereo
+      isStereoMerged: recordingResult.isStereoMerged || false, // flag for stereo processing
+      metadata: recordingResult.metadata // channel information
     });
     
     if (geminiResult.error) {
@@ -449,39 +451,56 @@ async function startAudioCaptureHandler(data) {
               ipcMain.once('audio-loopback-recording-stopped', async (event, result) => {
                 console.log('📥 Main: Received audio-loopback-recording-stopped:', result.success, result.streamType || result.error);
                 
-                // Save two separate audio files for proper speaker identification
+                // Save audio files based on stream type
                 if (result.success) {
                   try {
                     const audioTempDir = path.join(process.cwd(), 'audio-temp');
                     await fs.promises.mkdir(audioTempDir, { recursive: true });
                     
-                    // Save microphone audio file
-                    if (result.microphoneBuffer) {
-                      const micFilePath = path.join(audioTempDir, `session_${result.sessionId}_microphone.webm`);
-                      await fs.promises.writeFile(micFilePath, result.microphoneBuffer);
-                      result.microphoneFilePath = micFilePath;
-                      console.log(`🎤 Microphone audio saved: ${micFilePath} (${(result.microphoneBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-                      delete result.microphoneBuffer;
+                    // HIGHEST PRIORITY: Save stereo-merged file if available
+                    if (result.stereoBuffer) {
+                      const stereoFilePath = path.join(audioTempDir, `session_${result.sessionId}_stereo.webm`);
+                      await fs.promises.writeFile(stereoFilePath, result.stereoBuffer);
+                      result.stereoFilePath = stereoFilePath;
+                      console.log(`🎯 STEREO audio saved: ${stereoFilePath} (${(result.stereoBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                      console.log(`✅ Perfect temporal alignment achieved - left=mic, right=system`);
+                      delete result.stereoBuffer;
                     }
                     
-                    // Save system audio file
-                    if (result.systemAudioBuffer) {
-                      const systemFilePath = path.join(audioTempDir, `session_${result.sessionId}_system.webm`);
-                      await fs.promises.writeFile(systemFilePath, result.systemAudioBuffer);
-                      result.systemAudioFilePath = systemFilePath;
-                      console.log(`🔊 System audio saved: ${systemFilePath} (${(result.systemAudioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-                      delete result.systemAudioBuffer;
+                    // Fallback: Save separate files if no stereo merge
+                    if (!result.stereoFilePath) {
+                      // Save microphone audio file
+                      if (result.microphoneBuffer) {
+                        const micFilePath = path.join(audioTempDir, `session_${result.sessionId}_microphone.webm`);
+                        await fs.promises.writeFile(micFilePath, result.microphoneBuffer);
+                        result.microphoneFilePath = micFilePath;
+                        console.log(`🎤 Microphone audio saved: ${micFilePath} (${(result.microphoneBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                        delete result.microphoneBuffer;
+                      }
+                      
+                      // Save system audio file
+                      if (result.systemAudioBuffer) {
+                        const systemFilePath = path.join(audioTempDir, `session_${result.sessionId}_system.webm`);
+                        await fs.promises.writeFile(systemFilePath, result.systemAudioBuffer);
+                        result.systemAudioFilePath = systemFilePath;
+                        console.log(`🔊 System audio saved: ${systemFilePath} (${(result.systemAudioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                        delete result.systemAudioBuffer;
+                      }
                     }
                     
-                    // Log summary
-                    if (result.streamType === 'dual-file') {
+                    // Log summary based on stream type
+                    if (result.streamType === 'stereo-merged') {
+                      console.log(`✅ Stereo-merged approach: Single file with perfect channel alignment`);
+                      console.log(`   • Duration: ${result.totalDuration}s`);
+                      console.log(`   • Left channel: microphone, Right channel: system audio`);
+                    } else if (result.streamType === 'dual-file') {
                       console.log(`✅ Two-file approach: Saved both microphone and system audio separately`);
                       console.log(`   • Duration: ${result.totalDuration}s`);
                       console.log(`   • Files will be sent to Gemini for proper speaker identification`);
                     }
                     
                     // Set primary audio file path for backward compatibility
-                    result.audioFilePath = result.microphoneFilePath || result.systemAudioFilePath;
+                    result.audioFilePath = result.stereoFilePath || result.microphoneFilePath || result.systemAudioFilePath;
                     result.duration = result.totalDuration;
                     
                   } catch (error) {

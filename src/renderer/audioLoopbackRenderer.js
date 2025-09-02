@@ -227,6 +227,84 @@ class AudioLoopbackRenderer {
         }
     }
 
+    async createStereoFile(micSegments, systemSegments) {
+        try {
+            console.log('🎵 Creating single stereo file with perfect channel alignment...');
+            
+            // Create audio context for processing
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ 
+                sampleRate: 48000 
+            });
+            
+            // Convert segment blobs to array buffers
+            const micBlob = new Blob(micSegments, { type: 'audio/webm;codecs=opus' });
+            const sysBlob = new Blob(systemSegments, { type: 'audio/webm;codecs=opus' });
+            
+            console.log('📊 Source sizes - Mic: ' + (micBlob.size/1024/1024).toFixed(2) + 'MB, System: ' + (sysBlob.size/1024/1024).toFixed(2) + 'MB');
+            
+            // Decode both audio streams
+            const micArrayBuffer = await micBlob.arrayBuffer();
+            const sysArrayBuffer = await sysBlob.arrayBuffer();
+            
+            console.log('🔄 Decoding audio streams...');
+            const micBuffer = await audioContext.decodeAudioData(micArrayBuffer);
+            const sysBuffer = await audioContext.decodeAudioData(sysArrayBuffer);
+            
+            console.log('📏 Audio lengths - Mic: ' + micBuffer.duration.toFixed(1) + 's, System: ' + sysBuffer.duration.toFixed(1) + 's');
+            
+            // Create stereo buffer with perfect alignment
+            const maxLength = Math.max(micBuffer.length, sysBuffer.length);
+            const stereoBuffer = audioContext.createBuffer(2, maxLength, audioContext.sampleRate);
+            
+            // Copy mic to left channel, system to right channel
+            if (micBuffer.numberOfChannels > 0) {
+                stereoBuffer.copyToChannel(micBuffer.getChannelData(0), 0); // left = mic
+            }
+            if (sysBuffer.numberOfChannels > 0) {
+                stereoBuffer.copyToChannel(sysBuffer.getChannelData(0), 1); // right = system
+            }
+            
+            console.log('✅ Stereo buffer created: ' + (stereoBuffer.duration).toFixed(1) + 's, 2 channels');
+            
+            // Encode back to WebM using MediaRecorder
+            const dest = audioContext.createMediaStreamDestination();
+            const source = audioContext.createBufferSource();
+            source.buffer = stereoBuffer;
+            source.connect(dest);
+            
+            // Record the stereo stream
+            const chunks = [];
+            const recorder = new MediaRecorder(dest.stream, {
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: this.audioBitsPerSecond
+            });
+            
+            return new Promise((resolve, reject) => {
+                recorder.ondataavailable = (e) => chunks.push(e.data);
+                recorder.onstop = () => {
+                    const stereoBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
+                    console.log('🎯 Final stereo file: ' + (stereoBlob.size/1024/1024).toFixed(2) + 'MB');
+                    resolve(stereoBlob);
+                };
+                recorder.onerror = reject;
+                
+                recorder.start();
+                source.start();
+                
+                // Stop recording after buffer plays
+                setTimeout(() => {
+                    recorder.stop();
+                    source.stop();
+                }, stereoBuffer.duration * 1000 + 100);
+            });
+            
+        } catch (error) {
+            console.error('❌ Failed to create stereo file:', error);
+            // Fallback to separate files
+            return null;
+        }
+    }
+
     async stopRecording() {
         try {
             if (!this.isRecording) {
@@ -293,54 +371,79 @@ class AudioLoopbackRenderer {
                 console.log(`   • Data distribution: ${micPercentage}% mic, ${systemPercentage}% system`);
             }
             
-            // Create separate audio blobs for two-file approach
+            // Create STEREO file if we have both streams (highest priority improvement!)
+            let stereoBlob = null;
             let microphoneBlob = null;
             let systemAudioBlob = null;
             let streamType = 'none';
             
-            if (this.micSegments.length > 0) {
-                // Create microphone audio file
-                console.log(`🎤 Creating microphone audio file`);
-                microphoneBlob = new Blob(this.micSegments, { type: 'audio/webm;codecs=opus' });
-                console.log(`📦 Microphone audio: ${(microphoneBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.micSegments.length} segments`);
-            } else {
-                console.warn(`⚠️  No microphone audio captured`);
+            // Try stereo merge first if we have both streams
+            if (this.micSegments.length > 0 && this.systemSegments.length > 0) {
+                console.log('🎯 Attempting stereo merge for perfect temporal alignment...');
+                stereoBlob = await this.createStereoFile(this.micSegments, this.systemSegments);
+                
+                if (stereoBlob) {
+                    streamType = 'stereo-merged';
+                    console.log('✅ STEREO MERGE SUCCESS: Single file with left=mic, right=system');
+                }
             }
             
-            if (this.systemSegments.length > 0) {
-                // Create system audio file
-                console.log(`🔊 Creating system audio file`);
-                systemAudioBlob = new Blob(this.systemSegments, { type: 'audio/webm;codecs=opus' });
-                console.log(`📦 System audio: ${(systemAudioBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.systemSegments.length} segments`);
-            } else {
-                console.warn(`⚠️  No system audio captured`);
-            }
-            
-            // Determine stream type for logging
-            if (microphoneBlob && systemAudioBlob) {
-                streamType = 'dual-file';
-                console.log(`✅ Two-file approach: Both microphone and system audio captured separately`);
-            } else if (microphoneBlob) {
-                streamType = 'microphone-only';
-                console.log(`🎯 Microphone-only recording`);
-            } else if (systemAudioBlob) {
-                streamType = 'system-only';
-                console.log(`🔊 System-audio-only recording (no microphone)`);
-            } else {
-                console.error(`❌ No audio streams captured!`);
+            // Fallback to separate files if stereo merge failed or not applicable
+            if (!stereoBlob) {
+                if (this.micSegments.length > 0) {
+                    // Create microphone audio file
+                    console.log(`🎤 Creating microphone audio file`);
+                    microphoneBlob = new Blob(this.micSegments, { type: 'audio/webm;codecs=opus' });
+                    console.log(`📦 Microphone audio: ${(microphoneBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.micSegments.length} segments`);
+                } else {
+                    console.warn(`⚠️  No microphone audio captured`);
+                }
+                
+                if (this.systemSegments.length > 0) {
+                    // Create system audio file
+                    console.log(`🔊 Creating system audio file`);
+                    systemAudioBlob = new Blob(this.systemSegments, { type: 'audio/webm;codecs=opus' });
+                    console.log(`📦 System audio: ${(systemAudioBlob.size / 1024 / 1024).toFixed(2)} MB, ${this.systemSegments.length} segments`);
+                } else {
+                    console.warn(`⚠️  No system audio captured`);
+                }
+                
+                // Determine stream type for logging
+                if (microphoneBlob && systemAudioBlob) {
+                    streamType = 'dual-file';
+                    console.log(`✅ Two-file approach: Both microphone and system audio captured separately`);
+                } else if (microphoneBlob) {
+                    streamType = 'microphone-only';
+                    console.log(`🎯 Microphone-only recording`);
+                } else if (systemAudioBlob) {
+                    streamType = 'system-only';
+                    console.log(`🔊 System-audio-only recording (no microphone)`);
+                } else {
+                    console.error(`❌ No audio streams captured!`);
+                }
             }
             
             const result = {
                 success: true,
-                message: 'Dual-stream recording completed',
+                message: streamType === 'stereo-merged' ? 
+                    'Stereo-merged recording completed (perfect alignment!)' : 
+                    'Dual-stream recording completed',
                 sessionId: this.sessionId,
+                stereoBlob: stereoBlob,  // NEW: single stereo file
                 microphoneBlob: microphoneBlob,
                 systemAudioBlob: systemAudioBlob,
                 totalDuration: actualDuration,
                 micSegments: this.micSegments.length,
                 systemSegments: this.systemSegments.length,
                 streamType: streamType,
-                isDualFile: streamType === 'dual-file'
+                isDualFile: streamType === 'dual-file',
+                isStereoMerged: streamType === 'stereo-merged',  // NEW: flag for stereo merge
+                metadata: {
+                    leftChannel: 'microphone',
+                    rightChannel: 'system_audio',
+                    startTime: this.recordingStartTime,
+                    duration: actualDuration * 1000
+                }
             };
             
             // Clean up

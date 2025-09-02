@@ -19,7 +19,15 @@ ipcRenderer.on('stop-audio-loopback-recording', async (event) => {
     try {
         const result = await window.audioLoopbackRenderer.stopRecording();
         
-        // Handle audio blob conversion for IPC - now with two separate files
+        // Handle stereo blob if present (highest priority - perfect alignment!)
+        if (result.stereoBlob) {
+            console.log('🎯 Processing stereo-merged audio for IPC transfer...');
+            const buffer = Buffer.from(await result.stereoBlob.arrayBuffer());
+            result.stereoBuffer = buffer;
+            delete result.stereoBlob; // Remove blob (can't serialize over IPC)
+        }
+        
+        // Handle separate audio blobs for fallback dual-file approach
         if (result.microphoneBlob) {
             const buffer = Buffer.from(await result.microphoneBlob.arrayBuffer());
             result.microphoneBuffer = buffer;
