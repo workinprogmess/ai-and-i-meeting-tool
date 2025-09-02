@@ -160,31 +160,53 @@ class AudioLoopbackRenderer {
             // Set up microphone recorder events (if available)
             if (this.micRecorder) {
                 this.micRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        const timestamp = new Date().toISOString();
-                        const deviceLabel = this.micStream.getAudioTracks()[0]?.label || 'Unknown';
-                        this.micSegments.push(event.data);
-                        console.log(`🎤 [${timestamp}] Mic segment: ${event.data.size} bytes, device: "${deviceLabel}" (${this.micSegments.length} total segments)`);
+                    try {
+                        if (event.data.size > 0) {
+                            const timestamp = new Date().toISOString();
+                            const deviceLabel = this.micStream.getAudioTracks()[0]?.label || 'Unknown';
+                            this.micSegments.push(event.data);
+                            console.log(`🎤 [${timestamp}] Mic segment: ${event.data.size} bytes, device: "${deviceLabel}" (${this.micSegments.length} total segments)`);
+                            
+                            // Memory warning
+                            const totalMicSize = this.micSegments.reduce((sum, s) => sum + s.size, 0);
+                            if (totalMicSize > 100 * 1024 * 1024) { // 100MB warning
+                                console.warn(`⚠️ Mic segments using ${(totalMicSize / 1024 / 1024).toFixed(1)}MB of memory`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Error handling mic data:', error);
                     }
                 };
                 
                 this.micRecorder.onerror = (event) => {
                     console.error('❌ Microphone recorder error:', event.error);
+                    // Don't crash, just log the error
                 };
             }
             
             // Set up system audio recorder events
             this.systemRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    const timestamp = new Date().toISOString();
-                    const deviceLabel = this.systemStream.getAudioTracks()[0]?.label || 'System Audio';
-                    this.systemSegments.push(event.data);
-                    console.log(`🔊 [${timestamp}] System segment: ${event.data.size} bytes, source: "${deviceLabel}" (${this.systemSegments.length} total segments)`);
+                try {
+                    if (event.data.size > 0) {
+                        const timestamp = new Date().toISOString();
+                        const deviceLabel = this.systemStream.getAudioTracks()[0]?.label || 'System Audio';
+                        this.systemSegments.push(event.data);
+                        console.log(`🔊 [${timestamp}] System segment: ${event.data.size} bytes, source: "${deviceLabel}" (${this.systemSegments.length} total segments)`);
+                        
+                        // Memory warning
+                        const totalSysSize = this.systemSegments.reduce((sum, s) => sum + s.size, 0);
+                        if (totalSysSize > 100 * 1024 * 1024) { // 100MB warning
+                            console.warn(`⚠️ System segments using ${(totalSysSize / 1024 / 1024).toFixed(1)}MB of memory`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error handling system data:', error);
                 }
             };
             
             this.systemRecorder.onerror = (event) => {
                 console.error('❌ System audio recorder error:', event.error);
+                // Don't crash, just log the error
             };
             
             // Start both recorders SIMULTANEOUSLY to maintain temporal sync
@@ -202,10 +224,14 @@ class AudioLoopbackRenderer {
             console.log('🔊 System audio recording started (synchronized)');
             
             // Set up device change monitoring for seamless switching
-            this.setupDeviceChangeMonitoring();
+            // TEMPORARILY DISABLED: May be causing crashes during recording
+            // this.setupDeviceChangeMonitoring();
             
             // Setup silent persistent microphone recovery
-            this.setupSilentMicrophoneRecovery();
+            // TEMPORARILY DISABLED: May be causing crashes during recording
+            // this.setupSilentMicrophoneRecovery();
+            
+            console.log('⚠️ Device switching and recovery temporarily disabled to prevent crashes');
             
             this.isRecording = true;
             
