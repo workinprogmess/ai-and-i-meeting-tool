@@ -725,23 +725,37 @@ format example:
 transcribe the complete conversation from start to finish.` :
             `transcribe this audio recording completely, capturing every word spoken.
 
-CRITICAL: DUAL-FILE TEMPORAL ALIGNMENT
-you are receiving TWO SEPARATE audio files that were recorded SIMULTANEOUSLY:
-1. MICROPHONE AUDIO: continuous recording from the user's microphone
-2. SYSTEM AUDIO: continuous recording from system speakers (videos, calls)
+TRANSCRIPTION METHOD FOR DUAL AUDIO FILES:
 
-THESE FILES OVERLAP IN TIME - they are NOT sequential!
-- Both files start at time 00:00 and run concurrently
-- You must mentally align them chronologically, not process them sequentially
-- When transcribing, merge the content based on conversational flow
-- The microphone may have speech while system audio is playing (and vice versa)
+You receive 2 audio files that were recorded simultaneously:
+- MICROPHONE FILE: everything the user said (labeled @me)  
+- SYSTEM AUDIO FILE: everything from videos/calls (labeled @speaker1, @speaker2, etc.)
 
-IMPORTANT: IGNORE AUDIO QUALITY CHANGES
-- The microphone audio may change quality mid-recording (AirPods removed, device switch)
-- DO NOT reorganize content based on audio quality or device characteristics
-- DO NOT group "similar quality" segments together
-- MAINTAIN STRICT CHRONOLOGICAL ORDER regardless of audio quality changes
-- If mic quality changes at minute 2, that content still belongs at minute 2, not at the end
+Both files:
+- Start at exactly the same moment (0:00)
+- Have the same total duration
+- Were recorded in parallel, not sequentially
+
+TRANSCRIPTION ALGORITHM:
+Step 1: Mentally synchronize both files at their start point (0:00)
+Step 2: Move through both files chronologically in small increments
+Step 3: For each time point, transcribe what you hear from BOTH files
+Step 4: Maintain this synchronized progression even if audio quality changes
+
+THINK OF IT LIKE THIS:
+Imagine two audio players playing simultaneously, both started at the same time.
+As you listen, you write down what you hear from BOTH players at each moment.
+You never skip ahead in one file or reorganize based on audio quality.
+
+OUTPUT FORMAT:
+Simply transcribe the conversation as it naturally flows, alternating between speakers.
+Do not add timestamps or window markers.
+Just write what was said, by whom, in the order it was said.
+
+HANDLING DEVICE CHANGES:
+The microphone audio may change quality (AirPods on → off) but it's still the same person (@me).
+When you detect a quality change, continue transcribing in chronological order.
+The person doesn't change, only their microphone did.
 
 CONVERSATION FLOW APPROACH:
 i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
