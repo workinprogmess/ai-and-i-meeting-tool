@@ -643,37 +643,19 @@ QUALITY NOTES:
                     }
                 });
             }
-            // Fallback: handle separate files (original two-file approach)
-            else {
-                // handle primary audio file (microphone)
-                if (audioFilePath) {
-                    console.log(`🎤 loading microphone audio: ${audioFilePath}`);
-                    const micBuffer = await fs.readFile(audioFilePath);
-                    audioInputs.push({
-                        text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test. ALL speech in this file is from the same person (@me), whether using AirPods or built-in microphone. Even if the audio quality changes mid-recording (device switch), it's still @me. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
-                    });
-                    audioInputs.push({
-                        inlineData: {
-                            data: micBuffer.toString('base64'),
-                            mimeType: 'audio/webm'
-                        }
-                    });
-                }
-                
-                // handle system audio file if provided (two-file approach)
-                if (systemAudioFilePath) {
-                    console.log(`🔊 loading system audio: ${systemAudioFilePath}`);
-                    const systemBuffer = await fs.readFile(systemAudioFilePath);
-                    audioInputs.push({
-                        text: "SYSTEM AUDIO (YouTube/video speakers = @speaker1, @speaker2, etc): this contains voices from videos/calls played through system audio, NOT the microphone speaker. These should be labeled @speaker1, @speaker2, never @me."
-                    });
-                    audioInputs.push({
-                        inlineData: {
-                            data: systemBuffer.toString('base64'),
-                            mimeType: 'audio/webm'
-                        }
-                    });
-                }
+            // Primary path: mixed audio (the industry standard)
+            else if (audioFilePath) {
+                console.log(`🎯 loading mixed audio: ${audioFilePath}`);
+                const audioBuffer = await fs.readFile(audioFilePath);
+                audioInputs.push({
+                    text: "Mixed audio containing all speakers. Please transcribe thoroughly, distinguishing different speakers as @speaker1, @speaker2, @speaker3, etc. based on voice characteristics. Include all spoken content, sounds (music, laughter, clapping, pauses), and maintain chronological flow. The audio may contain English, Hindi, Hinglish, and code-switching between languages."
+                });
+                audioInputs.push({
+                    inlineData: {
+                        data: audioBuffer.toString('base64'),
+                        mimeType: 'audio/webm'
+                    }
+                });
             }
 
         // Check if we should use single-stream processing
@@ -682,8 +664,28 @@ QUALITY NOTES:
             return await this.processSingleStreamAudio(audioFilePath, systemAudioFilePath, context);
         }
 
-        // Enhanced prompt for stereo or dual-file processing
-        const prompt = isStereoMerged ? 
+        // Determine if we're using mixed audio (the new standard)
+        const isMixedAudio = audioFilePath && audioFilePath.includes('_mixed.');
+        
+        // Select appropriate prompt based on audio type
+        const prompt = isMixedAudio ?
+            `transcribe this mixed audio recording completely, capturing every word spoken.
+
+The audio contains all speakers naturally mixed together. Please:
+- distinguish different speakers as @speaker1, @speaker2, @speaker3, etc. based on voice characteristics
+- transcribe everything in chronological order as the conversation flows
+- include all spoken content, sounds (music, laughter, clapping, pauses)
+- be thorough - capture every word, utterance, and sound
+- the audio may contain English, Hindi, Hinglish, and code-switching between languages
+
+format example:
+@speaker1: what they said
+@speaker2: their response
+@speaker1: follow-up comment
+@speaker3: new person joining the conversation
+
+transcribe the complete conversation from start to finish.` :
+        isStereoMerged ? 
             `transcribe this STEREO audio recording completely, capturing every word spoken from both channels.
 
 STEREO FILE STRUCTURE:
@@ -775,23 +777,10 @@ EXAMPLE FORMAT:
 
 CRITICAL: Even if the same person speaks continuously, break their speech into short, readable lines.
 
-HANDLING DEVICE CHANGES:
-The microphone audio may change quality (AirPods on → off) but it's still the same person (@me).
-When you detect a quality change, continue transcribing in chronological order.
-The person doesn't change, only their microphone did.
-
-CONVERSATION FLOW APPROACH:
-i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
-- MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the meeting/test
-${systemAudioFilePath ? `- SYSTEM AUDIO (other participants = @speaker1, @speaker2, etc): voices from videos, calls, or other participants` : ''}
-
-CRITICAL SPEAKER IDENTIFICATION:
-- @me = ALWAYS the person conducting the meeting/test (the primary user)
-- This voice should ALWAYS be labeled @me throughout the entire recording
-- Even if audio device changes (AirPods on/off, microphone switching), the same person = @me
-- @speaker1, @speaker2, etc = any OTHER people's voices (from calls, videos, other participants)
-- NEVER change @me to @speaker1 or @speaker2 during the conversation
-- The person who started the recording remains @me for the full duration
+SPEAKER IDENTIFICATION:
+- label each distinct speaker as @speaker1, @speaker2, @speaker3, etc.
+- maintain consistency - once you identify a voice as @speaker1, keep using that label
+- distinguish speakers based on voice characteristics, tone, and accent
 
 NATURAL CONVERSATION CAPTURE:
 - transcribe exactly what was said as the conversation flowed
