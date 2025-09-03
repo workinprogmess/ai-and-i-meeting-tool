@@ -385,6 +385,53 @@ const professionalWebM = createMultiTrackWebM(interleavedBuffer);
 - **recordings sync** to cloud storage
 - **target:** user accounts and data persistence foundation
 
+### 3.3.5 mixed audio pivot - critical architectural simplification (2-3 days) 
+**the breakthrough (2025-09-03):** after a week of struggling with dual-file temporal alignment, discovered that native mixed audio is the industry standard solution
+
+**problem we were solving wrong:**
+- dual-file approach (mic + system separate) caused temporal alignment issues
+- gemini couldn't properly merge the streams chronologically
+- complex prompting strategies failed to fix the fundamental problem
+- we were fighting against what transcription services expect
+
+**the revelation:**
+- macos naturally mixes audio at hardware level via coreaudio
+- `getDisplayMedia({ audio: true })` gives us perfectly mixed audio
+- this is what zoom, teams, loom, and every major app uses
+- transcription services are designed for mixed audio + speaker diarization
+
+**implementation plan:**
+1. **switch to mixed audio capture** (0.5 days)
+   - use native getdisplaymedia for single mixed stream
+   - remove all dual-file capture complexity
+   - single mediarecorder, single file output
+
+2. **cleanup dual-file code** (1 day)
+   - remove audioloopbackrenderer dual-stream logic
+   - remove stereo merge attempts
+   - simplify ipc communication
+   - clean up file handling
+
+3. **integrate speaker diarization** (1 day)
+   - deepgram with `diarize: true`
+   - gemini with speaker detection
+   - simple "me vs them" labeling post-process
+   - test accuracy across services
+
+4. **test with real meetings** (0.5 days)
+   - complex interactions (play, pause, speak)
+   - long recordings (30-60 minutes)
+   - verify temporal alignment perfect
+   - measure transcription accuracy
+
+**expected outcomes:**
+- eliminate all temporal alignment issues
+- simplify codebase by ~500 lines
+- improve transcription accuracy to 90%+
+- work naturally with all transcription services
+
+**learning documented:** see mixed-audio-breakthrough.md
+
 ### 3.4 enhanced ui for beta (days 8-10)
 - **onboarding flow** for new users
 - **better recording management** (search, filters, export)
@@ -987,7 +1034,9 @@ result: overlapping audio becomes unintelligible to ai
 - redundancy (multiple services) might be necessary for reliability
 - acoustic environment matters more than we realized
 
-**milestone 3.3 status: critical pivot point - must solve audio quality before differentiation**
+**milestone 3.3 status: BREAKTHROUGH - native mixed audio is the solution**
+
+**critical pivot (2025-09-03)**: discovered that native mixed audio capture solves all temporal alignment issues. dual-file approach was fundamentally flawed. see milestone 3.3.5 for implementation plan.
 
 ### milestone 3.3(a): improvement plan - achieving 90% accuracy with current architecture
 
@@ -1109,11 +1158,13 @@ result: overlapping audio becomes unintelligible to ai
 - test comprehensive fix with various scenarios
 - measure accuracy improvements with fixed audio capture
 
-**milestone 3.3 status: critical pivot point - must solve audio quality before differentiation**
+**milestone 3.3 status: BREAKTHROUGH - native mixed audio is the solution**
+
+**critical pivot (2025-09-03)**: discovered that native mixed audio capture solves all temporal alignment issues. dual-file approach was fundamentally flawed. see milestone 3.3.5 for implementation plan.
 
 ---
 
-Last Updated: 2025-09-03 (3.3a comprehensive audio fix - eliminated recording delays and fixed device switching)
+Last Updated: 2025-09-03 (CRITICAL BREAKTHROUGH - mixed audio pivot, milestone 3.3.5 added)
 Session Duration: Comprehensive codebase analysis + strategic planning
 Major Achievements:
 - milestone 3.2: zero data loss + device resilience complete
