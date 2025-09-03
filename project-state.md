@@ -1189,9 +1189,11 @@ result: overlapping audio becomes unintelligible to ai
 - test comprehensive fix with various scenarios
 - measure accuracy improvements with fixed audio capture
 
-**milestone 3.3 status: BREAKTHROUGH - native mixed audio is the solution**
+**milestone 3.3 status: BREAKTHROUGH - programmatic aggregate devices solution**
 
-**critical pivot (2025-09-03)**: discovered that native mixed audio capture solves all temporal alignment issues. dual-file approach was fundamentally flawed. see milestone 3.3.5 for implementation plan.
+**critical pivot (2025-09-03)**: discovered that native mixed audio capture solves all temporal alignment issues. dual-file approach was fundamentally flawed. comprehensive research led to programmatic aggregate devices as the optimal solution. see `programmatic-aggregate-mixed-audio-research-breakthrough.md` for detailed analysis.
+
+**next milestone**: implement programmatic aggregate devices using macos core audio apis for hardware-level mixed audio capture.
 
 ---
 
