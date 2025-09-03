@@ -268,14 +268,13 @@ class AudioLoopbackRenderer {
             console.log(`   MediaRecorder state: ${this.systemRecorder.state}`);
             
             // Set up device change monitoring for seamless switching
-            // TEMPORARILY DISABLED: May be causing crashes during recording
-            // this.setupDeviceChangeMonitoring();
+            this.setupDeviceChangeMonitoring();
             
             // Setup silent persistent microphone recovery
-            // TEMPORARILY DISABLED: May be causing crashes during recording
+            // Keep disabled for now - might be too aggressive
             // this.setupSilentMicrophoneRecovery();
             
-            console.log('⚠️ Device switching and recovery temporarily disabled to prevent crashes');
+            console.log('✅ Device switching enabled for AirPods removal handling');
             
             // Add periodic health check
             this.healthCheckInterval = setInterval(() => {
