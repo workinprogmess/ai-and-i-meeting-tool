@@ -1,5 +1,25 @@
 [
   {
+    "sessionId": "1756876752528",
+    "title": "meeting 3/9/2025",
+    "startTime": "2025-09-03T05:19:12.528Z",
+    "status": "recording",
+    "id": "1756876752528",
+    "date": "3/9/2025",
+    "time": "10:52 am",
+    "duration": 204,
+    "timestamp": "2025-09-03T05:22:42.935Z",
+    "audioFilePath": "/Users/workinprogmess/ai-and-i/audio-temp/session_1756876752528_microphone.webm",
+    "transcript": "@me: uh in the sense that you'll send two separate files, microphone and system audio files to Gemini. We're testing Gemini right now and we hope that the transcript comes out great, all in one single output chronologically placed. I hope so. I'm gonna go ahead now and record a YouTube video. Okay, about this guy, how he designs premium apps. Let's see.\n\n@speaker1: You guys were really curious to hear about how I design my apps and specifically how I make them feel ten times better than the default iOS experience. I get a ton of compliments on my apps saying that they just feel different, a little bit more polished, more fun to use. So today I'm breaking down some of the advanced techniques I use to achieve that. If you're new here, welcome to the channel. My name is Chris and I build productive apps. I already made a video covering the basics of my design process like mood boarding and wire framing, but today we're going to be going a little bit deeper. These are practical things that I'm doing and applying to my own apps to really give them that polished and fun to use feel.\n\n@me: Okay, we'll see about that. How he does that. And now it's over one minute. We're gonna take off our AirPods.\n\n@me: Now it puts you, it records my microphone and\n",
+    "summary": "transcript-only mode (no summary requested)",
+    "speakerAnalysis": "integrated into transcript",
+    "emotionalDynamics": "natural conversation flow",
+    "cost": 0.0037674999999999996,
+    "processingTime": 6704,
+    "provider": "gemini-2.5-flash-end-to-end",
+    "fullOutput": "@me: uh in the sense that you'll send two separate files, microphone and system audio files to Gemini. We're testing Gemini right now and we hope that the transcript comes out great, all in one single output chronologically placed. I hope so. I'm gonna go ahead now and record a YouTube video. Okay, about this guy, how he designs premium apps. Let's see.\n\n@speaker1: You guys were really curious to hear about how I design my apps and specifically how I make them feel ten times better than the default iOS experience. I get a ton of compliments on my apps saying that they just feel different, a little bit more polished, more fun to use. So today I'm breaking down some of the advanced techniques I use to achieve that. If you're new here, welcome to the channel. My name is Chris and I build productive apps. I already made a video covering the basics of my design process like mood boarding and wire framing, but today we're going to be going a little bit deeper. These are practical things that I'm doing and applying to my own apps to really give them that polished and fun to use feel.\n\n@me: Okay, we'll see about that. How he does that. And now it's over one minute. We're gonna take off our AirPods.\n\n@me: Now it puts you, it records my microphone and\n"
+  },
+  {
     "sessionId": "1756835829527",
     "title": "meeting 2/9/2025",
     "startTime": "2025-09-02T17:57:09.529Z",
