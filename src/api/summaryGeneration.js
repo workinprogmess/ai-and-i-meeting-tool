@@ -739,8 +739,9 @@ Both files:
 TRANSCRIPTION ALGORITHM:
 Step 1: Mentally synchronize both files at their start point (0:00)
 Step 2: Move through both files chronologically in small increments
-Step 3: For each time point, transcribe what you hear from BOTH files
+Step 3: For each time point, transcribe EVERYTHING you hear from BOTH files
 Step 4: Maintain this synchronized progression even if audio quality changes
+Step 5: Do not skip any content, even if audio quality is poor - transcribe what you can hear
 
 THINK OF IT LIKE THIS:
 Imagine two audio players playing simultaneously, both started at the same time.
@@ -748,9 +749,31 @@ As you listen, you write down what you hear from BOTH players at each moment.
 You never skip ahead in one file or reorganize based on audio quality.
 
 OUTPUT FORMAT:
-Simply transcribe the conversation as it naturally flows, alternating between speakers.
-Do not add timestamps or window markers.
-Just write what was said, by whom, in the order it was said.
+- Start EACH speaker's turn on a NEW LINE
+- Begin each line with the speaker label (@me: or @speaker1: etc.)
+- IMPORTANT: Keep each line SHORT - one sentence or thought per line maximum
+- If someone speaks for long, break it into multiple lines with their label repeated
+- When the speaker changes, create a new line
+- Do not add timestamps or window markers
+
+EXAMPLE FORMAT:
+@me: I'm starting the recording now with my AirPods on.
+
+@me: This is a test of the dual audio recording system.
+
+@speaker1: Welcome to today's presentation about design tools.
+
+@speaker1: We'll be covering several important features.
+
+@me: Interesting point they're making about the features.
+
+@me: Let me take off my AirPods now.
+
+@me: Okay, continuing without AirPods.
+
+@speaker1: Let's continue with the demonstration.
+
+CRITICAL: Even if the same person speaks continuously, break their speech into short, readable lines.
 
 HANDLING DEVICE CHANGES:
 The microphone audio may change quality (AirPods on → off) but it's still the same person (@me).
