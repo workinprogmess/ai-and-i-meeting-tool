@@ -400,35 +400,45 @@ const professionalWebM = createMultiTrackWebM(interleavedBuffer);
 - this is what zoom, teams, loom, and every major app uses
 - transcription services are designed for mixed audio + speaker diarization
 
-**implementation plan:**
-1. **switch to mixed audio capture** (0.5 days)
+**implementation plan (file-based approach):**
+1. **switch to mixed audio capture with optimizations** (0.5 days)
    - use native getdisplaymedia for single mixed stream
-   - remove all dual-file capture complexity
-   - single mediarecorder, single file output
+   - implement stream-to-disk for memory efficiency
+   - circular buffer for ui waveform (last 30 seconds only)
+   - error recovery with retry logic
+   - performance monitoring built-in
+   - optimal settings: 48khz mono, 128kbps opus, 2-second chunks
 
 2. **cleanup dual-file code** (1 day)
    - remove audioloopbackrenderer dual-stream logic
+   - remove audioloopbackrendererfixed
    - remove stereo merge attempts
-   - simplify ipc communication
+   - simplify ipc communication to single file
    - clean up file handling
+   - estimated: -500 lines of code
 
 3. **integrate speaker diarization** (1 day)
-   - deepgram with `diarize: true`
-   - gemini with speaker detection
-   - simple "me vs them" labeling post-process
-   - test accuracy across services
+   - deepgram with `diarize: true`, nova-2 model
+   - assemblyai with `speaker_labels: true`
+   - gemini with simplified mixed audio prompt
+   - implement smart speaker identification (main speaker = @me)
+   - compare accuracy across all three services
 
 4. **test with real meetings** (0.5 days)
-   - complex interactions (play, pause, speak)
-   - long recordings (30-60 minutes)
-   - verify temporal alignment perfect
-   - measure transcription accuracy
+   - simple: continuous playback + speaking
+   - complex: play, pause, speak, resume patterns
+   - long recordings: 30-60 minutes memory test
+   - edge cases: silence, overlapping speech
+   - measure: accuracy, memory usage, performance
 
 **expected outcomes:**
-- eliminate all temporal alignment issues
+- eliminate all temporal alignment issues (100% guaranteed)
 - simplify codebase by ~500 lines
 - improve transcription accuracy to 90%+
 - work naturally with all transcription services
+- memory usage <50mb for 60-minute recordings
+- zero memory leaks with proper cleanup
+- resilient to device/permission issues
 
 **learning documented:** see mixed-audio-breakthrough.md
 
