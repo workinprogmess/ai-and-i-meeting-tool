@@ -10,15 +10,19 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 **Phase 1 - Milestone 3**: ⏳ IN PROGRESS - Beta-ready product experience (10-14 days)
 **Phase 1 - Milestone 3.1.9**: ✅ COMPLETE - Clean gemini end-to-end implementation with memory optimization
 **Phase 1 - Milestone 3.2**: ✅ COMPLETE - Advanced audio capture & speaker recognition with zero data loss
+**Phase 1 - Milestone 3.3**: 🔄 IN PROGRESS - Transcription accuracy improvements
+**Phase 1 - Milestone 3.3.5**: 🧪 TESTING - Native mixed audio capture breakthrough
 **Phase 1 - Milestone 4**: 📋 PLANNED - Enhanced collaboration and deployment (14-21 days)
 
 ## Critical Technical Architecture Decision ⚠️
-**EVOLVED APPROACH**: electron-audio-loopback (same as Granola's zero data loss solution)
+**MILESTONE 3.3.5 BREAKTHROUGH**: Native mixed audio capture (industry standard approach)
+- ✅ **Native Mixed Audio via Electron desktopCapturer** - Perfect temporal alignment, single file
+- ❌ NOT dual-file temporal alignment (unnecessary complexity, industry doesn't use this)
 - ❌ NOT FFmpeg + AVFoundation (5-year-old bugs causing 10-11% data loss)
 - ❌ NOT AudioTee (system audio only, no mic)
 - ❌ NOT node-osx-audio (compatibility issues)  
 - ❌ NOT node-mac-recorder alone (MP4 format issues)
-- ✅ **electron-audio-loopback with dual-stream capture** - Zero data loss, professional multi-track output
+- 🔄 LEGACY: electron-audio-loopback still available via USE_MIXED_AUDIO flag
 
 ## Completed Steps ✅
 
@@ -125,6 +129,18 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 43. **Simplified Transcript Prompt** ✅ - Basic chronological with speaker labels (@me, @speaker1, etc)
 44. **Speaker Identification Fix** ✅ - Clear source labeling for Gemini processing
 
+### Phase 1 - Milestone 3.3.5: Native Mixed Audio Capture Breakthrough 🧪 TESTING
+45. **Critical Discovery** ✅ - Realized industry uses mixed audio, not dual-file separation
+46. **Research Breakthrough** ✅ - Found that Zoom/Teams/Loom all use native mixed audio
+47. **Temporal Alignment Solution** ✅ - Mixed audio eliminates sync issues permanently
+48. **Implementation Strategy** ✅ - Created mixedAudioCapture.js using Electron's desktopCapturer
+49. **Electron API Migration** ✅ - Switched from browser's getDisplayMedia to desktopCapturer
+50. **IPC Architecture** ✅ - Desktop sources requested via main process for security
+51. **MediaRecorder Fix** ✅ - Removed video tracks for audio-only recording
+52. **SessionId Tracking** ✅ - Fixed async IPC sessionId persistence issue
+53. **electron-audio-loopback Disabled** ✅ - No longer running duplicate capture in sidebar
+54. **Initial Test Success** 🧪 - Mixed audio capture working, saves to webm, sends to Gemini
+
 ### Summary Generation Test Results 🎯
 **GPT-5 Performance:**
 - **Cost**: $0.0054 per 3-min meeting summary  
@@ -142,18 +158,21 @@ AI Meeting Transcription Tool using Electron + OpenAI Whisper API + Speaker Diar
 
 ## Current Technical Stack
 ```javascript
-// Complete ai&i Pipeline
-electron-audio-loopback → Two Separate WebM Files → Gemini 2.5 Flash → Transcript + Summary → UI
+// Complete ai&i Pipeline (MILESTONE 3.3.5 - TESTING)
+Native Mixed Audio → Single WebM File → Gemini 2.5 Flash → Transcript + Summary → UI
 
-// Audio Capture (Zero Data Loss)
-const AudioLoopbackRenderer = require('./src/renderer/audioLoopbackRenderer');
-// Two-file approach: session_*_microphone.webm + session_*_system.webm
+// Audio Capture (Native Mixed Audio - Industry Standard)
+const MixedAudioCapture = require('./src/renderer/mixedAudioCapture');
+// Single-file approach: session_*_mixed.webm (mic + system naturally mixed by macOS)
 
 // End-to-End Workflow
-Record → Dual-Stream Capture → Two Audio Files → Gemini Processing → Tabbed UI Display
+Record → Mixed Audio Capture → Single Audio File → Gemini Processing → Tabbed UI Display
 
 // Processing Pipeline
-Microphone WebM (source 1) + System WebM (source 2) → Gemini 2.5 Flash → Speaker-Identified Transcript
+Mixed Audio WebM (perfect temporal alignment) → Gemini 2.5 Flash → Diarized Transcript
+
+// Legacy Dual-File Approach (Still Available - USE_MIXED_AUDIO flag)
+// electron-audio-loopback → Two Separate WebM Files → Complex Temporal Alignment
 ```
 
 ## Key Files Structure

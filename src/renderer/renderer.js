@@ -1,48 +1,132 @@
 const { ipcRenderer } = require('electron');
 
-// MILESTONE 3.2: IPC handlers for electron-audio-loopback communication
-ipcRenderer.on('start-audio-loopback-recording', async (event, sessionId) => {
-    console.log('📨 IPC: Received start-audio-loopback-recording request:', sessionId);
+// Send logs to main process for debugging
+const sendLog = (msg) => {
+    console.log(msg);
     try {
-        const result = await window.audioLoopbackRenderer.startRecording(sessionId);
-        ipcRenderer.send('audio-loopback-recording-started', result);
-    } catch (error) {
-        ipcRenderer.send('audio-loopback-recording-started', {
+        ipcRenderer.send('renderer-log', msg);
+    } catch (e) {
+        // Ignore if IPC not ready
+    }
+};
+
+// MILESTONE 3.3.5: Mixed audio capture - the simple solution
+// First check if we have the required APIs
+sendLog('🔍 Checking browser APIs:');
+sendLog(`   - window available: ${typeof window !== 'undefined'}`);
+sendLog(`   - navigator available: ${typeof navigator !== 'undefined'}`);
+sendLog(`   - navigator.mediaDevices available: ${!!(navigator && navigator.mediaDevices)}`);
+sendLog(`   - getDisplayMedia available: ${!!(navigator && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)}`);
+sendLog(`   - __dirname: ${__dirname}`);
+sendLog(`   - process.cwd(): ${process.cwd()}`);
+
+// Load mixed audio capture directly in the renderer process
+try {
+    sendLog('📁 Loading mixed audio capture module...');
+    // Use absolute path from __dirname
+    const path = require('path');
+    const modulePath = path.join(__dirname, 'mixedAudioCapture.js');
+    sendLog(`   - Module path: ${modulePath}`);
+    const MixedAudioCapture = require(modulePath);
+    
+    // Create instance if not already created by the module
+    if (!window.mixedAudioCapture) {
+        sendLog('📦 Creating MixedAudioCapture instance from imported class...');
+        window.mixedAudioCapture = new MixedAudioCapture();
+    }
+    
+    sendLog(`✅ Mixed audio capture loaded, checking availability: ${!!window.mixedAudioCapture}`);
+} catch (error) {
+    sendLog(`❌ Failed to load mixed audio capture: ${error.message}`);
+    sendLog(`Stack trace: ${error.stack}`);
+}
+ipcRenderer.on('start-mixed-audio-recording', async (event, sessionId) => {
+    console.log('📨 IPC: Received start-mixed-audio-recording request:', sessionId);
+    
+    // Send console logs to main process for debugging
+    const sendLog = (msg) => {
+        console.log(msg);
+        ipcRenderer.send('renderer-log', msg);
+    };
+    
+    sendLog('🔍 Checking window.mixedAudioCapture...');
+    sendLog(`   - typeof window.mixedAudioCapture: ${typeof window.mixedAudioCapture}`);
+    sendLog(`   - window.mixedAudioCapture exists: ${!!window.mixedAudioCapture}`);
+    
+    // Check if mixed audio capture is available
+    if (!window.mixedAudioCapture) {
+        sendLog('❌ window.mixedAudioCapture is not available');
+        sendLog(`   - Checking global scope...`);
+        sendLog(`   - global.mixedAudioCapture: ${typeof global.mixedAudioCapture}`);
+        sendLog(`   - this.mixedAudioCapture: ${typeof this.mixedAudioCapture}`);
+        ipcRenderer.send('mixed-audio-recording-started', {
             success: false,
-            error: error.message
+            error: 'Mixed audio capture not initialized'
+        });
+        return;
+    }
+    
+    sendLog('✅ window.mixedAudioCapture is available, attempting to start recording...');
+    
+    // Capture console logs from mixed audio module
+    const originalLog = console.log;
+    const originalError = console.error;
+    
+    // Temporarily override console to capture module logs
+    console.log = (...args) => {
+        originalLog(...args);
+        // Use IPC directly to avoid recursion
+        try {
+            ipcRenderer.send('renderer-log', '   [Module] ' + args.join(' '));
+        } catch (e) {
+            // Ignore
+        }
+    };
+    console.error = (...args) => {
+        originalError(...args);
+        // Use IPC directly to avoid recursion
+        try {
+            ipcRenderer.send('renderer-log', '   [Module Error] ' + args.join(' '));
+        } catch (e) {
+            // Ignore
+        }
+    };
+    
+    try {
+        const result = await window.mixedAudioCapture.startRecording(sessionId);
+        // Restore console
+        console.log = originalLog;
+        console.error = originalError;
+        ipcRenderer.send('mixed-audio-recording-started', result);
+    } catch (error) {
+        // Restore console
+        console.log = originalLog;
+        console.error = originalError;
+        sendLog(`❌ Mixed audio recording failed: ${error.message}`);
+        sendLog(`   Stack: ${error.stack}`);
+        ipcRenderer.send('mixed-audio-recording-started', {
+            success: false,
+            error: error.message || 'Not supported'
         });
     }
 });
 
-ipcRenderer.on('stop-audio-loopback-recording', async (event) => {
-    console.log('📨 IPC: Received stop-audio-loopback-recording request');
+ipcRenderer.on('stop-mixed-audio-recording', async (event) => {
+    console.log('📨 IPC: Received stop-mixed-audio-recording request');
     try {
-        const result = await window.audioLoopbackRenderer.stopRecording();
+        const result = await window.mixedAudioCapture.stopRecording();
         
-        // Handle stereo blob if present (highest priority - perfect alignment!)
-        if (result.stereoBlob) {
-            console.log('🎯 Processing stereo-merged audio for IPC transfer...');
-            const buffer = Buffer.from(await result.stereoBlob.arrayBuffer());
-            result.stereoBuffer = buffer;
-            delete result.stereoBlob; // Remove blob (can't serialize over IPC)
+        // Handle the single mixed audio file
+        if (result.audioBlob) {
+            console.log('🎯 Processing mixed audio for IPC transfer...');
+            const buffer = Buffer.from(await result.audioBlob.arrayBuffer());
+            result.audioBuffer = buffer;
+            delete result.audioBlob; // Remove blob (can't serialize over IPC)
         }
         
-        // Handle separate audio blobs for fallback dual-file approach
-        if (result.microphoneBlob) {
-            const buffer = Buffer.from(await result.microphoneBlob.arrayBuffer());
-            result.microphoneBuffer = buffer;
-            delete result.microphoneBlob; // Remove blob (can't serialize over IPC)
-        }
-        
-        if (result.systemAudioBlob) {
-            const buffer = Buffer.from(await result.systemAudioBlob.arrayBuffer());
-            result.systemAudioBuffer = buffer;
-            delete result.systemAudioBlob; // Remove blob (can't serialize over IPC)
-        }
-        
-        ipcRenderer.send('audio-loopback-recording-stopped', result);
+        ipcRenderer.send('mixed-audio-recording-stopped', result);
     } catch (error) {
-        ipcRenderer.send('audio-loopback-recording-stopped', {
+        ipcRenderer.send('mixed-audio-recording-stopped', {
             success: false,
             error: error.message
         });

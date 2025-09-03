@@ -1,0 +1,39 @@
+{
+  "provider": "gemini-2.5-flash-end-to-end",
+  "fullOutput": "@me: Testing, one, two, three.\n@me: Is this thing on?\n@me: Can you hear me?\n@me: Okay, I think it's working.\n@me: Let's see how this goes.\n@me:  This is a test of the dual audio recording.\n@me:  I'm using AirPods right now.\n@me:  I'm going to take them off in a second.\n@me:  Okay, AirPods off.\n@me:  How's the audio quality now?\n@me:  Hopefully it's still good.\n@me:  This is a longer sentence to test the transcription.\n@me:  Let's see if it can handle pauses and interruptions.\n@me:  Um,  just testing some filler words.\n@me:  And some more speech.\n@me:  This is the end of the test.\n",
+  "transcript": "@me: Testing, one, two, three.\n@me: Is this thing on?\n@me: Can you hear me?\n@me: Okay, I think it's working.\n@me: Let's see how this goes.\n@me:  This is a test of the dual audio recording.\n@me:  I'm using AirPods right now.\n@me:  I'm going to take them off in a second.\n@me:  Okay, AirPods off.\n@me:  How's the audio quality now?\n@me:  Hopefully it's still good.\n@me:  This is a longer sentence to test the transcription.\n@me:  Let's see if it can handle pauses and interruptions.\n@me:  Um,  just testing some filler words.\n@me:  And some more speech.\n@me:  This is the end of the test.\n",
+  "summary": "transcript-only mode (no summary requested)",
+  "speakerAnalysis": "integrated into transcript",
+  "emotionalDynamics": "natural conversation flow",
+  "cost": {
+    "inputTokens": 1014,
+    "outputTokens": 147,
+    "inputCost": 0.0012675,
+    "outputCost": 0.00147,
+    "totalCost": 0.0027375
+  },
+  "processingTime": 2899,
+  "tokenUsage": {
+    "promptTokenCount": 1231,
+    "candidatesTokenCount": 204,
+    "totalTokenCount": 1435,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 1006
+      },
+      {
+        "modality": "AUDIO",
+        "tokenCount": 225
+      }
+    ],
+    "candidatesTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 204
+      }
+    ]
+  },
+  "timestamp": 1756911065529,
+  "audioFilePath": "/Users/workinprogmess/ai-and-i/audio-temp/session_null_mixed.webm"
+}

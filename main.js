@@ -9,10 +9,12 @@ const AudioCaptureLoopback = require('./src/audio/audioCaptureLoopback');
 const SummaryGeneration = require('./src/api/summaryGeneration');
 const RecordingsDB = require('./src/storage/recordingsDB');
 
-// Initialize electron-audio-loopback in main process
-console.log('🔧 Initializing electron-audio-loopback...');
-initMain();
-console.log('✅ electron-audio-loopback initialized');
+// Initialize electron-audio-loopback in main process (disabled for mixed audio)
+// Commenting out since we're using mixed audio capture now
+// console.log('🔧 Initializing electron-audio-loopback...');
+// initMain();
+// console.log('✅ electron-audio-loopback initialized');
+console.log('🎯 Using mixed audio capture - electron-audio-loopback disabled');
 
 let mainWindow;
 let tray = null;
@@ -20,9 +22,10 @@ let isRecording = false;
 let audioCapture = null;
 let summaryGeneration = null;
 let recordingsDB = null;
+let currentSessionId = null; // Track the current recording session ID
 
-// MILESTONE 3.2: Audio capture method selection
-const USE_ELECTRON_AUDIO_LOOPBACK = true; // Set to false to use old FFmpeg method
+// MILESTONE 3.3.5: Mixed audio capture - the simple solution
+const USE_MIXED_AUDIO = true; // Native mixed audio capture (the industry standard)
 
 // auto-updater configuration
 autoUpdater.checkForUpdatesAndNotify = false; // we'll handle this manually
@@ -108,7 +111,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      enableRemoteModule: true
+      enableRemoteModule: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false
     },
     titleBarStyle: 'hiddenInset',
     show: true,
@@ -333,6 +338,7 @@ function startRecordingSession(sessionId) {
 function stopRecordingSession() {
   console.log('⏹️  Recording session stopped');
   // Clean stop without transcription cleanup
+  currentSessionId = null; // Reset session ID
 }
 
 // Gemini end-to-end processing (replaces whisper → gemini pipeline)
@@ -430,78 +436,49 @@ async function startAudioCaptureHandler(data) {
   try {
     if (!audioCapture) {
       // MILESTONE 3.2: Choose audio capture method
-      if (USE_ELECTRON_AUDIO_LOOPBACK) {
-        console.log('🎯 Using new electron-audio-loopback via renderer process (zero data loss + speaker recognition)');
-        // Use renderer-based audio capture via IPC
+      if (USE_MIXED_AUDIO) {
+        console.log('🎯 Using mixed audio capture - the simple solution');
+        // Use mixed audio capture via IPC
         audioCapture = {
           async startRecording(sessionId) {
             return new Promise((resolve) => {
-              console.log('📤 Main: Sending start-audio-loopback-recording to renderer:', sessionId);
-              mainWindow.webContents.send('start-audio-loopback-recording', sessionId);
-              ipcMain.once('audio-loopback-recording-started', (event, result) => {
-                console.log('📥 Main: Received audio-loopback-recording-started:', result.success, result.streamType || result.error);
+              console.log('📤 Main: Sending start-mixed-audio-recording to renderer:', sessionId);
+              mainWindow.webContents.send('start-mixed-audio-recording', sessionId);
+              ipcMain.once('mixed-audio-recording-started', (event, result) => {
+                console.log('📥 Main: Received mixed-audio-recording-started:', result.success, result.streamType || result.error);
                 resolve(result);
               });
             });
           },
           async stopRecording() {
             return new Promise(async (resolve) => {
-              console.log('📤 Main: Sending stop-audio-loopback-recording to renderer');
-              mainWindow.webContents.send('stop-audio-loopback-recording');
-              ipcMain.once('audio-loopback-recording-stopped', async (event, result) => {
-                console.log('📥 Main: Received audio-loopback-recording-stopped:', result.success, result.streamType || result.error);
+              console.log('📤 Main: Sending stop-mixed-audio-recording to renderer');
+              mainWindow.webContents.send('stop-mixed-audio-recording');
+              ipcMain.once('mixed-audio-recording-stopped', async (event, result) => {
+                console.log('📥 Main: Received mixed-audio-recording-stopped:', result.success, result.streamType || result.error);
                 
-                // Save audio files based on stream type
+                // Save the single mixed audio file
                 if (result.success) {
                   try {
                     const audioTempDir = path.join(process.cwd(), 'audio-temp');
                     await fs.promises.mkdir(audioTempDir, { recursive: true });
                     
-                    // HIGHEST PRIORITY: Save stereo-merged file if available
-                    if (result.stereoBuffer) {
-                      const stereoFilePath = path.join(audioTempDir, `session_${result.sessionId}_stereo.webm`);
-                      await fs.promises.writeFile(stereoFilePath, result.stereoBuffer);
-                      result.stereoFilePath = stereoFilePath;
-                      console.log(`🎯 STEREO audio saved: ${stereoFilePath} (${(result.stereoBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-                      console.log(`✅ Perfect temporal alignment achieved - left=mic, right=system`);
-                      delete result.stereoBuffer;
+                    // Use stored sessionId if not in result
+                    if (!result.sessionId && currentSessionId) {
+                      result.sessionId = currentSessionId;
                     }
                     
-                    // Fallback: Save separate files if no stereo merge
-                    if (!result.stereoFilePath) {
-                      // Save microphone audio file
-                      if (result.microphoneBuffer) {
-                        const micFilePath = path.join(audioTempDir, `session_${result.sessionId}_microphone.webm`);
-                        await fs.promises.writeFile(micFilePath, result.microphoneBuffer);
-                        result.microphoneFilePath = micFilePath;
-                        console.log(`🎤 Microphone audio saved: ${micFilePath} (${(result.microphoneBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-                        delete result.microphoneBuffer;
-                      }
-                      
-                      // Save system audio file
-                      if (result.systemAudioBuffer) {
-                        const systemFilePath = path.join(audioTempDir, `session_${result.sessionId}_system.webm`);
-                        await fs.promises.writeFile(systemFilePath, result.systemAudioBuffer);
-                        result.systemAudioFilePath = systemFilePath;
-                        console.log(`🔊 System audio saved: ${systemFilePath} (${(result.systemAudioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-                        delete result.systemAudioBuffer;
-                      }
+                    // Save the mixed audio file
+                    if (result.audioBuffer) {
+                      const audioFilePath = path.join(audioTempDir, `session_${result.sessionId}_mixed.webm`);
+                      await fs.promises.writeFile(audioFilePath, result.audioBuffer);
+                      result.audioFilePath = audioFilePath;
+                      console.log(`🎯 Mixed audio saved: ${audioFilePath} (${(result.audioBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                      console.log(`✅ Native mixed audio - perfect temporal alignment guaranteed`);
+                      console.log(`   • Duration: ${result.duration}s`);
+                      console.log(`   • Contains: microphone + system audio naturally mixed`);
+                      delete result.audioBuffer;
                     }
-                    
-                    // Log summary based on stream type
-                    if (result.streamType === 'stereo-merged') {
-                      console.log(`✅ Stereo-merged approach: Single file with perfect channel alignment`);
-                      console.log(`   • Duration: ${result.totalDuration}s`);
-                      console.log(`   • Left channel: microphone, Right channel: system audio`);
-                    } else if (result.streamType === 'dual-file') {
-                      console.log(`✅ Two-file approach: Saved both microphone and system audio separately`);
-                      console.log(`   • Duration: ${result.totalDuration}s`);
-                      console.log(`   • Files will be sent to Gemini for proper speaker identification`);
-                    }
-                    
-                    // Set primary audio file path for backward compatibility
-                    result.audioFilePath = result.stereoFilePath || result.microphoneFilePath || result.systemAudioFilePath;
-                    result.duration = result.totalDuration;
                     
                   } catch (error) {
                     console.error('❌ Failed to save audio file(s):', error.message);
@@ -543,6 +520,7 @@ async function startAudioCaptureHandler(data) {
     }
 
     const sessionId = data?.sessionId || Date.now();
+    currentSessionId = sessionId; // Store for later use when stopping
     
     // Create meeting entry in sidebar IMMEDIATELY - before recording starts
     if (recordingsDB) {
@@ -579,7 +557,7 @@ async function startAudioCaptureHandler(data) {
       startRecordingSession(sessionId);
     } else {
       // Recording failed - remove the sidebar entry
-      if (recordingsDB) {
+      if (recordingsDB && recordingsDB.deleteRecording) {
         recordingsDB.deleteRecording(sessionId);
         mainWindow.webContents.send('meeting-cancelled', { sessionId });
       }
@@ -718,6 +696,27 @@ function stopRecording() {
 
 // initialize services (lazy loading to avoid startup errors)
 function initializeServices() {
+  // Add global handler for renderer debug logs (register early)
+  ipcMain.on('renderer-log', (event, msg) => {
+    console.log('📋 Renderer:', msg);
+  });
+  
+  // Add handler for desktop capturer sources (for mixed audio)
+  ipcMain.on('get-desktop-sources', async (event) => {
+    try {
+      console.log('📺 Main: Getting desktop sources for mixed audio...');
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        fetchWindowIcons: false
+      });
+      console.log(`📺 Main: Found ${sources.length} screen source(s)`);
+      event.reply('desktop-sources-response', sources);
+    } catch (error) {
+      console.error('❌ Main: Failed to get desktop sources:', error);
+      event.reply('desktop-sources-response', { error: error.message });
+    }
+  });
+  
   try {
     recordingsDB = new RecordingsDB();
     console.log(`✅ services ready (${recordingsDB.getAllRecordings().length} recordings loaded)`);
