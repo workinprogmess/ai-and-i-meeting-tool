@@ -736,6 +736,13 @@ THESE FILES OVERLAP IN TIME - they are NOT sequential!
 - When transcribing, merge the content based on conversational flow
 - The microphone may have speech while system audio is playing (and vice versa)
 
+IMPORTANT: IGNORE AUDIO QUALITY CHANGES
+- The microphone audio may change quality mid-recording (AirPods removed, device switch)
+- DO NOT reorganize content based on audio quality or device characteristics
+- DO NOT group "similar quality" segments together
+- MAINTAIN STRICT CHRONOLOGICAL ORDER regardless of audio quality changes
+- If mic quality changes at minute 2, that content still belongs at minute 2, not at the end
+
 CONVERSATION FLOW APPROACH:
 i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
 - MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the meeting/test

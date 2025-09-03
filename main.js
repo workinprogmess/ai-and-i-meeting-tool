@@ -543,6 +543,21 @@ async function startAudioCaptureHandler(data) {
     }
 
     const sessionId = data?.sessionId || Date.now();
+    
+    // Create meeting entry in sidebar IMMEDIATELY - before recording starts
+    if (recordingsDB) {
+      const meetingData = {
+        sessionId,
+        title: 'new meeting',
+        startTime: data?.timestamp || new Date().toISOString(),
+        status: 'recording'
+      };
+      recordingsDB.addRecording(meetingData);
+      
+      // Notify UI to show new meeting in sidebar NOW
+      mainWindow.webContents.send('meeting-started', meetingData);
+    }
+    
     const result = await audioCapture.startRecording(sessionId);
     
     if (result.success) {
@@ -562,19 +577,11 @@ async function startAudioCaptureHandler(data) {
       
       // Clean recording - no real-time transcription
       startRecordingSession(sessionId);
-      
-      // Create meeting entry in sidebar immediately
+    } else {
+      // Recording failed - remove the sidebar entry
       if (recordingsDB) {
-        const meetingData = {
-          sessionId,
-          title: 'new meeting',
-          startTime: data?.timestamp || new Date().toISOString(),
-          status: 'recording'
-        };
-        recordingsDB.addRecording(meetingData);
-        
-        // Notify UI to show new meeting in sidebar
-        mainWindow.webContents.send('meeting-started', meetingData);
+        recordingsDB.deleteRecording(sessionId);
+        mainWindow.webContents.send('meeting-cancelled', { sessionId });
       }
     }
     
