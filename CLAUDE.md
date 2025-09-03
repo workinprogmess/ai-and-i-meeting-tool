@@ -29,14 +29,31 @@
 - **save research**: document findings and analysis as .md files for future reference
 
 ## development priorities
-1. **user experience first**: always consider impact on user workflow
-2. **differentiation over commodity**: prioritize competitive advantage features before infrastructure
-3. **foundation first**: ensure core functionality is solid before building advanced features
-4. **reliability over features**: ensure existing functionality is rock-solid before adding new features
-5. **security by design**: address electron security model, api key protection, data encryption (balanced with timeline)
-6. **memory efficiency**: be mindful of resource usage, especially for long recordings
-7. **clean architecture**: prefer simple, maintainable solutions over complex ones
-8. **quality over speed**: build a quality product - test extensively, handle edge cases
+1. **understand deeply before implementing**: research industry standards, question assumptions, explore all approaches
+2. **user experience first**: always consider impact on user workflow
+3. **differentiation over commodity**: prioritize competitive advantage features before infrastructure
+4. **foundation first**: ensure core functionality is solid before building advanced features
+5. **reliability over features**: ensure existing functionality is rock-solid before adding new features
+6. **security by design**: address electron security model, api key protection, data encryption (balanced with timeline)
+7. **memory efficiency**: be mindful of resource usage, especially for long recordings
+8. **clean architecture**: prefer simple, maintainable solutions over complex ones
+9. **quality over speed**: build a quality product - test extensively, handle edge cases
+
+## critical lesson: work with tools, not against them
+**the mixed audio breakthrough (2025-09-03)**: after a week of fighting temporal alignment issues with dual-file audio, we discovered that native mixed audio is what the entire industry uses. this taught us:
+
+- **always research first**: ask "how does zoom/teams/loom do this?" before implementing
+- **question when things feel complex**: if you're fighting tools at every step, you're probably solving the wrong problem
+- **understand what services expect**: transcription apis are designed for mixed audio with diarization, not separate files
+- **simplest solution often best**: macos naturally mixes audio perfectly - we don't need to engineer a solution
+
+**key questions to ask before implementing:**
+1. what's the industry standard approach?
+2. what do the tools/apis expect as input?
+3. are we creating unnecessary complexity?
+4. is there a native solution we're overlooking?
+
+if the implementation feels like you're fighting the system, step back and question fundamentals.
 
 ## testing standards
 - **extensive parallel testing**: user tests foundation while development focuses on differentiation
