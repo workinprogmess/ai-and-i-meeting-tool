@@ -1193,7 +1193,16 @@ result: overlapping audio becomes unintelligible to ai
 
 **critical pivot (2025-09-03)**: discovered that native mixed audio capture solves all temporal alignment issues. dual-file approach was fundamentally flawed. comprehensive research led to programmatic aggregate devices as the optimal solution. see `programmatic-aggregate-mixed-audio-research-breakthrough.md` for detailed analysis.
 
-**next milestone**: implement programmatic aggregate devices using macos core audio apis for hardware-level mixed audio capture.
+**next milestone**: implement programmatic aggregate devices using macos core audio apis for hardware-level mixed audio capture. comprehensive implementation plan documented in `programmatic-aggregate-devices-implementation-plan.md`.
+
+**implementation approach**: thorough, incremental development with validation at each step (10-12 days total)
+- **phase 3.3.5(a)**: core audio foundation - validate apis, build proof-of-concept (4-5 days)
+- **phase 3.3.5(b)**: electron bridge architecture - reliable swift-electron communication (3-4 days)  
+- **phase 3.3.5(c)**: audio capture integration - replace existing mixed audio capture (2-3 days)
+- **phase 3.3.5(d)**: user experience polish - seamless operation, error handling (2-3 days)
+- **phase 3.3.5(e)**: comprehensive testing and validation across all scenarios (2-3 days)
+
+**philosophy**: research and validate each assumption before implementation, provide fallback strategies for all failure modes.
 
 ---
 
