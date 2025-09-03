@@ -374,6 +374,6 @@ class AudioLoopbackRendererFixed {
     }
 }
 
-// Make available globally
-window.audioLoopbackRendererFixed = new AudioLoopbackRendererFixed();
+// Make available globally with expected name
+window.audioLoopbackRenderer = new AudioLoopbackRendererFixed();
 console.log('🚀 Fixed audio renderer ready');

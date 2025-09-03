@@ -650,7 +650,7 @@ QUALITY NOTES:
                     console.log(`🎤 loading microphone audio: ${audioFilePath}`);
                     const micBuffer = await fs.readFile(audioFilePath);
                     audioInputs.push({
-                        text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test, speaking directly into microphone with AirPods. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
+                        text: "MICROPHONE AUDIO (primary speaker = @me): this is the person conducting the test. ALL speech in this file is from the same person (@me), whether using AirPods or built-in microphone. Even if the audio quality changes mid-recording (device switch), it's still @me. THIS VOICE SHOULD ALWAYS BE LABELED @me, never @speaker1 or @speaker2."
                     });
                     audioInputs.push({
                         inlineData: {
@@ -724,6 +724,17 @@ format example:
 
 transcribe the complete conversation from start to finish.` :
             `transcribe this audio recording completely, capturing every word spoken.
+
+CRITICAL: DUAL-FILE TEMPORAL ALIGNMENT
+you are receiving TWO SEPARATE audio files that were recorded SIMULTANEOUSLY:
+1. MICROPHONE AUDIO: continuous recording from the user's microphone
+2. SYSTEM AUDIO: continuous recording from system speakers (videos, calls)
+
+THESE FILES OVERLAP IN TIME - they are NOT sequential!
+- Both files start at time 00:00 and run concurrently
+- You must mentally align them chronologically, not process them sequentially
+- When transcribing, merge the content based on conversational flow
+- The microphone may have speech while system audio is playing (and vice versa)
 
 CONVERSATION FLOW APPROACH:
 i'm providing ${audioInputs.length / 2} audio file(s) that contain a natural conversation:
