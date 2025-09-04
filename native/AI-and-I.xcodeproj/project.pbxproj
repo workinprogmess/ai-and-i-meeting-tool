@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 70;
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -34,17 +34,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		A1234567890ABCDEF019 /* AI-and-I.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AI-and-I.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1234567890ABCDEF002 /* AI_and_IApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_IApp.swift; sourceTree = "<group>"; };
 		A1234567890ABCDEF004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1234567890ABCDEF006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1234567890ABCDEF008 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		A1234567890ABCDEF020 /* AI-and-I.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AI-and-I.entitlements"; sourceTree = "<group>"; };
-		A1234567890ABCDEF021 /* AI-and-ITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AI-and-ITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1234567890ABCDEF010 /* AI_and_ITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_ITests.swift; sourceTree = "<group>"; };
-		A1234567890ABCDEF022 /* AI-and-IUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AI-and-IUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1234567890ABCDEF012 /* AI_and_IUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_IUITests.swift; sourceTree = "<group>"; };
 		A1234567890ABCDEF014 /* AI_and_IUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_IUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		A1234567890ABCDEF019 /* AI-and-I.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AI-and-I.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1234567890ABCDEF020 /* AI-and-I.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AI-and-I.entitlements"; sourceTree = "<group>"; };
+		A1234567890ABCDEF021 /* AI-and-ITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AI-and-ITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1234567890ABCDEF022 /* AI-and-IUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AI-and-IUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,14 +94,6 @@
 			path = "AI-and-I";
 			sourceTree = "<group>";
 		};
-		A1234567890ABCDEF031 /* Preview Content */ = {
-			isa = PBXGroup;
-			children = (
-				A1234567890ABCDEF008 /* Preview Assets.xcassets */,
-			);
-			path = "Preview Content";
-			sourceTree = "<group>";
-		};
 		A1234567890ABCDEF028 /* AI-and-ITests */ = {
 			isa = PBXGroup;
 			children = (
@@ -127,6 +119,14 @@
 				A1234567890ABCDEF022 /* AI-and-IUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A1234567890ABCDEF031 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				A1234567890ABCDEF008 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -427,6 +427,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"AI-and-I/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "ai&i";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs microphone access to record and transcribe meetings.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -453,6 +454,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"AI-and-I/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "ai&i";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs microphone access to record and transcribe meetings.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -538,15 +540,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1234567890ABCDEF045 /* Build configuration list for PBXProject "AI-and-I" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A1234567890ABCDEF046 /* Debug */,
-				A1234567890ABCDEF047 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		A1234567890ABCDEF032 /* Build configuration list for PBXNativeTarget "AI-and-I" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -570,6 +563,15 @@
 			buildConfigurations = (
 				A1234567890ABCDEF052 /* Debug */,
 				A1234567890ABCDEF053 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1234567890ABCDEF045 /* Build configuration list for PBXProject "AI-and-I" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1234567890ABCDEF046 /* Debug */,
+				A1234567890ABCDEF047 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
