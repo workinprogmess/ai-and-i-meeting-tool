@@ -1,0 +1,11 @@
+version: 0.3.2
+files:
+  - url: ai-and-i-0.3.2-arm64-mac.zip
+    sha512: Ih2GUEG8eMDWRYX6fyArAXpd+EWfJQZOGJcyaxeolpt08Npm+RtLNC6INbOqBf6s+jz8Sxpe4nOhJikV3w8ZDw==
+    size: 108239104
+  - url: ai-and-i-0.3.2-arm64.dmg
+    sha512: QoswlCCKmjj9Y2hNTW0y96Ojyh6FT11grWNEO4nBPfR+bYb7WnDiDAR1CmazI1Zj+tQ6f3UBZQdB+jkTKKBnog==
+    size: 112043821
+path: ai-and-i-0.3.2-arm64-mac.zip
+sha512: Ih2GUEG8eMDWRYX6fyArAXpd+EWfJQZOGJcyaxeolpt08Npm+RtLNC6INbOqBf6s+jz8Sxpe4nOhJikV3w8ZDw==
+releaseDate: '2025-08-28T17:44:00.000Z'

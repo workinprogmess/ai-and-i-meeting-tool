@@ -1,0 +1,39 @@
+{
+  "provider": "gemini-2.5-flash-end-to-end",
+  "fullOutput": "I cannot transcribe the audio because I do not have access to external files or audio input.  Please provide the audio recording's text content.\n",
+  "transcript": "enhanced transcript parsing failed",
+  "summary": "enhanced summary parsing failed",
+  "speakerAnalysis": "integrated into summary",
+  "emotionalDynamics": "integrated into summary",
+  "cost": {
+    "inputTokens": 187,
+    "outputTokens": 37,
+    "inputCost": 0.00023375,
+    "outputCost": 0.00037,
+    "totalCost": 0.00060375
+  },
+  "processingTime": 3347,
+  "tokenUsage": {
+    "promptTokenCount": 10781,
+    "candidatesTokenCount": 31,
+    "totalTokenCount": 10812,
+    "promptTokensDetails": [
+      {
+        "modality": "AUDIO",
+        "tokenCount": 10550
+      },
+      {
+        "modality": "TEXT",
+        "tokenCount": 231
+      }
+    ],
+    "candidatesTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 31
+      }
+    ]
+  },
+  "timestamp": 1756919408372,
+  "audioFilePath": "/Users/workinprogmess/ai-and-i/audio-temp/session_1756919356271_mixed.webm"
+}
