@@ -8,14 +8,45 @@ ai meeting intelligence - native swiftui application for world-class user experi
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
-- ⏳ core audio mixed device creation (hardware-level audio capture)
+- 🔄 core audio mixed device creation (hardware-level audio capture)
 - 📋 basic recording functionality testing
 
-## upcoming native milestones
-- **milestone 1 (0.1.0)**: core foundation - xcode project, basic ui, core audio setup
-- **milestone 2 (0.2.0)**: advanced audio - programmatic aggregate devices, mixed capture
-- **milestone 3 (0.3.0)**: ai integration - whisper, gemini, real-time processing  
-- **milestone 4 (1.0.0)**: production release - polish, optimization, distribution
+## native implementation milestones
+based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
+
+### milestone 1: core foundation (0.1.0) - current
+**goal**: basic app structure with working core audio mixed capture
+- swiftui app scaffold with proper macos integration
+- core audio mixed device creation (microphone + system audio)
+- basic recording start/stop functionality
+- single mixed audio file output (.wav format)
+- native permissions handling (microphone + system audio recording)
+
+### milestone 2: transcription integration (0.2.0)
+**goal**: full transcription pipeline from audio to text  
+- gemini 2.5 flash api integration (reuse electron patterns)
+- audio file processing and upload
+- transcript parsing and display
+- basic error handling and retry logic
+- cost tracking and display
+
+### milestone 3: user interface excellence (0.3.0)
+**goal**: professional native mac ui with superior user experience
+- sidebar with recordings list (chronological, searchable)
+- main view with recording controls and status
+- tabbed transcript/summary display
+- native menu bar integration
+- settings preferences pane
+- keyboard shortcuts and accessibility
+
+### milestone 4: polish and reliability (0.4.0 → 1.0.0)
+**goal**: production-ready app with professional reliability
+- comprehensive error recovery and user messaging
+- background processing for long transcriptions
+- export functionality (markdown, pdf, txt)
+- automatic updates checking
+- crash reporting and analytics integration
+- performance optimization and memory profiling
 
 ## technical architecture
 **native macos approach**: 
