@@ -29,7 +29,7 @@ class PerformanceMonitor: ObservableObject {
     // MARK: - Initialization
     init() {
         startMemoryMonitoring()
-        recordAppLaunch()
+        // don't record app launch here - wait for UI ready signal
     }
     
     deinit {
@@ -66,6 +66,14 @@ extension PerformanceMonitor {
     
     /// Records a measurement and updates published properties
     private func recordMeasurement(_ operation: String, _ duration: TimeInterval) {
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async { [weak self] in
+            self?.updatePublishedProperties(operation, duration)
+        }
+    }
+    
+    /// Updates published properties on main thread
+    private func updatePublishedProperties(_ operation: String, _ duration: TimeInterval) {
         // Store in history
         if measurements[operation] == nil {
             measurements[operation] = []
@@ -114,6 +122,17 @@ extension PerformanceMonitor {
     func recordAppLaunch() {
         // calculate precise time from app start to ui ready
         let launchTime = (CFAbsoluteTimeGetCurrent() - appStartTime) * 1000 // convert to milliseconds
+        
+        // update on main thread immediately for UI
+        DispatchQueue.main.async { [weak self] in
+            self?.appLaunchTime = launchTime
+            self?.recentLaunchTimes.append(launchTime)
+            if self?.recentLaunchTimes.count ?? 0 > self?.maxHistoryCount ?? 10 {
+                self?.recentLaunchTimes.removeFirst()
+            }
+        }
+        
+        // also record through normal measurement flow
         recordMeasurement("app_launch", launchTime)
         print("📱 app launch measured: \(String(format: "%.1f", launchTime))ms")
     }

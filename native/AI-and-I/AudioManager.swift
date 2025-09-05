@@ -56,28 +56,54 @@ class AudioManager: NSObject, ObservableObject {
         self.performanceMonitor = monitor
     }
     
-    /// prepares basic hot-standby architecture (phase 1: state management only)
+    /// prepares hot-standby architecture - NO audio operations during init
     private func prepareBasicHotStandby() {
-        print("🔥 preparing phase 1 hot-standby architecture...")
+        print("🔥 preparing hot-standby architecture - no audio operations during init")
         
-        // phase 1: no audio operations - just mark as configured for ui state
+        // just mark as configured for ui state - no audio operations
         standbyConfigured = true
         
-        print("✅ phase 1 hot-standby architecture prepared - state management ready")
+        print("✅ hot-standby architecture prepared - audio operations deferred until user action")
     }
     
-    /// phase 1: no permission requests - reserved for phase 2
+    /// requests audio permissions on background thread to avoid main thread blocking
     private func requestBasicAudioPermissions() async {
-        print("🔑 phase 1: audio permission requests deferred to phase 2")
-        // phase 1: simulate permissions granted for ui testing
-        isPermissionGranted = true
+        print("🔑 requesting audio permissions on background thread...")
+        
+        return await withCheckedContinuation { continuation in
+            // move permission request to background thread
+            Task.detached {
+                let granted = await withCheckedContinuation { permissionContinuation in
+                    DispatchQueue.main.async {
+                        AVAudioApplication.requestRecordPermission { granted in
+                            permissionContinuation.resume(returning: granted)
+                        }
+                    }
+                }
+                
+                // update state on main thread
+                await MainActor.run {
+                    self.isPermissionGranted = granted
+                    if granted {
+                        print("🔓 audio permissions granted")
+                    } else {
+                        print("❌ audio permissions denied")
+                    }
+                }
+                
+                continuation.resume()
+            }
+        }
     }
     
-    /// phase 1: no audio engine setup - reserved for phase 2
+    /// phase 1: no audio engine setup to avoid any hanging issues
     private func setupBasicAudioEngine() {
-        print("🎚️ phase 1: audio engine setup deferred to phase 2")
-        // phase 1: no actual audio operations
-        // phase 2 will implement real audio engine setup
+        print("🎚️ phase 1: audio engine setup completely deferred to phase 2")
+        
+        // phase 1: mark as ready without actual engine creation
+        isEngineReady = true
+        
+        print("🎚️ phase 1: simulated engine ready for ui testing")
     }
 }
 
@@ -181,27 +207,78 @@ extension AudioManager {
         }
         
         // measure recording start latency with performance monitor
-        performanceMonitor?.measureOperation("recording_start") { [weak self] in
-            print("📊 measuring recording start...")
-            
-            // request permissions and start recording flow
-            Task { @MainActor in
+        Task { @MainActor in
+            await performanceMonitor?.measureAsyncOperation("recording_start") { [weak self] in
+                print("📊 measuring recording start...")
                 await self?.ensureAudioPermissionsAndStartRecording()
             }
         }
     }
     
-    /// phase 1: simple state-only recording start (no audio operations)
+    /// user-initiated permission and recording flow
     private func ensureAudioPermissionsAndStartRecording() async {
-        print("🎤 phase 1: starting state-only recording...")
+        print("🎤 user initiated recording - checking audio system readiness...")
         
-        // phase 1: just manage ui state without any audio operations
-        actuallyStartRecording()
+        // check current permission status without triggering any audio operations
+        let currentPermissionStatus = AVAudioApplication.shared.recordPermission
+        
+        switch currentPermissionStatus {
+        case .granted:
+            print("🔓 audio permissions already granted")
+            isPermissionGranted = true
+            await startRecordingWithPermissions()
+            
+        case .denied:
+            print("❌ audio permissions previously denied")
+            errorMessage = "microphone access required - please enable in system preferences"
+            
+        case .undetermined:
+            print("🔑 requesting audio permissions for first time...")
+            await requestAudioPermissionsFromUser()
+            
+        @unknown default:
+            print("⚠️ unknown permission status")
+            errorMessage = "unable to determine microphone permissions"
+        }
     }
     
-    /// phase 1: starts recording state without any audio engine operations
+    /// requests permissions only when user explicitly tries to record
+    private func requestAudioPermissionsFromUser() async {
+        let granted = await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+            
+        await MainActor.run {
+            self.isPermissionGranted = granted
+            if granted {
+                print("🔓 user granted audio permissions")
+                Task {
+                    await self.startRecordingWithPermissions()
+                }
+            } else {
+                print("❌ user denied audio permissions")
+                self.errorMessage = "microphone access required for recording"
+            }
+        }
+    }
+    
+    /// starts recording after permissions are confirmed (phase 1: no audio engine)
+    private func startRecordingWithPermissions() async {
+        print("🎚️ phase 1: skipping audio engine setup - state management only...")
+        
+        await MainActor.run {
+            // phase 1: just start recording state without audio engine
+            self.actuallyStartRecording()
+        }
+    }
+    
+    /// starts recording state management (phase 1: no actual audio capture)
     private func actuallyStartRecording() {
-        // phase 1: pure state management - no audio operations
+        print("🎤 phase 1: starting recording state management (no audio capture)...")
+        
+        // update recording state
         isRecording = true
         recordingStartTime = Date()
         errorMessage = nil
@@ -209,15 +286,9 @@ extension AudioManager {
         // start ui update timer for recording duration display
         startRecordingTimer()
         
-        print("✅ phase 1 recording started (state management only)")
+        print("✅ phase 1: recording state started successfully (ui simulation)")
     }
     
-    /// phase 1: no audio permissions needed - just state management
-    private func ensureAudioPermissions() async {
-        print("🔓 phase 1: skipping audio permissions - state management only")
-        isPermissionGranted = true  // simulate granted for phase 1
-        isEngineReady = true        // simulate ready for phase 1
-    }
     
     /// internal recording start implementation - optimized for speed
     private func performStartRecording() {

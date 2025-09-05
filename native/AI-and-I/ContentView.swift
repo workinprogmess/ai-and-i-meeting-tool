@@ -70,10 +70,8 @@ struct ContentView: View {
             // connect performance monitor to audio manager
             audioManager.setPerformanceMonitor(performanceMonitor)
             
-            // measure app readiness time
-            performanceMonitor.measureOperation("app_ready") {
-                print("📱 app ready for user interaction")
-            }
+            // record actual app launch time when UI is ready
+            performanceMonitor.recordAppLaunch()
         }
     }
     
