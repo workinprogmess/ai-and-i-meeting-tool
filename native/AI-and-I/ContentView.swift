@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var performanceMonitor = PerformanceMonitor()
     @State private var isRecording = false
+    @State private var showInsights = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -49,20 +51,44 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
+            
+            // Admin insights toggle (hidden shortcut)
+            Button("") {
+                showInsights.toggle()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .hidden()
         }
         .padding(40)
         .frame(minWidth: 400, minHeight: 300)
+        .sheet(isPresented: $showInsights) {
+            InsightsDashboard()
+                .environmentObject(performanceMonitor)
+        }
+        .onAppear {
+            // Measure app readiness time
+            performanceMonitor.measureOperation("app_ready") {
+                print("📱 App ready for user interaction")
+            }
+        }
     }
     
     private func toggleRecording() {
-        isRecording.toggle()
-        
         if isRecording {
-            // TODO: Start audio recording with Core Audio
-            print("Starting recording...")
+            // Measure recording stop time
+            performanceMonitor.measureOperation("recording_stop") {
+                isRecording = false
+                performanceMonitor.endRecordingMeasurement()
+                print("Recording stopped")
+            }
         } else {
-            // TODO: Stop recording and process
-            print("Stopping recording...")
+            // Measure recording start time
+            performanceMonitor.measureOperation("recording_start") {
+                isRecording = true
+                performanceMonitor.startRecordingMeasurement()
+                performanceMonitor.resetAudioDropouts()
+                print("Recording started")
+            }
         }
     }
 }
