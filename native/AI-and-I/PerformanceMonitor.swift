@@ -24,6 +24,7 @@ class PerformanceMonitor: ObservableObject {
     private var measurements: [String: [TimeInterval]] = [:]
     private var memoryTimer: Timer?
     private let maxHistoryCount = 10
+    private let appStartTime = CFAbsoluteTimeGetCurrent() // precise app launch time tracking
     
     // MARK: - Initialization
     init() {
@@ -109,12 +110,12 @@ extension PerformanceMonitor {
 // MARK: - Specific Measurements
 extension PerformanceMonitor {
     
-    /// Records app launch time from startup
+    /// records actual app launch time from initialization to ui ready
     func recordAppLaunch() {
-        // This would be called from app startup
-        // For now, we'll simulate measuring from app initialization
-        let launchTime = ProcessInfo.processInfo.systemUptime * 1000 // Rough approximation
+        // calculate precise time from app start to ui ready
+        let launchTime = (CFAbsoluteTimeGetCurrent() - appStartTime) * 1000 // convert to milliseconds
         recordMeasurement("app_launch", launchTime)
+        print("📱 app launch measured: \(String(format: "%.1f", launchTime))ms")
     }
     
     /// Starts recording session timing
@@ -152,7 +153,7 @@ extension PerformanceMonitor {
     
     /// Updates current memory usage
     private func updateMemoryUsage() {
-        let memoryInfo = mach_task_basic_info()
+        var memoryInfo = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
         
         let result = withUnsafeMutablePointer(to: &memoryInfo) {

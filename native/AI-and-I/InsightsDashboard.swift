@@ -15,11 +15,11 @@ struct InsightsDashboard: View {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .font(.title2)
                             .foregroundColor(.blue)
-                        Text("Performance Insights")
+                        Text("performance insights")
                             .font(.title2)
                             .fontWeight(.semibold)
                         Spacer()
-                        Text("Admin Only")
+                        Text("admin only")
                             .font(.caption)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -46,11 +46,10 @@ struct InsightsDashboard: View {
                 }
                 .padding()
             }
-            .navigationTitle("AI & I Insights")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("ai & i insights")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("done") {
                         dismiss()
                     }
                 }

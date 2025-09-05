@@ -7,12 +7,12 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            // App title
-            Text("AI & I")
+            // app title
+            Text("ai & i")
                 .font(.largeTitle)
                 .fontWeight(.bold)
             
-            Text("Native Mac Meeting Intelligence")
+            Text("native mac meeting intelligence")
                 .font(.headline)
                 .foregroundStyle(.secondary)
             
@@ -27,7 +27,7 @@ struct ContentView: View {
                         .scaleEffect(isRecording ? 1.1 : 1.0)
                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isRecording)
                     
-                    Text("Recording...")
+                    Text("recording...")
                         .font(.title2)
                         .fontWeight(.medium)
                 }
@@ -41,7 +41,7 @@ struct ContentView: View {
             
             // Control button
             Button(action: toggleRecording) {
-                Text(isRecording ? "Stop Recording" : "Start Recording")
+                Text(isRecording ? "stop recording" : "start recording")
                     .font(.title3)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
@@ -52,8 +52,9 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             
-            // Admin insights toggle (hidden shortcut)
+            // admin insights toggle (hidden shortcut)
             Button("") {
+                print("🔍 insights shortcut pressed")
                 showInsights.toggle()
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
@@ -66,28 +67,28 @@ struct ContentView: View {
                 .environmentObject(performanceMonitor)
         }
         .onAppear {
-            // Measure app readiness time
+            // measure app readiness time
             performanceMonitor.measureOperation("app_ready") {
-                print("📱 App ready for user interaction")
+                print("📱 app ready for user interaction")
             }
         }
     }
     
     private func toggleRecording() {
         if isRecording {
-            // Measure recording stop time
+            // measure recording stop time
             performanceMonitor.measureOperation("recording_stop") {
                 isRecording = false
                 performanceMonitor.endRecordingMeasurement()
-                print("Recording stopped")
+                print("recording stopped")
             }
         } else {
-            // Measure recording start time
+            // measure recording start time
             performanceMonitor.measureOperation("recording_start") {
                 isRecording = true
                 performanceMonitor.startRecordingMeasurement()
                 performanceMonitor.resetAudioDropouts()
-                print("Recording started")
+                print("recording started")
             }
         }
     }
