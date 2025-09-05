@@ -30,30 +30,50 @@ native mac app using swiftui + core audio that captures perfectly mixed audio (m
 
 ## milestone structure & timeline
 
-### milestone 1: core foundation (2-3 days) → version 0.1.0
-**goal**: basic app structure with working core audio mixed capture
+### milestone 1: core foundation (phased approach) → version 0.1.0
+**goal**: performance-first foundation with real-time mixed audio capture
 
-**features**:
-- swiftui app scaffold with proper macos integration
-- core audio mixed device creation (microphone + system audio)
-- basic recording start/stop functionality
-- single mixed audio file output (.wav format)
-- native permissions handling (microphone + system audio recording)
+**critical architectural insight - electron dual-stream vs native real-time mixing**:
+- **electron dual-stream failure**: two separate files (mic.webm, system.webm) with temporal alignment issues, 33-50% content loss in transcription
+- **native real-time mixing**: single synchronized stream mixed during recording, perfect temporal alignment, transcription-ready output
+- **key difference**: mixing happens DURING recording (not post-processing), exactly what zoom/teams produce
 
-**success criteria**:
-- app launches and shows native mac interface
-- can create hardware-level mixed audio capture
-- recording produces single audio file with both sources
-- proper permission requests with clear user messaging
-- clean device cleanup on recording stop
+**phase 1 - foundation (complete)**:
+- ✅ swiftui app scaffold with performance monitoring
+- ✅ user-initiated permissions architecture (no app launch dialogs)
+- ✅ admin insights dashboard (cmd+shift+i) with microsecond precision
+- ✅ app launch time measurement (~50-200ms typical)
+- ✅ minimal audiomanager with state-only recording
+
+**phase 2 - real-time mixed audio (current)**:
+implementation approach (not auhal - that's overkill for meeting capture):
+- **mic capture**: avaudioengine with lazy init after permission granted
+- **system audio**: screencapturekit (apple's recommended api)
+- **real-time mixing**: avaudioengine mixer nodes combine streams during recording
+- **single output**: one .wav file with perfect synchronization
+
+technical challenges to solve:
+- format conversion: screencapturekit cmSampleBuffer → pcm for avaudioengine
+- device hot-swap: handle mic unplugged/changed during recording
+- error recovery: graceful handling of permission revocation, format mismatches
+
+**phase 3 - performance optimization**:
+- achieve < 200ms recording start latency
+- optimize memory usage during long recordings
+- implement stream-to-disk architecture
+
+**phase 4 - device management**:
+- full airpods switching during recording
+- device enumeration and selection
+- audio continuity across device changes
 
 **test cases**:
-- [ ] app startup under 3 seconds
-- [ ] permission dialogs clear and actionable  
-- [ ] mixed audio file contains both microphone and system audio
-- [ ] device switching (airpods) during recording handled gracefully
+- [ ] app startup under 1 second (beat voice memos)
+- [ ] permission dialogs only on user action (not app launch)
+- [ ] mixed audio file contains synchronized mic + system audio
+- [ ] no temporal alignment issues in transcription
 - [ ] memory usage stays under 30mb during recording
-- [ ] recording stop cleans up all audio resources properly
+- [ ] recording produces single transcription-ready file
 
 ### milestone 2: transcription integration (2 days) → version 0.2.0
 **goal**: full transcription pipeline from audio to text
@@ -175,46 +195,67 @@ AI-and-I/
     └── UITests/                         # User interface testing
 ```
 
-### core audio implementation approach
+### core audio implementation approach (phase 2)
 ```swift
-// CoreAudioManager.swift - Hardware-level mixed audio
-class CoreAudioManager: ObservableObject {
+// AudioManager.swift - Real-time mixed audio with AVAudioEngine + ScreenCaptureKit
+class AudioManager: ObservableObject {
     @Published var isRecording = false
     @Published var recordingDuration: TimeInterval = 0
     
-    private var audioEngine = AVAudioEngine()
-    private var mixerNode = AVAudioMixerNode()
+    private var audioEngine: AVAudioEngine?  // Lazy init after permissions
     private var audioFile: AVAudioFile?
+    private var systemAudioStream: SCStream?
     
-    func startMixedRecording() async throws -> URL {
-        // 1. Get microphone input
-        let micInput = audioEngine.inputNode
+    // Phase 2: Proper initialization order
+    func startRecording() async throws -> URL {
+        // 1. Ensure permissions first (critical - never touch inputNode before this)
+        guard await requestMicrophonePermission() else {
+            throw AudioError.microphonePermissionDenied
+        }
         
-        // 2. Get system audio (via aggregate device or loopback)
-        let systemInput = try await getSystemAudioInput()
+        // 2. Now safe to create and configure engine
+        audioEngine = AVAudioEngine()
+        let mixerNode = audioEngine!.mainMixerNode
         
-        // 3. Mix at hardware level using AVAudioEngine
-        audioEngine.attach(mixerNode)
-        audioEngine.connect(micInput, to: mixerNode, format: nil)
-        audioEngine.connect(systemInput, to: mixerNode, format: nil)
+        // 3. Connect microphone (safe after permission)
+        let micInput = audioEngine!.inputNode
+        audioEngine!.connect(micInput, to: mixerNode, format: nil)
         
-        // 4. Record mixed output to file
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, 
-                                                   in: .userDomainMask).first!
-        let fileURL = documentsURL.appendingPathComponent("recording_\(Date().timeIntervalSince1970).wav")
+        // 4. Setup ScreenCaptureKit for system audio
+        let systemAudioNode = AVAudioPlayerNode()
+        audioEngine!.attach(systemAudioNode)
+        audioEngine!.connect(systemAudioNode, to: mixerNode, format: nil)
         
+        // Start system audio capture
+        systemAudioStream = try await startSystemAudioCapture { sampleBuffer in
+            // Convert CMSampleBuffer to PCM and schedule on systemAudioNode
+            if let pcmBuffer = self.convertToPCM(sampleBuffer) {
+                systemAudioNode.scheduleBuffer(pcmBuffer, completionHandler: nil)
+            }
+        }
+        
+        // 5. Record mixed output to single file
+        let fileURL = getRecordingURL()
         audioFile = try AVAudioFile(forWriting: fileURL, 
-                                   settings: audioFormat.settings)
+                                   settings: micInput.outputFormat(forBus: 0).settings)
         
-        // 5. Install tap and start recording
+        // Install tap on mixer for recording
         mixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, time in
             try? self.audioFile?.write(from: buffer)
         }
         
-        try audioEngine.start()
+        // Start everything
+        systemAudioNode.play()
+        try audioEngine!.start()
         isRecording = true
         
         return fileURL
+    }
+    
+    // Critical: Handle format conversion
+    private func convertToPCM(_ sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        // Convert ScreenCaptureKit's CMSampleBuffer to AVAudioPCMBuffer
+        // This is the key technical challenge in Phase 2
     }
 }
 ```
