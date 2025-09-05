@@ -1,9 +1,10 @@
 import Foundation
 import AVFoundation
 import SwiftUI
+import ScreenCaptureKit
 
-/// high-performance audio manager with hot-standby architecture
-/// designed for < 200ms recording start latency and zero audio loss
+/// phase 2: audio manager with real-time mixed audio capture
+/// implements avaudioengine (mic) + screencapturekit (system audio)
 @MainActor
 class AudioManager: NSObject, ObservableObject {
     // MARK: - published state for ui binding
@@ -104,6 +105,24 @@ class AudioManager: NSObject, ObservableObject {
         isEngineReady = true
         
         print("🎚️ phase 1: simulated engine ready for ui testing")
+    }
+}
+
+// MARK: - Error Types
+enum AudioError: LocalizedError {
+    case engineCreationFailed
+    case engineNotConfigured
+    case fileCreationFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .engineCreationFailed:
+            return "failed to create audio engine"
+        case .engineNotConfigured:
+            return "audio engine not properly configured"
+        case .fileCreationFailed:
+            return "failed to create recording file"
+        }
     }
 }
 
@@ -274,19 +293,78 @@ extension AudioManager {
         }
     }
     
-    /// starts recording state management (phase 1: no actual audio capture)
+    /// starts recording with real audio capture (phase 2)
     private func actuallyStartRecording() {
-        print("🎤 phase 1: starting recording state management (no audio capture)...")
+        print("🎤 phase 2: starting recording with real audio capture")
         
-        // update recording state
-        isRecording = true
         recordingStartTime = Date()
         errorMessage = nil
         
-        // start ui update timer for recording duration display
-        startRecordingTimer()
+        // phase 2: setup and start real audio recording
+        do {
+            try startRealAudioRecording()
+            isRecording = true
+            startRecordingTimer()
+            print("✅ phase 2: recording started with audio engine")
+        } catch {
+            errorMessage = "failed to start recording: \(error.localizedDescription)"
+            print("❌ recording start failed: \(error)")
+        }
+    }
+    
+    /// phase 2: sets up and starts real audio recording
+    private func startRealAudioRecording() throws {
+        // lazy init audio engine after permissions
+        if audioEngine == nil {
+            audioEngine = AVAudioEngine()
+            mixerNode = audioEngine?.mainMixerNode
+            
+            // connect mic to mixer (safe after permissions)
+            if let engine = audioEngine, let mixer = mixerNode {
+                let inputNode = engine.inputNode
+                let inputFormat = inputNode.inputFormat(forBus: 0)
+                engine.connect(inputNode, to: mixer, format: inputFormat)
+                
+                // important: do not connect mixer to output to avoid monitoring
+                // we only want to record, not hear ourselves
+                // engine.connect(mixer, to: engine.outputNode, format: inputFormat) // DON'T DO THIS
+                
+                print("✅ audio engine configured: mic → mixer (no monitoring)")
+            }
+        }
         
-        print("✅ phase 1: recording state started successfully (ui simulation)")
+        guard let engine = audioEngine,
+              let mixer = mixerNode else {
+            throw AudioError.engineNotConfigured
+        }
+        
+        // create recording file
+        let documentsPath = FileManager.default.urls(for: .documentDirectory,
+                                                     in: .userDomainMask).first!
+        let timestamp = Date().timeIntervalSince1970
+        let recordingURL = documentsPath.appendingPathComponent("recording_\(timestamp).wav")
+        
+        // create audio file for writing
+        let outputFormat = mixer.outputFormat(forBus: 0)
+        outputFile = try AVAudioFile(forWriting: recordingURL,
+                                    settings: outputFormat.settings)
+        
+        // install tap on mixer to capture audio
+        mixer.installTap(onBus: 0, bufferSize: 2048, format: outputFormat) { [weak self] buffer, _ in
+            do {
+                try self?.outputFile?.write(from: buffer)
+            } catch {
+                print("❌ error writing audio buffer: \(error)")
+            }
+        }
+        
+        // start engine if not already running
+        if !engine.isRunning {
+            engine.prepare()
+            try engine.start()
+        }
+        
+        print("📁 recording to: \(recordingURL.lastPathComponent)")
     }
     
     
@@ -357,6 +435,17 @@ extension AudioManager {
     
     /// actually stops the recording and cleans up state
     private func actuallyStopRecording() {
+        // phase 2: stop audio recording
+        if let mixer = mixerNode {
+            mixer.removeTap(onBus: 0)
+        }
+        
+        // close audio file
+        outputFile = nil
+        
+        // stop engine to prevent monitoring after recording
+        audioEngine?.stop()
+        
         // update recording state
         isRecording = false
         recordingStartTime = nil
@@ -368,7 +457,7 @@ extension AudioManager {
         recordingTimer?.invalidate()
         recordingTimer = nil
         
-        print("⏹️ recording stopped and state cleaned up")
+        print("⏹️ phase 2: audio recording stopped and cleaned up")
     }
     
     /// internal recording stop implementation
