@@ -14,13 +14,36 @@ ai meeting intelligence - native swiftui application for world-class user experi
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
 
-### milestone 1: core foundation (0.1.0) - current
-**goal**: basic app structure with working core audio mixed capture
-- swiftui app scaffold with proper macos integration
-- core audio mixed device creation (microphone + system audio)
-- basic recording start/stop functionality
-- single mixed audio file output (.wav format)
-- native permissions handling (microphone + system audio recording)
+### milestone 1: core foundation (0.1.0) - current  
+**goal**: performance-first mixed audio capture with professional-grade speed and precision
+
+**core philosophy**: build performance-first from the beginning - near-magic user experience
+- app launch: < 1 second (beat voice memos)  
+- recording start: < 200ms latency (zero audio loss)
+- recording stop: complete buffer capture (no truncation)
+- full airpods switching: seamless device management during recording
+- minimal insights dashboard: real-time performance metrics (admin-only)
+
+**technical implementation**:
+- performancemonitor.swift: real-time metrics tracking foundation
+- audiomanager.swift: hot-standby architecture with pre-warmed audio engine  
+- core audio mixed device: hardware-level synchronization (mic + system)
+- single mixed audio output: .wav format (mp3 compression deferred to milestone 2/3)
+- comprehensive device management: full airpods switching, device enumeration, audio continuity
+- swiftui integration: @observableobject patterns with async performance
+
+**implementation phases**:
+1. performancemonitor foundation + baseline measurements
+2. core audio integration + mixed capture testing  
+3. performance optimization + < 200ms recording start
+4. full airpods device management + seamless switching
+5. swiftui integration + minimal insights dashboard
+
+**validation approach**: test individual components first, then integrated system
+- performance benchmarks: measure against voice memos and industry standards  
+- component testing: launch speed, recording latency, device switching, audio quality
+- precision validation: millisecond-level timing accuracy, complete audio capture
+- real-world scenarios: airpods connect/disconnect during recording, multiple cycles
 
 ### milestone 2: transcription integration (0.2.0)
 **goal**: full transcription pipeline from audio to text  
