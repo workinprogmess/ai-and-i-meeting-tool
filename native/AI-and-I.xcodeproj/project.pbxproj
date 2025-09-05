@@ -16,6 +16,7 @@
 		A1234567890ABCDEF013 /* AI_and_IUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF014 /* AI_and_IUITestsLaunchTests.swift */; };
 		BEEFFE382E6B55AE00A0CF8F /* InsightsDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */; };
 		BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */; };
+		BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +50,7 @@
 		A1234567890ABCDEF022 /* AI-and-IUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AI-and-IUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsDashboard.swift; sourceTree = "<group>"; };
 		BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitor.swift; sourceTree = "<group>"; };
+		BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +91,7 @@
 		A1234567890ABCDEF027 /* AI-and-I */ = {
 			isa = PBXGroup;
 			children = (
+				BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */,
 				BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */,
 				BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */,
 				A1234567890ABCDEF002 /* AI_and_IApp.swift */,
@@ -268,6 +271,7 @@
 				BEEFFE382E6B55AE00A0CF8F /* InsightsDashboard.swift in Sources */,
 				BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */,
 				A1234567890ABCDEF003 /* ContentView.swift in Sources */,
+				BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */,
 				A1234567890ABCDEF001 /* AI_and_IApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

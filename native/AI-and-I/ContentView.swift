@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var performanceMonitor = PerformanceMonitor()
-    @State private var isRecording = false
+    @StateObject private var audioManager = AudioManager()
     @State private var showInsights = false
     
     var body: some View {
@@ -18,14 +18,14 @@ struct ContentView: View {
             
             Spacer()
             
-            // Recording status
-            if isRecording {
+            // recording status
+            if audioManager.isRecording {
                 VStack {
                     Image(systemName: "record.circle.fill")
                         .font(.system(size: 60))
                         .foregroundColor(.red)
-                        .scaleEffect(isRecording ? 1.1 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isRecording)
+                        .scaleEffect(audioManager.isRecording ? 1.1 : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: audioManager.isRecording)
                     
                     Text("recording...")
                         .font(.title2)
@@ -41,13 +41,13 @@ struct ContentView: View {
             
             // Control button
             Button(action: toggleRecording) {
-                Text(isRecording ? "stop recording" : "start recording")
+                Text(audioManager.isRecording ? "stop recording" : "start recording")
                     .font(.title3)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(isRecording ? Color.red : Color.blue)
+                    .background(audioManager.isRecording ? Color.red : Color.blue)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
@@ -67,6 +67,9 @@ struct ContentView: View {
                 .environmentObject(performanceMonitor)
         }
         .onAppear {
+            // connect performance monitor to audio manager
+            audioManager.setPerformanceMonitor(performanceMonitor)
+            
             // measure app readiness time
             performanceMonitor.measureOperation("app_ready") {
                 print("📱 app ready for user interaction")
@@ -75,21 +78,15 @@ struct ContentView: View {
     }
     
     private func toggleRecording() {
-        if isRecording {
-            // measure recording stop time
-            performanceMonitor.measureOperation("recording_stop") {
-                isRecording = false
-                performanceMonitor.endRecordingMeasurement()
-                print("recording stopped")
-            }
+        if audioManager.isRecording {
+            // use audio manager's optimized stop recording
+            audioManager.stopRecording()
+            performanceMonitor.endRecordingMeasurement()
         } else {
-            // measure recording start time
-            performanceMonitor.measureOperation("recording_start") {
-                isRecording = true
-                performanceMonitor.startRecordingMeasurement()
-                performanceMonitor.resetAudioDropouts()
-                print("recording started")
-            }
+            // use audio manager's optimized start recording
+            audioManager.startRecording()
+            performanceMonitor.startRecordingMeasurement()
+            performanceMonitor.resetAudioDropouts()
         }
     }
 }
