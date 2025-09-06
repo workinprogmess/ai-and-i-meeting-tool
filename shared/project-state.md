@@ -50,6 +50,32 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅
 
+**phase 2: real audio capture (2025-01-06) - testing in progress**:
+- ✅ avaudioengine implementation with lazy initialization (prevents hanging)
+- ✅ proper sample rate conversion for airpods (fixed "cartoon speed" issue)
+- ✅ automatic gain control (agc) for built-in mic (-16 dbfs target, voice memos level)
+- ✅ true-peak limiter at -1 dbfs (prevents clipping)
+- ✅ high-pass filter at 90hz (removes fan rumble/vibration)
+- ✅ prime and discard warmup (fixes missing first 1-2 seconds)
+- ✅ proper airpods detection (prevents double processing)
+- ✅ device-specific processing pipeline (agc for built-in, bypass for airpods)
+- ✅ silence detection and warning system
+- ✅ thread-safe audio processing (minimal logging in tap callback)
+
+**audio quality achievements**:
+- built-in mic: audible at 40-50% system volume (was 80-100%)
+- airpods: clean audio without harsh artifacts (disabled double processing)
+- no missing audio at recording start (warmup buffer discard working)
+- no background vibration/rumble (high-pass filter active)
+- proper loudness normalization (-16 dbfs for speech)
+
+**technical insights gained**:
+- cadefaultdeviceaggregate: macos creates aggregate devices when multiple audio devices present
+- airpods telephony mode: 8-16khz sample rate causes quality issues
+- agc critical for macbook mics: raw input often -60 dbfs (nearly silent)
+- warmup essential: avaudioengine needs 500ms-1s to stabilize
+- double processing harmful: airpods already have dsp, additional processing causes artifacts
+
 **validation approach**: test individual components first, then integrated system
 - performance benchmarks: measure against voice memos and industry standards  
 - component testing: launch speed, recording latency, device switching, audio quality

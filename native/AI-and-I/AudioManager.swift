@@ -21,8 +21,44 @@ class AudioManager: NSObject, ObservableObject {
     private var micInput: AVAudioInputNode!
     private var mixerNode: AVAudioMixerNode!
     private var outputFile: AVAudioFile?
+    private var audioConverter: AVAudioConverter?
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
+    
+    // MARK: - AGC (Automatic Gain Control) for built-in mic
+    private var agcEnabled = false
+    private var targetLevel: Float = -16.0  // voice memos loudness target (was -18)
+    private var currentGain: Float = 1.0    // current gain multiplier
+    private var smoothingFactor: Float = 0.95  // smoothing for gain changes
+    private var noiseFloor: Float = -60.0   // gate threshold - don't lift room tone
+    private var peakCeiling: Float = -1.0   // true-peak ceiling to prevent clipping
+    
+    // AGC timing parameters (in seconds)
+    private var agcAttackTime: Float = 0.015  // 15ms attack (gentle)
+    private var agcReleaseTime: Float = 0.300  // 300ms release (smooth)
+    private var lastRMSTime: Date = Date()
+    
+    // clipping detection
+    private var clippingCount: Int = 0
+    private var totalBuffers: Int = 0
+    
+    // silence detection
+    private var silentBufferCount: Int = 0
+    private var lastAudioTime: Date = Date()
+    private let maxSilenceSeconds: TimeInterval = 5.0  // warn after 5 seconds of silence
+    
+    // prime and discard for startup latency
+    private var buffersToDiscard: Int = 0
+    private var discardedBuffers: Int = 0
+    private let warmupBufferCount: Int = 25  // ~500ms at 48kHz with 2048 buffer size
+    private var isWarmedUp = false
+    
+    // high-pass filter state for rumble removal (80-100Hz)
+    private var hpFilterState: (x1: Float, y1: Float) = (0, 0)  // previous sample state per channel
+    private let hpFilterCutoff: Float = 90.0  // Hz - removes rumble without affecting voice
+    
+    // dc blocker state
+    private var dcBlockerState: Float = 0.0
     
     // MARK: - hot-standby state management
     private var isEngineReady = false
@@ -44,6 +80,41 @@ class AudioManager: NSObject, ObservableObject {
         
         // prepare non-blocking hot-standby architecture
         prepareBasicHotStandby()
+        
+        // monitor for device changes
+        setupDeviceChangeMonitoring()
+    }
+    
+    /// monitors for audio device changes
+    private func setupDeviceChangeMonitoring() {
+        // on macOS, we monitor for audio hardware changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteChange),
+            name: .AVCaptureDeviceWasConnected,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteChange),
+            name: .AVCaptureDeviceWasDisconnected,
+            object: nil
+        )
+    }
+    
+    @objc private func handleRouteChange(notification: Notification) {
+        switch notification.name {
+        case .AVCaptureDeviceWasConnected:
+            print("🎧 NEW DEVICE CONNECTED")
+        case .AVCaptureDeviceWasDisconnected:
+            print("🎧 DEVICE DISCONNECTED")
+            if isRecording {
+                print("⚠️ Device changed during recording - audio may be affected")
+            }
+        default:
+            break
+        }
     }
     
     deinit {
@@ -113,6 +184,7 @@ enum AudioError: LocalizedError {
     case engineCreationFailed
     case engineNotConfigured
     case fileCreationFailed
+    case formatCreationFailed
     
     var errorDescription: String? {
         switch self {
@@ -122,6 +194,8 @@ enum AudioError: LocalizedError {
             return "audio engine not properly configured"
         case .fileCreationFailed:
             return "failed to create recording file"
+        case .formatCreationFailed:
+            return "failed to create audio format"
         }
     }
 }
@@ -312,29 +386,364 @@ extension AudioManager {
         }
     }
     
-    /// phase 2: sets up and starts real audio recording
-    private func startRealAudioRecording() throws {
-        // lazy init audio engine after permissions
-        if audioEngine == nil {
-            audioEngine = AVAudioEngine()
-            mixerNode = audioEngine?.mainMixerNode
+    
+    /// gets input device name on macOS
+    private func getInputDeviceName() -> String {
+        // on macOS, we can get this from the audio unit
+        if let audioUnit = audioEngine?.inputNode.audioUnit {
+            var deviceID: AudioDeviceID = 0
+            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
             
-            // connect mic to mixer (safe after permissions)
-            if let engine = audioEngine, let mixer = mixerNode {
-                let inputNode = engine.inputNode
-                let inputFormat = inputNode.inputFormat(forBus: 0)
-                engine.connect(inputNode, to: mixer, format: inputFormat)
+            AudioUnitGetProperty(audioUnit,
+                               kAudioOutputUnitProperty_CurrentDevice,
+                               kAudioUnitScope_Global,
+                               0,
+                               &deviceID,
+                               &size)
+            
+            if deviceID != 0 {
+                return getDeviceName(deviceID) ?? "Unknown"
+            }
+        }
+        return "Default Input"
+    }
+    
+    /// gets output device name on macOS
+    private func getOutputDeviceName() -> String {
+        // get default output device
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                  &address,
+                                  0,
+                                  nil,
+                                  &size,
+                                  &deviceID)
+        
+        if deviceID != 0 {
+            return getDeviceName(deviceID) ?? "Unknown"
+        }
+        return "Default Output"
+    }
+    
+    /// gets device name from device ID
+    private func getDeviceName(_ deviceID: AudioDeviceID) -> String? {
+        var name: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        let result = AudioObjectGetPropertyData(deviceID,
+                                               &address,
+                                               0,
+                                               nil,
+                                               &size,
+                                               &name)
+        
+        if result == noErr {
+            return name as String
+        }
+        return nil
+    }
+    
+    /// gets human-readable format name
+    private func getFormatName(_ format: AVAudioCommonFormat) -> String {
+        switch format {
+        case .pcmFormatFloat32: return "Float32"
+        case .pcmFormatFloat64: return "Float64"
+        case .pcmFormatInt16: return "Int16"
+        case .pcmFormatInt32: return "Int32"
+        default: return "Other(\(format.rawValue))"
+        }
+    }
+    
+    /// applies AGC (Automatic Gain Control) to audio buffer for consistent levels
+    private func applyAGC(to buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard agcEnabled else { 
+            // log once why AGC is disabled
+            if totalBuffers == 1 {
+                print("❌ AGC is disabled - returning unprocessed buffer")
+            }
+            return buffer 
+        }
+        
+        // compute current RMS level
+        let currentRMS = rms(of: buffer)
+        
+        // debug log first few buffers
+        if totalBuffers < 5 {
+            print("🔍 AGC DEBUG: buffer #\(totalBuffers), input RMS: \(String(format: "%.1f", currentRMS)) dBFS")
+        }
+        
+        // skip if signal is below noise floor
+        if currentRMS < noiseFloor {
+            return buffer  // don't amplify silence/noise floor
+        }
+        
+        // calculate desired gain adjustment
+        let desiredGain = pow(10, (targetLevel - currentRMS) / 20.0)
+        
+        // calculate time-based smoothing factor for attack/release
+        let now = Date()
+        let timeDelta = Float(now.timeIntervalSince(lastRMSTime))
+        lastRMSTime = now
+        
+        // use different smoothing based on whether gain is increasing (attack) or decreasing (release)
+        let effectiveSmoothingFactor: Float
+        if desiredGain > currentGain {
+            // attack phase - gain increasing
+            let attackFactor = exp(-timeDelta / agcAttackTime)
+            effectiveSmoothingFactor = attackFactor
+        } else {
+            // release phase - gain decreasing
+            let releaseFactor = exp(-timeDelta / agcReleaseTime)
+            effectiveSmoothingFactor = releaseFactor
+        }
+        
+        // smooth gain changes with proper attack/release
+        currentGain = currentGain * effectiveSmoothingFactor + desiredGain * (1 - effectiveSmoothingFactor)
+        
+        // limit gain to reasonable range (0.5x to 5x) - capped lower to reduce room tone
+        currentGain = min(max(currentGain, 0.5), 5.0)
+        
+        // create output buffer with same format
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: buffer.format,
+            frameCapacity: buffer.frameCapacity
+        ) else { return buffer }
+        
+        outputBuffer.frameLength = buffer.frameLength
+        
+        // track clipping for warnings
+        totalBuffers += 1
+        var bufferClipped = false
+        
+        // apply gain to all channels with true-peak limiting
+        if let inputData = buffer.floatChannelData,
+           let outputData = outputBuffer.floatChannelData {
+            
+            // calculate peak limit in linear scale
+            let peakLimit = pow(10, peakCeiling / 20.0)  // -1 dBFS = 0.891
+            
+            for channel in 0..<Int(buffer.format.channelCount) {
+                let inputChannel = inputData[channel]
+                let outputChannel = outputData[channel]
                 
-                // important: do not connect mixer to output to avoid monitoring
-                // we only want to record, not hear ourselves
-                // engine.connect(mixer, to: engine.outputNode, format: inputFormat) // DON'T DO THIS
+                for frame in 0..<Int(buffer.frameLength) {
+                    // apply gain
+                    var sample = inputChannel[frame] * currentGain
+                    
+                    // true-peak limiting (hard limit at -1 dBFS)
+                    if abs(sample) > peakLimit {
+                        sample = peakLimit * (sample > 0 ? 1 : -1)
+                        bufferClipped = true
+                    }
+                    
+                    outputChannel[frame] = sample
+                }
+            }
+            
+            if bufferClipped {
+                clippingCount += 1
+            }
+            
+            // log AGC activity occasionally (not every buffer for thread hygiene)
+            if totalBuffers % 50 == 0 {  // more frequent logging for debugging (was 200)
+                let outputRMS = rms(of: outputBuffer)
+                print("🎚️ AGC: gain=\(String(format: "%.1f", currentGain))x, in=\(String(format: "%.1f", currentRMS))dB → out=\(String(format: "%.1f", outputRMS))dB")
                 
-                print("✅ audio engine configured: mic → mixer (no monitoring)")
+                if clippingCount > 0 {
+                    let clipPercent = Float(clippingCount) / Float(totalBuffers) * 100
+                    print("⚠️ CLIPPING: \(clippingCount) buffers (\(String(format: "%.1f", clipPercent))%) hit limiter")
+                }
+            }
+            
+            return outputBuffer
+        }
+        
+        return buffer  // fallback if processing fails
+    }
+    
+    /// applies high-pass filter to remove low-frequency rumble (fan noise, vibration)
+    private func applyHighPassFilter(to buffer: AVAudioPCMBuffer, sampleRate: Float) -> AVAudioPCMBuffer? {
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: buffer.format,
+            frameCapacity: buffer.frameCapacity
+        ) else { return buffer }
+        
+        outputBuffer.frameLength = buffer.frameLength
+        
+        // calculate filter coefficient for 90Hz cutoff
+        let rc = 1.0 / (2.0 * Float.pi * hpFilterCutoff)
+        let dt = 1.0 / sampleRate
+        let alpha = rc / (rc + dt)
+        
+        if let inputData = buffer.floatChannelData,
+           let outputData = outputBuffer.floatChannelData {
+            
+            for channel in 0..<Int(buffer.format.channelCount) {
+                let inputChannel = inputData[channel]
+                let outputChannel = outputData[channel]
+                
+                // apply first-order high-pass filter
+                var prevInput = hpFilterState.x1
+                var prevOutput = hpFilterState.y1
+                
+                for frame in 0..<Int(buffer.frameLength) {
+                    let input = inputChannel[frame]
+                    
+                    // high-pass filter: y[n] = α * (y[n-1] + x[n] - x[n-1])
+                    let output = alpha * (prevOutput + input - prevInput)
+                    
+                    // dc blocker (additional safety)
+                    let dcBlocked = output - dcBlockerState * 0.995
+                    dcBlockerState = dcBlocked
+                    
+                    outputChannel[frame] = dcBlocked
+                    
+                    prevInput = input
+                    prevOutput = output
+                }
+                
+                // save state for next buffer
+                if channel == 0 {  // only save once for simplicity
+                    hpFilterState = (prevInput, prevOutput)
+                }
             }
         }
         
-        guard let engine = audioEngine,
-              let mixer = mixerNode else {
+        return outputBuffer
+    }
+    
+    /// computes rms level of audio buffer for diagnostics
+    private func rms(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let ch0 = buffer.floatChannelData?.pointee else { return -120 }
+        let n = Int(buffer.frameLength)
+        var sum: Float = 0
+        var peakCount = 0
+        
+        for i in 0..<n {
+            let sample = ch0[i]
+            sum += sample * sample
+            
+            // check for clipping
+            if abs(sample) > 0.99 {
+                peakCount += 1
+            }
+        }
+        
+        // warn if many samples near clipping
+        if peakCount > n / 100 { // more than 1% samples near peak
+            print("⚠️ CLIPPING DETECTED: \(peakCount) samples near 0 dBFS")
+        }
+        
+        let mean = sum / Float(n)
+        return 10 * log10(mean + 1e-12) // dBFS
+    }
+    
+    /// phase 2: sets up and starts real audio recording
+    private func startRealAudioRecording() throws {
+        // always recreate engine to handle device changes (airpods switching)
+        if audioEngine?.isRunning == true {
+            audioEngine?.stop()
+            audioEngine = nil
+            mixerNode = nil
+        }
+        
+        // create fresh engine
+        audioEngine = AVAudioEngine()
+        // DO NOT use mixer for mic-only - avoid monitoring paths
+        
+        // configure clean mic-only recording
+        if let engine = audioEngine {
+            let inputNode = engine.inputNode
+            
+            // log device names (macOS approach)
+            let inputDevice = getInputDeviceName()
+            let outputDevice = getOutputDeviceName()
+            
+            print("🎤 INPUT DEVICE: \(inputDevice)")
+            print("🔊 OUTPUT DEVICE: \(outputDevice)")
+            
+            // enable AGC for built-in mic (not for AirPods which have their own processing)
+            // macos creates aggregate devices when multiple audio devices are present
+            let inputDeviceLower = inputDevice.lowercased()
+            let outputDeviceLower = outputDevice.lowercased()
+            
+            // check if airpods are connected (either as input OR output means telephony mode)
+            let isAirPodsConnected = inputDeviceLower.contains("airpod") || 
+                                     outputDeviceLower.contains("airpod")
+            
+            // check if this is likely the built-in mic
+            let isLikelyBuiltIn = inputDeviceLower.contains("built-in") || 
+                                  inputDeviceLower.contains("macbook") ||
+                                  inputDeviceLower.contains("default") ||     // system default
+                                  inputDeviceLower.contains("aggregate")       // aggregate device
+            
+            if isAirPodsConnected {
+                // airpods detected - disable all processing
+                agcEnabled = false
+                currentGain = 1.0
+                print("🎧 AIRPODS DETECTED - AGC and filtering DISABLED")
+                print("   Input: \(inputDevice)")
+                print("   Output: \(outputDevice)")
+                print("   Note: AirPods have built-in DSP, no additional processing needed")
+            } else if isLikelyBuiltIn {
+                // built-in mic - enable full processing
+                agcEnabled = true
+                currentGain = 2.5  // boost to 2.5x for very quiet built-in mics
+                print("🎚️ AGC ENABLED for built-in mic (device: \(inputDevice))")
+                print("   Initial gain: \(currentGain)x, target: \(targetLevel) dBFS")
+            } else {
+                // other external device
+                agcEnabled = false
+                currentGain = 1.0
+                print("🎚️ AGC DISABLED for external device: \(inputDevice)")
+            }
+            
+            // setup warmup period based on device type
+            if isAirPodsConnected {
+                buffersToDiscard = 50  // ~1 second for bluetooth settling
+                print("🔄 WARMUP: Will discard first 50 buffers (~1s) for AirPods")
+            } else {
+                buffersToDiscard = warmupBufferCount  // ~500ms for built-in
+                print("🔄 WARMUP: Will discard first \(warmupBufferCount) buffers (~500ms)")
+            }
+            discardedBuffers = 0
+            isWarmedUp = false
+            
+            // log the actual capture format - critical for diagnosing telephony profile
+            let inputFormat = inputNode.inputFormat(forBus: 0)
+            let formatName = getFormatName(inputFormat.commonFormat)
+            print("📊 INPUT FORMAT: sr=\(inputFormat.sampleRate)Hz ch=\(inputFormat.channelCount) format=\(formatName)")
+            
+            // check if we're in telephony profile (bad for quality)
+            if inputFormat.sampleRate <= 16000 {
+                print("⚠️ WARNING: Low sample rate detected - likely Bluetooth telephony profile (HFP/HSP)")
+                print("💡 TIP: For better quality, use built-in mic or disconnect AirPods")
+                print("📱 Device combo: Input=\(inputDevice) Output=\(outputDevice)")
+                
+                if inputDevice.lowercased().contains("airpod") {
+                    errorMessage = "AirPods in call mode - use built-in mic for better quality"
+                }
+            }
+            
+            // CRITICAL: Do NOT connect to mixer or output for mic-only
+            // This prevents ALL monitoring issues
+            
+            print("✅ audio engine configured (NO mixer, NO monitoring)")
+        }
+        
+        guard let engine = audioEngine else {
             throw AudioError.engineNotConfigured
         }
         
@@ -344,15 +753,192 @@ extension AudioManager {
         let timestamp = Date().timeIntervalSince1970
         let recordingURL = documentsPath.appendingPathComponent("recording_\(timestamp).wav")
         
-        // create audio file for writing
-        let outputFormat = mixer.outputFormat(forBus: 0)
-        outputFile = try AVAudioFile(forWriting: recordingURL,
-                                    settings: outputFormat.settings)
+        // use mono 48kHz for file (Voice Memos style)
+        let inputNode = engine.inputNode
         
-        // install tap on mixer to capture audio
-        mixer.installTap(onBus: 0, bufferSize: 2048, format: outputFormat) { [weak self] buffer, _ in
+        // force mono 48kHz for consistent quality
+        let recordingSettings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 48000.0,
+            AVNumberOfChannelsKey: 1,  // MONO for clarity
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+        
+        print("📝 FILE: 48kHz mono 16-bit (Voice Memos style)")
+        
+        // create audio file
+        outputFile = try AVAudioFile(forWriting: recordingURL,
+                                    settings: recordingSettings)
+        
+        // create converter if needed for proper resampling
+        let tapFormat = inputNode.outputFormat(forBus: 0)
+        print("📼 TAP FORMAT: sr=\(tapFormat.sampleRate)Hz ch=\(tapFormat.channelCount)")
+        
+        // create target format for conversion
+        guard let targetFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1) else {
+            throw AudioError.formatCreationFailed
+        }
+        
+        // create converter if formats don't match
+        if tapFormat.sampleRate != 48000 || tapFormat.channelCount != 1 {
+            print("🔄 Creating converter: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount)ch → 48000Hz mono")
+            
+            // IMPORTANT: handle mono vs stereo conversion properly
+            if tapFormat.channelCount == 2 {
+                print("   📊 Stereo → Mono: will sum and scale by 0.5 to avoid -6dB loss")
+            } else if tapFormat.channelCount == 1 {
+                print("   📊 Mono → Mono: pass-through (no level change)")
+            }
+            
+            audioConverter = AVAudioConverter(from: tapFormat, to: targetFormat)
+            
+            if audioConverter == nil {
+                print("❌ FAILED to create converter - will try direct write")
+                print("   Input: sr=\(tapFormat.sampleRate) ch=\(tapFormat.channelCount)")
+                print("   Target: sr=48000 ch=1")
+            } else {
+                print("✅ Converter created successfully")
+                // log converter settings for debugging
+                if let conv = audioConverter {
+                    print("   Input format: \(conv.inputFormat)")
+                    print("   Output format: \(conv.outputFormat)")
+                    print("   Sample rate ratio: \(48000.0 / tapFormat.sampleRate)x")
+                    
+                    // set channel map for proper stereo→mono conversion
+                    if tapFormat.channelCount == 2 {
+                        // sum both channels equally for mono
+                        conv.channelMap = [NSNumber(value: 0), NSNumber(value: 1)]
+                    }
+                }
+            }
+        } else {
+            print("✅ No conversion needed - formats match (48kHz mono)")
+        }
+        
+        inputNode.installTap(onBus: 0, bufferSize: 2048, format: tapFormat) { [weak self] buffer, _ in
+            // handle warmup period - discard initial buffers
+            if !(self?.isWarmedUp ?? true) {
+                self?.discardedBuffers += 1
+                if (self?.discardedBuffers ?? 0) < (self?.buffersToDiscard ?? 0) {
+                    // still warming up, discard this buffer
+                    if (self?.discardedBuffers ?? 0) % 10 == 0 {
+                        print("🔄 Warming up... discarded \(self?.discardedBuffers ?? 0) buffers")
+                    }
+                    return  // don't process or write
+                } else if !(self?.isWarmedUp ?? true) {
+                    self?.isWarmedUp = true
+                    print("✅ WARMUP COMPLETE - starting actual recording")
+                }
+            }
+            
+            // processing pipeline (order matters):
+            // skip all processing for airpods (they have their own dsp)
+            let processedBuffer: AVAudioPCMBuffer
+            if self?.agcEnabled == true {
+                // built-in mic: apply full processing
+                // 1. high-pass filter (remove rumble)
+                let filteredBuffer = self?.applyHighPassFilter(to: buffer, sampleRate: Float(tapFormat.sampleRate)) ?? buffer
+                // 2. AGC (adjust levels)
+                processedBuffer = self?.applyAGC(to: filteredBuffer) ?? filteredBuffer
+            } else {
+                // airpods or external: no processing
+                processedBuffer = buffer
+            }
+            
+            // log RMS level for diagnostics (after AGC)
+            let rmsLevel = self?.rms(of: processedBuffer) ?? -120
+            
+            // silence detection
+            if rmsLevel < -60 {  // effectively silent
+                self?.silentBufferCount += 1
+                
+                // check for extended silence
+                let silenceDuration = Double(self?.silentBufferCount ?? 0) * (2048.0 / 48000.0)  // buffer duration
+                if silenceDuration > self?.maxSilenceSeconds ?? 5.0 {
+                    if let lastTime = self?.lastAudioTime {
+                        let timeSinceAudio = Date().timeIntervalSince(lastTime)
+                        print("⚠️ SILENCE: No audio for \(String(format: "%.1f", timeSinceAudio)) seconds")
+                        print("   Check: mic permissions, device selection, or user not speaking")
+                    }
+                    self?.silentBufferCount = 0  // reset counter to avoid spam
+                }
+            } else {
+                self?.silentBufferCount = 0
+                self?.lastAudioTime = Date()
+            }
+            
+            // periodic status logging (reduced frequency for thread hygiene)
+            if Int.random(in: 0..<200) < 1 { // ~0.5% of buffers
+                var status = "📊 RMS: \(String(format: "%.1f", rmsLevel)) dBFS"
+                
+                // add quality indicators
+                if rmsLevel > -6 {
+                    status += " ⚠️ LOUD (may clip)"
+                } else if rmsLevel > -12 {
+                    status += " ✅ GOOD"
+                } else if rmsLevel > -20 {
+                    status += " 👍 OK"
+                } else if rmsLevel > -30 {
+                    status += " 🔈 QUIET"
+                } else {
+                    status += " ❌ TOO QUIET"
+                }
+                
+                print(status)
+            }
+            
             do {
-                try self?.outputFile?.write(from: buffer)
+                // convert if needed, then write
+                if let converter = self?.audioConverter {
+                    // need to convert - create output buffer with extra capacity
+                    // add 20% buffer for safety with varying sample rates
+                    let outputFrameCapacity = AVAudioFrameCount(
+                        Double(buffer.frameLength) * (48000.0 / tapFormat.sampleRate) * 1.2
+                    )
+                    
+                    guard let outputBuffer = AVAudioPCMBuffer(
+                        pcmFormat: targetFormat, 
+                        frameCapacity: outputFrameCapacity
+                    ) else { return }
+                    
+                    // reset buffer to ensure clean conversion
+                    outputBuffer.frameLength = outputFrameCapacity
+                    
+                    // convert to 48kHz mono
+                    var error: NSError?
+                    
+                    let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
+                        outStatus.pointee = .haveData
+                        return processedBuffer  // use AGC-processed buffer
+                    }
+                    
+                    // perform conversion and get actual converted frame count
+                    _ = converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+                    
+                    if let error = error {
+                        print("❌ Conversion error: \(error)")
+                        return
+                    }
+                    
+                    // CRITICAL: use actual frameLength from converter, not theoretical
+                    // this prevents the "cartoon speed" issue with AirPods
+                    if outputBuffer.frameLength > 0 {
+                        // occasionally log conversion stats for debugging
+                        if Int.random(in: 0..<200) < 1 {
+                            print("🔄 Conversion: in=\(buffer.frameLength) → out=\(outputBuffer.frameLength) frames")
+                            print("   Rate: \(tapFormat.sampleRate)Hz → 48000Hz")
+                        }
+                        try self?.outputFile?.write(from: outputBuffer)
+                    } else {
+                        print("⚠️ Converter produced 0 frames - skipping write")
+                    }
+                } else {
+                    // no conversion needed, write directly (with AGC applied)
+                    try self?.outputFile?.write(from: processedBuffer)
+                }
             } catch {
                 print("❌ error writing audio buffer: \(error)")
             }
@@ -435,9 +1021,9 @@ extension AudioManager {
     
     /// actually stops the recording and cleans up state
     private func actuallyStopRecording() {
-        // phase 2: stop audio recording
-        if let mixer = mixerNode {
-            mixer.removeTap(onBus: 0)
+        // stop audio recording - remove tap from input node
+        if let engine = audioEngine {
+            engine.inputNode.removeTap(onBus: 0)
         }
         
         // close audio file
@@ -445,6 +1031,20 @@ extension AudioManager {
         
         // stop engine to prevent monitoring after recording
         audioEngine?.stop()
+        
+        // reset AGC and detection counters
+        currentGain = 2.5  // reset to initial gain for next recording
+        clippingCount = 0
+        totalBuffers = 0
+        silentBufferCount = 0
+        
+        // reset warmup state
+        isWarmedUp = false
+        discardedBuffers = 0
+        
+        // reset filter states
+        hpFilterState = (0, 0)
+        dcBlockerState = 0.0
         
         // update recording state
         isRecording = false
