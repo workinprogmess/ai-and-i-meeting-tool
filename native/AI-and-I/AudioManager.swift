@@ -25,6 +25,13 @@ class AudioManager: NSObject, ObservableObject {
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
     
+    // MARK: - system audio mixing components
+    private var systemAudioPlayer: AVAudioPlayerNode?
+    private var systemAudioMixer: AVAudioMixerNode?
+    private var mainMixerNode: AVAudioMixerNode?  // combines mic + system
+    private var systemAudioBufferQueue: [(buffer: AVAudioPCMBuffer, time: AVAudioTime)] = []
+    private let systemAudioQueue = DispatchQueue(label: "com.ai-and-i.systemaudio", qos: .userInteractive)
+    
     // MARK: - AGC (Automatic Gain Control) for built-in mic
     private var agcEnabled = false
     private var targetLevel: Float = -16.0  // voice memos loudness target (was -18)
@@ -197,6 +204,70 @@ enum AudioError: LocalizedError {
         case .formatCreationFailed:
             return "failed to create audio format"
         }
+    }
+}
+
+// MARK: - system audio mixing
+
+extension AudioManager {
+    /// sets up audio nodes for real-time mic + system mixing
+    private func setupAudioNodesForMixing() {
+        guard let engine = audioEngine else { return }
+        
+        // create nodes for mixing
+        systemAudioPlayer = AVAudioPlayerNode()
+        systemAudioMixer = AVAudioMixerNode()
+        mainMixerNode = AVAudioMixerNode()
+        
+        // attach nodes to engine
+        engine.attach(systemAudioPlayer!)
+        engine.attach(systemAudioMixer!)
+        engine.attach(mainMixerNode!)
+        
+        // get standard format (48khz stereo)
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
+        
+        // connect system audio path (no processing)
+        engine.connect(systemAudioPlayer!, to: systemAudioMixer!, format: format)
+        engine.connect(systemAudioMixer!, to: mainMixerNode!, format: format)
+        
+        // mic will connect to mainMixerNode in startRealAudioRecording
+        // this keeps mic and system paths separate for independent processing
+        
+        // set initial volumes
+        systemAudioMixer?.volume = 1.0  // system audio at full volume (no agc)
+        mainMixerNode?.volume = 1.0     // main mix at full volume
+        
+        print("🎛️ audio mixing nodes configured for mic + system")
+    }
+    
+    /// processes system audio from screencapturekit
+    func processSystemAudio(_ buffer: AVAudioPCMBuffer) {
+        // Log that we're receiving system audio
+        print("🔊 received system audio: \(buffer.frameLength) frames, \(buffer.format.sampleRate)Hz, \(buffer.format.channelCount)ch")
+        
+        // TODO: Properly mix with mic audio
+        // For now, we're just verifying system audio capture works
+        // The mixing nodes are disabled to avoid format conflicts
+        
+        /* Original mixing code - disabled until we fix format compatibility
+        guard let player = systemAudioPlayer,
+              let engine = audioEngine,
+              engine.isRunning else {
+            return
+        }
+        
+        systemAudioQueue.async { [weak self] in
+            player.scheduleBuffer(buffer, at: nil, options: .interrupts) {
+                // buffer played
+            }
+            
+            if !player.isPlaying {
+                player.play()
+                print("🔊 system audio playback started")
+            }
+        }
+        */
     }
 }
 
@@ -661,9 +732,12 @@ extension AudioManager {
         
         // create fresh engine
         audioEngine = AVAudioEngine()
-        // DO NOT use mixer for mic-only - avoid monitoring paths
         
-        // configure clean mic-only recording
+        // Setup mixing nodes only if we're actually going to use system audio
+        // For now, keep disabled until we fix format compatibility
+        // setupAudioNodesForMixing()
+        
+        // configure recording
         if let engine = audioEngine {
             let inputNode = engine.inputNode
             
@@ -737,10 +811,15 @@ extension AudioManager {
                 }
             }
             
-            // CRITICAL: Do NOT connect to mixer or output for mic-only
-            // This prevents ALL monitoring issues
-            
-            print("✅ audio engine configured (NO mixer, NO monitoring)")
+            // connect mic to main mixer (if mixing nodes exist)
+            if let mainMixer = mainMixerNode {
+                // mic → main mixer (for mixed recording)
+                let micFormat = inputNode.outputFormat(forBus: 0)
+                engine.connect(inputNode, to: mainMixer, format: micFormat)
+                print("✅ mic connected to main mixer for mixed capture")
+            } else {
+                print("✅ audio engine configured (mic-only mode)")
+            }
         }
         
         guard let engine = audioEngine else {
@@ -818,7 +897,13 @@ extension AudioManager {
             print("✅ No conversion needed - formats match (48kHz mono)")
         }
         
-        inputNode.installTap(onBus: 0, bufferSize: 2048, format: tapFormat) { [weak self] buffer, _ in
+        // install tap on main mixer if available (for mixed capture), otherwise on input
+        let tapNode = mainMixerNode ?? inputNode
+        let actualTapFormat = tapNode.outputFormat(forBus: 0)
+        
+        print("📼 installing tap on: \(mainMixerNode != nil ? "main mixer (mixed)" : "input node (mic-only)")")
+        
+        tapNode.installTap(onBus: 0, bufferSize: 2048, format: actualTapFormat) { [weak self] buffer, _ in
             // handle warmup period - discard initial buffers
             if !(self?.isWarmedUp ?? true) {
                 self?.discardedBuffers += 1
@@ -1021,9 +1106,19 @@ extension AudioManager {
     
     /// actually stops the recording and cleans up state
     private func actuallyStopRecording() {
-        // stop audio recording - remove tap from input node
+        // stop audio recording - remove tap from appropriate node
         if let engine = audioEngine {
-            engine.inputNode.removeTap(onBus: 0)
+            // remove tap from whichever node we were tapping
+            if let mainMixer = mainMixerNode {
+                mainMixer.removeTap(onBus: 0)
+                print("🎛️ removed tap from main mixer")
+            } else {
+                engine.inputNode.removeTap(onBus: 0)
+                print("🎤 removed tap from input node")
+            }
+            
+            // stop system audio player if running
+            systemAudioPlayer?.stop()
         }
         
         // close audio file

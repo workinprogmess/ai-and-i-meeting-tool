@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var performanceMonitor = PerformanceMonitor()
     @StateObject private var audioManager = AudioManager()
+    @StateObject private var screenCaptureManager = ScreenCaptureManager()
     @State private var showInsights = false
     
     var body: some View {
@@ -38,6 +39,17 @@ struct ContentView: View {
             }
             
             Spacer()
+            
+            // system audio capture status
+            if screenCaptureManager.isCapturing {
+                HStack {
+                    Image(systemName: "waveform.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("capturing system audio")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             // Control button
             Button(action: toggleRecording) {
@@ -77,14 +89,31 @@ struct ContentView: View {
     
     private func toggleRecording() {
         if audioManager.isRecording {
-            // use audio manager's optimized stop recording
+            // stop recording
             audioManager.stopRecording()
             performanceMonitor.endRecordingMeasurement()
+            
+            // stop system audio capture
+            Task {
+                await screenCaptureManager.stopCapture()
+            }
         } else {
-            // use audio manager's optimized start recording
+            // start both recordings - let each handle their own permissions
+            print("🎬 starting recording...")
+            
+            // start mic recording (will prompt for mic permission if needed)
             audioManager.startRecording()
+            print("📍 called audioManager.startRecording, isRecording = \(audioManager.isRecording)")
             performanceMonitor.startRecordingMeasurement()
             performanceMonitor.resetAudioDropouts()
+            
+            // Start screen capture for system audio
+            // Now that we've fixed the format conflict, this should work
+            screenCaptureManager.audioManager = audioManager
+            Task {
+                await screenCaptureManager.startCaptureForDisplay()
+                print("📍 screen capture started, isCapturing = \(await screenCaptureManager.isCapturing)")
+            }
         }
     }
 }
