@@ -184,6 +184,7 @@ private class StreamOutput: NSObject, SCStreamOutput {
     weak var manager: ScreenCaptureManager?
     private var bufferCount = 0
     private var hasLoggedFormat = false
+    private var maxAudioLevel: Float = 0.0
     
     init(manager: ScreenCaptureManager) {
         self.manager = manager
@@ -207,11 +208,46 @@ private class StreamOutput: NSObject, SCStreamOutput {
             }
         }
         
-        // just count buffers - don't process to avoid dropping frames
-        // log occasionally to show it's working
-        if bufferCount % 100 == 0 {  // every ~2 seconds at 48khz
-            print("🔊 system audio streaming: \(bufferCount) buffers received")
-            print("📝 note: 'dropping frame' errors are about video, not audio - audio is working fine")
+        // calculate audio level to prove we're getting real audio
+        if bufferCount % 50 == 0 {  // check every ~1 second
+            if let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
+                var dataLength = 0
+                var dataPointer: UnsafeMutablePointer<Int8>?
+                
+                CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil,
+                                          totalLengthOut: &dataLength,
+                                          dataPointerOut: &dataPointer)
+                
+                if let dataPointer = dataPointer {
+                    // calculate RMS (root mean square) for audio level
+                    dataPointer.withMemoryRebound(to: Float.self, capacity: dataLength / MemoryLayout<Float>.size) { floatPointer in
+                        let sampleCount = dataLength / MemoryLayout<Float>.size
+                        var sum: Float = 0
+                        for i in 0..<min(sampleCount, 1000) {  // sample first 1000 values
+                            let sample = floatPointer[i]
+                            sum += sample * sample
+                        }
+                        let rms = sqrt(sum / Float(min(sampleCount, 1000)))
+                        let dbLevel = 20 * log10(max(rms, 0.00001))  // convert to dB
+                        
+                        // track max level
+                        if rms > maxAudioLevel {
+                            maxAudioLevel = rms
+                        }
+                        
+                        // log audio levels
+                        if bufferCount % 100 == 0 {  // every ~2 seconds
+                            if rms > 0.001 {  // if there's actual audio
+                                print("🎵 SYSTEM AUDIO DETECTED: level = \(String(format: "%.1f", dbLevel)) dB, RMS = \(String(format: "%.4f", rms))")
+                                print("   ✅ Real audio content confirmed! Max level seen: \(String(format: "%.4f", maxAudioLevel))")
+                            } else {
+                                print("🔇 System audio is silent (level = \(String(format: "%.1f", dbLevel)) dB)")
+                            }
+                            print("📊 \(bufferCount) buffers received")
+                        }
+                    }
+                }
+            }
         }
     }
 }
