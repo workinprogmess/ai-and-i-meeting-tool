@@ -12,14 +12,11 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     // MARK: - capture components
     private var stream: SCStream?
-    private var streamOutput: StreamOutput?
+    private var streamOutput: StreamOutput?  // strong reference to prevent deallocation
     private var filter: SCContentFilter?
     
     // MARK: - audio processing
     weak var audioManager: AudioManager?  // delegate audio to main manager
-    private var warmupBuffersToDiscard = 25  // ~500ms at 48khz
-    private var discardedBuffers = 0
-    private var isWarmedUp = false
     
     // MARK: - format configuration
     private let targetSampleRate = 48000  // int for SCStreamConfiguration
@@ -54,14 +51,19 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             let filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: [])
             self.filter = filter
             
-            // configure stream for audio only
+            // configure stream for audio only with optimized settings
             let config = SCStreamConfiguration()
             config.capturesAudio = true
             config.sampleRate = targetSampleRate
             config.channelCount = targetChannels
             
-            // exclude our own app's audio
+            // exclude our own app's audio to prevent feedback
             config.excludesCurrentProcessAudio = true
+            
+            // disable video capture completely to focus on audio
+            config.width = 1
+            config.height = 1
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)  // 1 fps (minimum)
             
             print("📊 stream config: \(targetSampleRate)hz, \(targetChannels)ch, display-wide capture")
             
@@ -74,10 +76,6 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             // add audio output handler with dedicated queue
             let audioQueue = DispatchQueue(label: "com.ai-and-i.audio.capture", qos: .userInteractive)
             try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
-            
-            // reset warmup state
-            discardedBuffers = 0
-            isWarmedUp = false
             
             // start capture
             try await stream?.startCapture()
@@ -105,7 +103,6 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             filter = nil
             
             isCapturing = false
-            isWarmedUp = false
             
             print("✅ system audio capture stopped")
             
@@ -116,32 +113,8 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     // MARK: - audio processing
     
-    /// processes captured audio buffer from screencapturekit (direct, non-MainActor)
-    func processCapturedAudioDirect(_ sampleBuffer: CMSampleBuffer) {
-        // handle warmup period
-        if !isWarmedUp {
-            discardedBuffers += 1
-            if discardedBuffers < warmupBuffersToDiscard {
-                if discardedBuffers % 10 == 0 {
-                    print("🔄 system audio warming up... discarded \(discardedBuffers)")
-                }
-                return
-            } else {
-                isWarmedUp = true
-                print("✅ system audio warmup complete")
-            }
-        }
-        
-        // log format once
-        if discardedBuffers == warmupBuffersToDiscard {
-            if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)
-                if let desc = audioDesc?.pointee {
-                    print("📊 system audio format: \(desc.mSampleRate)hz, \(desc.mChannelsPerFrame)ch")
-                }
-            }
-        }
-        
+    /// processes audio buffer from the stream output handler (nonisolated for performance)
+    nonisolated func processAudioBuffer(_ sampleBuffer: CMSampleBuffer) {
         // convert cmsamplebuffer to avaudiopcmbuffer
         guard let pcmBuffer = convertToAudioBuffer(sampleBuffer) else {
             print("❌ failed to convert system audio buffer")
@@ -154,45 +127,9 @@ class ScreenCaptureManager: NSObject, ObservableObject {
         }
     }
     
-    /// processes captured audio buffer from screencapturekit (MainActor version - deprecated)
-    @MainActor
-    fileprivate func processCapturedAudio(_ sampleBuffer: CMSampleBuffer) {
-        // handle warmup period
-        if !isWarmedUp {
-            discardedBuffers += 1
-            if discardedBuffers < warmupBuffersToDiscard {
-                if discardedBuffers % 10 == 0 {
-                    print("🔄 system audio warming up... discarded \(discardedBuffers)")
-                }
-                return
-            } else {
-                isWarmedUp = true
-                print("✅ system audio warmup complete")
-            }
-        }
-        
-        // log format once
-        if discardedBuffers == warmupBuffersToDiscard {
-            if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)
-                if let desc = audioDesc?.pointee {
-                    print("📊 system audio format: \(desc.mSampleRate)hz, \(desc.mChannelsPerFrame)ch")
-                }
-            }
-        }
-        
-        // convert cmsamplebuffer to avaudiopcmbuffer
-        guard let pcmBuffer = convertToAudioBuffer(sampleBuffer) else {
-            print("❌ failed to convert system audio buffer")
-            return
-        }
-        
-        // send to audio manager for mixing/recording
-        audioManager?.processSystemAudio(pcmBuffer)
-    }
     
     /// converts cmsamplebuffer to avaudiopcmbuffer for avaudioengine
-    private func convertToAudioBuffer(_ sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+    nonisolated private func convertToAudioBuffer(_ sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
         // get format description
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
@@ -232,7 +169,6 @@ class ScreenCaptureManager: NSObject, ObservableObject {
         if let dataPointer = dataPointer,
            let channelData = pcmBuffer.floatChannelData {
             // convert data to float32
-            let bytesPerFrame = Int(asbd.mBytesPerFrame)
             let channelCount = Int(asbd.mChannelsPerFrame)
             
             dataPointer.withMemoryRebound(to: Float.self, capacity: dataLength / MemoryLayout<Float>.size) { floatPointer in
@@ -252,8 +188,12 @@ class ScreenCaptureManager: NSObject, ObservableObject {
 // MARK: - stream output handler
 
 /// handles audio output from screencapturekit stream
+/// this class is NOT MainActor isolated, allowing it to process on the audio queue
 private class StreamOutput: NSObject, SCStreamOutput {
     weak var manager: ScreenCaptureManager?
+    private var warmupBuffersToDiscard = 25
+    private var discardedBuffers = 0
+    private var isWarmedUp = false
     
     init(manager: ScreenCaptureManager) {
         self.manager = manager
@@ -263,11 +203,32 @@ private class StreamOutput: NSObject, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
         
-        // retain the buffer and process synchronously to avoid dropping
-        let retainedBuffer = sampleBuffer
-        DispatchQueue.main.async { [weak manager] in
-            manager?.processCapturedAudioDirect(retainedBuffer)
+        // handle warmup period directly here to avoid actor isolation issues
+        if !isWarmedUp {
+            discardedBuffers += 1
+            if discardedBuffers < warmupBuffersToDiscard {
+                if discardedBuffers % 10 == 0 {
+                    print("🔄 system audio warming up... discarded \(discardedBuffers)")
+                }
+                return
+            } else {
+                isWarmedUp = true
+                print("✅ system audio warmup complete")
+            }
         }
+        
+        // log format once after warmup
+        if discardedBuffers == warmupBuffersToDiscard {
+            if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)
+                if let desc = audioDesc?.pointee {
+                    print("📊 system audio format: \(desc.mSampleRate)hz, \(desc.mChannelsPerFrame)ch")
+                }
+            }
+        }
+        
+        // process the audio buffer
+        manager?.processAudioBuffer(sampleBuffer)
     }
 }
 

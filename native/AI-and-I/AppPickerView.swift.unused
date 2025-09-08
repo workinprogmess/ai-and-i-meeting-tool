@@ -1,0 +1,171 @@
+import SwiftUI
+import ScreenCaptureKit
+
+/// view for selecting which app to capture audio from
+struct AppPickerView: View {
+    @ObservedObject var screenCaptureManager: ScreenCaptureManager
+    @ObservedObject var audioManager: AudioManager
+    let performanceMonitor: PerformanceMonitor
+    @Environment(\.dismiss) private var dismiss
+    @State private var isLoading = true
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("select app to capture")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("choose the meeting app or browser")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            if isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.8)
+            } else if screenCaptureManager.availableApps.isEmpty {
+                VStack(spacing: 12) {
+                    Text("no apps available")
+                        .foregroundStyle(.secondary)
+                    
+                    Text("grant screen recording permission first")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    Button("refresh apps") {
+                        Task {
+                            isLoading = true
+                            await screenCaptureManager.refreshAvailableContent()
+                            isLoading = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(screenCaptureManager.availableApps, id: \.bundleIdentifier) { app in
+                            AppRow(
+                                app: app,
+                                isSelected: screenCaptureManager.selectedApp?.bundleIdentifier == app.bundleIdentifier,
+                                action: {
+                                    screenCaptureManager.selectedApp = app
+                                    startRecordingWithApp()
+                                }
+                            )
+                        }
+                    }
+                    .padding()
+                }
+                .frame(maxHeight: 400)
+            }
+            
+            HStack {
+                Button("cancel") {
+                    dismiss()
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+            }
+            .padding(.top)
+        }
+        .padding(30)
+        .frame(width: 400)
+        .task {
+            await screenCaptureManager.refreshAvailableContent()
+            isLoading = false
+        }
+    }
+    
+    private func startRecordingWithApp() {
+        // connect screen capture to audio manager
+        screenCaptureManager.audioManager = audioManager
+        
+        // start system audio capture
+        Task {
+            await screenCaptureManager.startCapture()
+            
+            // start recording after capture is ready
+            await MainActor.run {
+                audioManager.startRecording()
+                performanceMonitor.startRecordingMeasurement()
+                performanceMonitor.resetAudioDropouts()
+                dismiss()
+            }
+        }
+    }
+}
+
+/// row view for each available app
+struct AppRow: View {
+    let app: SCRunningApplication
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                // app icon placeholder
+                Image(systemName: iconName(for: app.applicationName))
+                    .font(.title2)
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(iconColor(for: app.applicationName))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.applicationName)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    
+                    Text(app.bundleIdentifier)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func iconName(for appName: String) -> String {
+        let name = appName.lowercased()
+        if name.contains("zoom") { return "video.circle" }
+        if name.contains("teams") { return "person.2.circle" }
+        if name.contains("meet") { return "video.badge.checkmark" }
+        if name.contains("chrome") { return "globe.badge.chevron.backward" }
+        if name.contains("safari") { return "safari" }
+        if name.contains("firefox") { return "flame" }
+        if name.contains("slack") { return "message.circle" }
+        if name.contains("discord") { return "mic.circle" }
+        return "app.circle"
+    }
+    
+    private func iconColor(for appName: String) -> Color {
+        let name = appName.lowercased()
+        if name.contains("zoom") { return .blue }
+        if name.contains("teams") { return .purple }
+        if name.contains("meet") { return .green }
+        if name.contains("chrome") { return .yellow }
+        if name.contains("safari") { return .blue }
+        if name.contains("firefox") { return .orange }
+        if name.contains("slack") { return .pink }
+        if name.contains("discord") { return .indigo }
+        return .gray
+    }
+}
