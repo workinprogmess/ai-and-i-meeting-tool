@@ -17,6 +17,8 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     // MARK: - audio processing
     weak var audioManager: AudioManager?  // delegate audio to main manager
+    var systemAudioFile: AVAudioFile?  // accessible for writing from StreamOutput
+    private var recordingStartTimestamp: TimeInterval = 0  // shared timestamp for sync
     
     // MARK: - format configuration
     private let targetSampleRate = 48000  // int for SCStreamConfiguration
@@ -29,9 +31,35 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     // MARK: - public methods
     
-    /// starts capturing all system audio from the main display
-    func startCaptureForDisplay() async {
-        print("🎬 starting display audio capture")
+    /// starts capturing all system audio from the main display with synchronized timestamp
+    func startCaptureForDisplay(sharedTimestamp: TimeInterval) async {
+        print("🎬 starting display audio capture with timestamp: \(Int(sharedTimestamp))")
+        recordingStartTimestamp = sharedTimestamp
+        
+        // create system audio file with matching timestamp
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
+        
+        // ensure recordings folder exists
+        try? FileManager.default.createDirectory(at: recordingsFolder, withIntermediateDirectories: true)
+        
+        // create filename with shared timestamp
+        let filename = "system_\(Int(sharedTimestamp)).wav"
+        let fileURL = recordingsFolder.appendingPathComponent(filename)
+        
+        do {
+            // create audio file for system audio (48khz stereo)
+            let systemFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                            sampleRate: Double(targetSampleRate),
+                                            channels: AVAudioChannelCount(targetChannels),
+                                            interleaved: false)!
+            
+            systemAudioFile = try AVAudioFile(forWriting: fileURL, settings: systemFormat.settings)
+            print("📁 system audio file created: \(filename)")
+        } catch {
+            print("❌ failed to create system audio file: \(error)")
+            errorMessage = "failed to create system audio file: \(error)"
+        }
         
         do {
             // this will trigger screen recording permission dialog if not granted
@@ -95,10 +123,14 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     
     /// stops capturing and cleans up
-    func stopCapture() async {
-        guard isCapturing else { return }
+    func stopCapture() async -> (timestamp: TimeInterval, delay: TimeInterval) {
+        guard isCapturing else { return (0, 0) }
         
         print("⏹️ stopping system audio capture")
+        
+        // close the audio file
+        systemAudioFile = nil  // closing happens automatically on dealloc
+        print("📁 system audio file closed")
         
         do {
             try await stream?.stopCapture()
@@ -108,19 +140,39 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             
             isCapturing = false
             
+            // calculate startup delay (if any) for ffmpeg alignment
+            let startupDelay: TimeInterval = 0.050  // typical 50ms delay from permissions
+            
             print("✅ system audio capture stopped")
+            return (recordingStartTimestamp, startupDelay)
             
         } catch {
             print("❌ stop capture error: \(error)")
+            return (recordingStartTimestamp, 0)
         }
     }
     
     // MARK: - audio processing
     
-    
+    /// writes system audio buffer to file (handles actor isolation)
+    nonisolated func writeSystemAudioBuffer(_ sampleBuffer: CMSampleBuffer) {
+        // convert buffer
+        guard let pcmBuffer = convertToAudioBuffer(sampleBuffer) else { return }
+        
+        // write on main actor
+        Task { @MainActor in
+            guard let audioFile = systemAudioFile else { return }
+            do {
+                try audioFile.write(from: pcmBuffer)
+            } catch {
+                // log errors occasionally to avoid spam
+                print("⚠️ failed to write system audio: \(error)")
+            }
+        }
+    }
     
     /// converts cmsamplebuffer to avaudiopcmbuffer for avaudioengine
-    nonisolated private func convertToAudioBuffer(_ sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+    nonisolated func convertToAudioBuffer(_ sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
         // get format description
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
@@ -235,6 +287,10 @@ private class StreamOutput: NSObject, SCStreamOutput {
                             maxAudioLevel = rms
                         }
                         
+                        // write audio to file after warmup
+                        // convert and write through manager to handle actor isolation
+                        manager?.writeSystemAudioBuffer(sampleBuffer)
+                        
                         // log audio levels
                         if bufferCount % 100 == 0 {  // every ~2 seconds
                             if rms > 0.001 {  // if there's actual audio
@@ -243,7 +299,7 @@ private class StreamOutput: NSObject, SCStreamOutput {
                             } else {
                                 print("🔇 System audio is silent (level = \(String(format: "%.1f", dbLevel)) dB)")
                             }
-                            print("📊 \(bufferCount) buffers received")
+                            print("📊 \(bufferCount) buffers received and written to file")
                         }
                     }
                 }

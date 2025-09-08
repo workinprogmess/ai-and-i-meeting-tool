@@ -25,6 +25,7 @@ class AudioManager: NSObject, ObservableObject {
     private var audioConverter: AVAudioConverter?
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
+    private var recordingTimestamp: TimeInterval?  // shared timestamp for sync
     
     // MARK: - system audio mixing components
     private var systemAudioPlayer: AVAudioPlayerNode?
@@ -374,13 +375,16 @@ extension AudioManager {
 extension AudioManager {
     
     /// starts recording with lazy permissions and engine setup
-    func startRecording() {
+    func startRecording(timestamp: TimeInterval? = nil) {
         print("🎤 start recording called")
         
         guard !isRecording else {
             print("⚠️ recording already in progress")
             return
         }
+        
+        // store timestamp for file creation
+        self.recordingTimestamp = timestamp
         
         // measure recording start latency with performance monitor
         Task { @MainActor in
@@ -459,7 +463,7 @@ extension AudioManager {
         
         // phase 2: setup and start real audio recording
         do {
-            try startRealAudioRecording()
+            try startRealAudioRecording(timestamp: recordingTimestamp)
             isRecording = true
             startRecordingTimer()
             print("✅ phase 2: recording started with audio engine")
@@ -734,7 +738,7 @@ extension AudioManager {
     }
     
     /// phase 2: sets up and starts real audio recording
-    private func startRealAudioRecording() throws {
+    private func startRealAudioRecording(timestamp: TimeInterval? = nil) throws {
         // always recreate engine to handle device changes (airpods switching)
         if audioEngine?.isRunning == true {
             audioEngine?.stop()
@@ -838,11 +842,17 @@ extension AudioManager {
             throw AudioError.engineNotConfigured
         }
         
-        // create recording file
+        // create recording file with shared timestamp
         let documentsPath = FileManager.default.urls(for: .documentDirectory,
                                                      in: .userDomainMask).first!
-        let timestamp = Date().timeIntervalSince1970
-        let recordingURL = documentsPath.appendingPathComponent("recording_\(timestamp).wav")
+        let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
+        
+        // ensure folder exists
+        try? FileManager.default.createDirectory(at: recordingsFolder, withIntermediateDirectories: true)
+        
+        // use shared timestamp for perfect sync with system audio
+        let recordingTimestamp = timestamp ?? Date().timeIntervalSince1970
+        let recordingURL = recordingsFolder.appendingPathComponent("mic_\(Int(recordingTimestamp)).wav")
         
         // use mono 48kHz for file (Voice Memos style)
         let inputNode = engine.inputNode
@@ -1052,10 +1062,10 @@ extension AudioManager {
     
     
     /// internal recording start implementation - optimized for speed
-    private func performStartRecording() {
+    private func performStartRecording(timestamp: TimeInterval? = nil) {
         do {
             // create output file with timestamp
-            let outputFile = try createRecordingFile()
+            let outputFile = try createRecordingFile(timestamp: timestamp)
             self.outputFile = outputFile
             
             // configure audio format matching engine format
@@ -1083,11 +1093,17 @@ extension AudioManager {
     }
     
     /// creates timestamped recording file in documents directory
-    private func createRecordingFile() throws -> AVAudioFile {
+    private func createRecordingFile(timestamp: TimeInterval? = nil) throws -> AVAudioFile {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let fileName = "ai-and-i-recording-\(timestamp).wav"
-        let fileURL = documentsPath.appendingPathComponent(fileName)
+        let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
+        
+        // ensure recordings folder exists
+        try? FileManager.default.createDirectory(at: recordingsFolder, withIntermediateDirectories: true)
+        
+        // use shared timestamp for perfect sync with system audio
+        let recordingTimestamp = timestamp ?? Date().timeIntervalSince1970
+        let fileName = "mic_\(Int(recordingTimestamp)).wav"
+        let fileURL = recordingsFolder.appendingPathComponent(fileName)
         
         print("📁 creating recording file: \(fileName)")
         

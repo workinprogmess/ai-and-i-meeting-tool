@@ -93,25 +93,32 @@ struct ContentView: View {
             audioManager.stopRecording()
             performanceMonitor.endRecordingMeasurement()
             
-            // stop system audio capture
+            // stop system audio capture and get timing info
             Task {
-                await screenCaptureManager.stopCapture()
+                let (timestamp, delay) = await screenCaptureManager.stopCapture()
+                
+                // trigger ffmpeg mixing here (future implementation)
+                if timestamp > 0 {
+                    print("🎬 ready to mix audio files with timestamp: \(Int(timestamp)), delay: \(delay)s")
+                    // TODO: call ffmpeg to mix mic_\(timestamp).wav + system_\(timestamp).wav
+                }
             }
         } else {
-            // start both recordings - let each handle their own permissions
-            print("🎬 starting recording...")
+            // generate shared timestamp for both recordings
+            let sharedTimestamp = Date().timeIntervalSince1970
+            print("🎬 starting recording with shared timestamp: \(Int(sharedTimestamp))")
             
-            // start mic recording (will prompt for mic permission if needed)
-            audioManager.startRecording()
+            // start mic recording with timestamp (will prompt for mic permission if needed)
+            audioManager.startRecording(timestamp: sharedTimestamp)
             print("📍 called audioManager.startRecording, isRecording = \(audioManager.isRecording)")
             performanceMonitor.startRecordingMeasurement()
             performanceMonitor.resetAudioDropouts()
             
-            // Start screen capture for system audio
+            // Start screen capture for system audio with same timestamp
             // Now that we've fixed the format conflict, this should work
             screenCaptureManager.audioManager = audioManager
             Task {
-                await screenCaptureManager.startCaptureForDisplay()
+                await screenCaptureManager.startCaptureForDisplay(sharedTimestamp: sharedTimestamp)
                 print("📍 screen capture started, isCapturing = \(await screenCaptureManager.isCapturing)")
             }
         }
