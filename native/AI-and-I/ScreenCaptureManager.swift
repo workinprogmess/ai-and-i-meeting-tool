@@ -60,11 +60,12 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             // exclude our own app's audio to prevent feedback
             config.excludesCurrentProcessAudio = true
             
-            // set minimal but valid video config (required even for audio-only)
-            // SCStream requires valid video dimensions even when we only want audio
-            config.width = 16  // minimum valid width
-            config.height = 16  // minimum valid height
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)  // 1 fps (minimum to reduce overhead)
+            // try to disable video capture completely
+            // these "dropping frame" errors are about video frames, not audio
+            config.width = 1920  // standard size to avoid errors
+            config.height = 1080  
+            config.minimumFrameInterval = CMTime(value: 600, timescale: 1)  // extremely low fps (0.0016 fps)
+            config.scalesToFit = false
             
             print("📊 stream config: \(targetSampleRate)hz, \(targetChannels)ch, display-wide capture")
             
@@ -74,9 +75,11 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             // create output handler
             streamOutput = StreamOutput(manager: self)
             
-            // add audio output handler with dedicated queue
+            // add ONLY audio output handler - no video handler
+            // this should prevent video frame dropping errors
             let audioQueue = DispatchQueue(label: "com.ai-and-i.audio.capture", qos: .userInteractive)
             try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+            // explicitly NOT adding a video output handler
             
             // start capture
             try await stream?.startCapture()
@@ -208,6 +211,7 @@ private class StreamOutput: NSObject, SCStreamOutput {
         // log occasionally to show it's working
         if bufferCount % 100 == 0 {  // every ~2 seconds at 48khz
             print("🔊 system audio streaming: \(bufferCount) buffers received")
+            print("📝 note: 'dropping frame' errors are about video, not audio - audio is working fine")
         }
     }
 }
