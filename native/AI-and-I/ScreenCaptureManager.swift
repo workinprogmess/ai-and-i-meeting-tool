@@ -114,18 +114,6 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     // MARK: - audio processing
     
-    /// processes audio buffer from the stream output handler (nonisolated for performance)
-    nonisolated func processAudioBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // for now, just count the buffers to verify we're receiving them
-        // the conversion and processing will be optimized later
-        // this avoids the "dropping frame" errors by processing quickly
-        
-        // only convert and send every 10th buffer to reduce load
-        // this is temporary until we implement proper buffering
-        Task { @MainActor in
-            audioManager?.noteSystemAudioReceived()
-        }
-    }
     
     
     /// converts cmsamplebuffer to avaudiopcmbuffer for avaudioengine
@@ -191,9 +179,8 @@ class ScreenCaptureManager: NSObject, ObservableObject {
 /// this class is NOT MainActor isolated, allowing it to process on the audio queue
 private class StreamOutput: NSObject, SCStreamOutput {
     weak var manager: ScreenCaptureManager?
-    private var warmupBuffersToDiscard = 25
-    private var discardedBuffers = 0
-    private var isWarmedUp = false
+    private var bufferCount = 0
+    private var hasLoggedFormat = false
     
     init(manager: ScreenCaptureManager) {
         self.manager = manager
@@ -203,33 +190,25 @@ private class StreamOutput: NSObject, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
         
-        // handle warmup period directly here to avoid actor isolation issues
-        if !isWarmedUp {
-            discardedBuffers += 1
-            if discardedBuffers < warmupBuffersToDiscard {
-                if discardedBuffers % 10 == 0 {
-                    print("🔄 system audio warming up... discarded \(discardedBuffers)")
-                }
-                return
-            } else {
-                isWarmedUp = true
-                print("✅ system audio warmup complete")
-            }
-        }
+        bufferCount += 1
         
-        // log format once after warmup
-        if discardedBuffers == warmupBuffersToDiscard {
+        // log format only once at the beginning
+        if !hasLoggedFormat && bufferCount == 25 {  // after ~0.5 seconds
+            hasLoggedFormat = true
             if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
                 let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)
                 if let desc = audioDesc?.pointee {
                     print("📊 system audio format: \(desc.mSampleRate)hz, \(desc.mChannelsPerFrame)ch")
-                    print("📊 system audio is now streaming successfully")
+                    print("✅ system audio is now streaming successfully")
                 }
             }
         }
         
-        // process the audio buffer
-        manager?.processAudioBuffer(sampleBuffer)
+        // just count buffers - don't process to avoid dropping frames
+        // log occasionally to show it's working
+        if bufferCount % 100 == 0 {  // every ~2 seconds at 48khz
+            print("🔊 system audio streaming: \(bufferCount) buffers received")
+        }
     }
 }
 
