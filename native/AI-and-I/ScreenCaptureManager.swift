@@ -51,7 +51,7 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             let filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: [])
             self.filter = filter
             
-            // configure stream for audio only with optimized settings
+            // configure stream for audio only
             let config = SCStreamConfiguration()
             config.capturesAudio = true
             config.sampleRate = targetSampleRate
@@ -60,10 +60,11 @@ class ScreenCaptureManager: NSObject, ObservableObject {
             // exclude our own app's audio to prevent feedback
             config.excludesCurrentProcessAudio = true
             
-            // disable video capture completely to focus on audio
-            config.width = 1
-            config.height = 1
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)  // 1 fps (minimum)
+            // set minimal but valid video config (required even for audio-only)
+            // SCStream requires valid video dimensions even when we only want audio
+            config.width = 16  // minimum valid width
+            config.height = 16  // minimum valid height
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)  // 1 fps (minimum to reduce overhead)
             
             print("📊 stream config: \(targetSampleRate)hz, \(targetChannels)ch, display-wide capture")
             
