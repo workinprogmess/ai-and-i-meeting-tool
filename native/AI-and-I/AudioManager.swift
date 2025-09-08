@@ -21,6 +21,7 @@ class AudioManager: NSObject, ObservableObject {
     private var micInput: AVAudioInputNode!
     private var mixerNode: AVAudioMixerNode!
     private var outputFile: AVAudioFile?
+    private var systemAudioBufferCount = 0  // track system audio buffers
     private var audioConverter: AVAudioConverter?
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
@@ -241,10 +242,21 @@ extension AudioManager {
         print("🎛️ audio mixing nodes configured for mic + system")
     }
     
+    /// simple counter for system audio buffers (temporary)
+    func noteSystemAudioReceived() {
+        systemAudioBufferCount += 1
+        if systemAudioBufferCount % 50 == 1 {  // log every 50th buffer (~1 per second)
+            print("🔊 system audio streaming: buffer #\(systemAudioBufferCount)")
+        }
+    }
+    
     /// processes system audio from screencapturekit
     func processSystemAudio(_ buffer: AVAudioPCMBuffer) {
-        // Log that we're receiving system audio
-        print("🔊 received system audio: \(buffer.frameLength) frames, \(buffer.format.sampleRate)Hz, \(buffer.format.channelCount)ch")
+        // Log occasionally to avoid console spam
+        systemAudioBufferCount += 1
+        if systemAudioBufferCount % 50 == 1 {  // log every 50th buffer (~1 per second)
+            print("🔊 received system audio: \(buffer.frameLength) frames, \(buffer.format.sampleRate)Hz, \(buffer.format.channelCount)ch (buffer #\(systemAudioBufferCount))")
+        }
         
         // TODO: Properly mix with mic audio
         // For now, we're just verifying system audio capture works
