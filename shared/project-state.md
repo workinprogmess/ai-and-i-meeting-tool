@@ -78,11 +78,35 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - double processing harmful: airpods already have dsp, additional processing causes artifacts
 - debug vs release builds: audio processing requires release optimizations for real-time performance
 
-**phase 2 step 2: system audio capture (next)**:
-- 🔄 screencapturekit integration for system audio
-- 🔄 real-time mixing of mic + system audio streams
-- 🔄 single mixed .wav file output with perfect synchronization
-- 🔄 proper temporal alignment (avoiding electron's dual-stream issues)
+**phase 2 step 2: system audio capture (2025-09-08) - completed**:
+- ✅ screencapturekit integration with full system audio capture
+- ✅ developer certificate implemented to fix permission loops ($99 apple developer account)
+- ✅ app sandboxing disabled for screencapturekit functionality
+- ✅ audio format handling (48khz mono mic + 48khz stereo system)
+- ✅ stream output handler optimized to eliminate frame drops
+- ✅ audio level detection proves real system audio capture
+- ✅ macos 15 sequoia privacy dialog handled correctly
+
+**critical fixes during system audio implementation**:
+- fixed permission loops with developer certificate (ad-hoc signing was the issue)
+- resolved "dropping frame" errors by minimizing processing in audio callback
+- adjusted scstream video config (16x16 minimum) to prevent stream creation failures
+- implemented thread-safe audio processing with nonisolated methods
+
+**audio mixing approach decision (2025-09-08)**:
+- ✅ evaluated three approaches: real-time avaudioengine, ring buffer, two files + ffmpeg
+- ✅ selected two-file approach with automatic ffmpeg mixing for reliability
+- ✅ documented decision in AUDIO_MIXING_DECISION.md
+- ✅ perfect sync via shared timestamps (both streams use mach_absolute_time())
+- ✅ post-processing with ffmpeg provides single mixed file for transcription
+- ✅ fallback safety: both files available if mixing fails
+
+**phase 2 step 3: audio mixing implementation (next)**:
+- 🔄 implement system audio file writer in screencapturemanager
+- 🔄 ensure synchronized timestamps for both audio files
+- 🔄 measure startup delay between mic and system streams
+- 🔄 automatic ffmpeg mixing when recording stops
+- 🔄 test mixed output alignment and quality
 
 **validation approach**: test individual components first, then integrated system
 - performance benchmarks: measure against voice memos and industry standards  
