@@ -4,12 +4,14 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: native foundation (0.1.0) 
-**status**: 🔄 in progress
+**status**: 🎯 nearing completion (phase 2 step 3 done!)
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
-- 🔄 core audio mixed device creation (hardware-level audio capture)
-- 📋 basic recording functionality testing
+- ✅ dual-file audio capture (mic + system) with synchronization
+- ✅ ffmpeg mixing with delay compensation
+- ✅ performance monitoring and insights dashboard
+- 🔄 testing with real meetings for transcription quality
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -101,12 +103,25 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - ✅ post-processing with ffmpeg provides single mixed file for transcription
 - ✅ fallback safety: both files available if mixing fails
 
-**phase 2 step 3: audio mixing implementation (next)**:
-- 🔄 implement system audio file writer in screencapturemanager
-- 🔄 ensure synchronized timestamps for both audio files
-- 🔄 measure startup delay between mic and system streams
-- 🔄 automatic ffmpeg mixing when recording stops
-- 🔄 test mixed output alignment and quality
+**phase 2 step 3: audio mixing implementation (2025-09-10) - completed**:
+- ✅ implement system audio file writer in screencapturemanager
+- ✅ ensure synchronized timestamps for both audio files
+- ✅ measure startup delay between mic and system streams (~2.28s typical)
+- ✅ automatic ffmpeg mixing when recording stops
+- ✅ test mixed output alignment and quality
+
+**mixing implementation details**:
+- ffmpeg path detection for both intel and apple silicon macs
+- 2-second delay compensation (system audio typically starts late)
+- friend's optimized mixing recipe:
+  - normalize=0 to prevent auto-attenuation
+  - highpass filter at 90hz to remove rumble
+  - gentle compression on mic for consistency
+  - volume balance: mic 1.4x, system 0.7x
+  - limiter at -1 dbfs for safety
+- perfect timestamp alignment achieved
+- acoustic bleed identified (speakers → mic) - normal for speaker playback
+- recommendation: use headphones for best quality, but speaker bleed acceptable
 
 **validation approach**: test individual components first, then integrated system
 - performance benchmarks: measure against voice memos and industry standards  
