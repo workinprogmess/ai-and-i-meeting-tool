@@ -142,12 +142,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             framesCaptured = 0
             
             // create stream
-            guard let newStream = SCStream(filter: filter!, configuration: config, delegate: nil) else {
-                print("❌ failed to create SCStream")
-                errorMessage = "failed to create stream"
-                return
-            }
-            stream = newStream
+            stream = SCStream(filter: filter!, configuration: config, delegate: nil)
             print("✅ stream created")
             
             // create output handler
@@ -156,11 +151,18 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             
             // add audio output handler
             let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
-            try stream!.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+            
+            guard let stream = stream else {
+                print("❌ stream is nil after creation")
+                errorMessage = "stream creation failed"
+                return
+            }
+            
+            try stream.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
             print("✅ audio output handler added")
             
             // start capture
-            try await stream!.startCapture()
+            try await stream.startCapture()
             print("✅ stream capture started")
             
             print("✅ system segment #\(segmentNumber) started")
