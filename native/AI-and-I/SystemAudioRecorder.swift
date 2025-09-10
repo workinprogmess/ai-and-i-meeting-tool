@@ -94,7 +94,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         do {
             // get shareable content
+            print("🔍 requesting shareable content...")
             let content = try await SCShareableContent.current
+            print("✅ got shareable content")
             guard let display = content.displays.first else {
                 errorMessage = "no display found"
                 print("❌ no display found for system audio")
@@ -117,10 +119,10 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             config.channelCount = 2  // stereo for system audio
             config.excludesCurrentProcessAudio = true
             
-            // minimize video capture (we don't need it)
-            config.width = 1920
-            config.height = 1080
-            config.minimumFrameInterval = CMTime(value: 600, timescale: 1)
+            // set minimal video settings to avoid errors
+            config.width = 1
+            config.height = 1
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
             
             print("📊 stream config: 48000hz, 2ch, display-wide capture")
             
@@ -140,17 +142,26 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             framesCaptured = 0
             
             // create stream
-            stream = SCStream(filter: filter!, configuration: config, delegate: nil)
+            guard let newStream = SCStream(filter: filter!, configuration: config, delegate: nil) else {
+                print("❌ failed to create SCStream")
+                errorMessage = "failed to create stream"
+                return
+            }
+            stream = newStream
+            print("✅ stream created")
             
             // create output handler
             streamOutput = SystemStreamOutput(recorder: self)
+            print("✅ output handler created")
             
             // add audio output handler
             let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
-            try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+            try stream!.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+            print("✅ audio output handler added")
             
             // start capture
-            try await stream?.startCapture()
+            try await stream!.startCapture()
+            print("✅ stream capture started")
             
             print("✅ system segment #\(segmentNumber) started")
             
