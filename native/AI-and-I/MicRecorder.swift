@@ -133,6 +133,7 @@ class MicRecorder: ObservableObject {
             return
         }
         
+        // don't try to set device - avaudioengine uses system default automatically
         let inputNode = engine.inputNode  // inputNode is not optional
         
         // get device info
@@ -193,10 +194,13 @@ class MicRecorder: ObservableObject {
         engine.prepare()
         do {
             try engine.start()
-            print("✅ mic segment #\(segmentNumber) started")
+            print("✅ mic segment #\(segmentNumber) started - recording with \(currentDeviceName)")
         } catch {
             errorMessage = "failed to start audio engine: \(error)"
             print("❌ engine start failed: \(error)")
+            // clean up on failure
+            audioEngine = nil
+            audioFile = nil
         }
     }
     

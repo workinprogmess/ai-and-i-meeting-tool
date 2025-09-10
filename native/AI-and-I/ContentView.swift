@@ -124,7 +124,10 @@ struct ContentView: View {
                 
                 // connect device change callbacks
                 deviceMonitor.onMicDeviceChange = { reason in
-                    micRecorder.handleDeviceChange(reason: reason)
+                    // handle on main actor to avoid deadlock
+                    Task { @MainActor in
+                        micRecorder.handleDeviceChange(reason: reason)
+                    }
                 }
                 deviceMonitor.onSystemDeviceChange = { reason in
                     Task {
