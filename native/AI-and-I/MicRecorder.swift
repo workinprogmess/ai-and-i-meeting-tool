@@ -123,11 +123,12 @@ class MicRecorder: ObservableObject {
         
         // create new audio engine
         audioEngine = AVAudioEngine()
-        guard let engine = audioEngine,
-              let inputNode = engine.inputNode else {
+        guard let engine = audioEngine else {
             errorMessage = "failed to create audio engine"
             return
         }
+        
+        let inputNode = engine.inputNode  // inputNode is not optional
         
         // get device info
         let inputFormat = inputNode.inputFormat(forBus: 0)
@@ -274,7 +275,7 @@ class MicRecorder: ObservableObject {
     /// checks if we should switch to new device
     private func shouldSwitchToNewDevice() -> Bool {
         // get new device info
-        guard let newDevice = AVAudioEngine().inputNode else { return false }
+        let newDevice = AVAudioEngine().inputNode  // inputNode is not optional
         let newFormat = newDevice.inputFormat(forBus: 0)
         let newQuality = AudioSegmentMetadata.assessQuality(sampleRate: newFormat.sampleRate)
         
