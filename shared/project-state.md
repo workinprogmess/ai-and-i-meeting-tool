@@ -72,12 +72,13 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - implemented airpods device selection (explicit audiounit config) ⚠️
 - reduced warmup buffer discard (better recording start latency) ✅
 
-**phase 4 implementation plan (2025-01-10)**:
-- detect device connection/disconnection events during recording
-- implement audio engine recreation without losing data
-- maintain recording continuity across device switches
-- handle airpods connection mid-meeting seamlessly
-- preserve audio buffers during transition
+**phase 4 architecture defined (2025-01-10)**:
+- comprehensive device switching design documented
+- segmented recording approach with independent pipelines
+- metadata tracking for perfect timeline reconstruction
+- quality guards against telephony mode
+- debouncing and rate limiting for stability
+- see: DEVICE_SWITCHING_ARCHITECTURE.md for complete design
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅
