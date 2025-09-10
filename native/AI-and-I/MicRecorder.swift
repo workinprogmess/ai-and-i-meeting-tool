@@ -40,6 +40,11 @@ class MicRecorder: ObservableObject {
     private var discardedFrames: AVAudioFrameCount = 0
     private let warmupFrames: AVAudioFrameCount = 24000  // 0.5s at 48khz
     
+    // MARK: - agc (automatic gain control)
+    private var agcEnabled = true
+    private var currentGain: Float = 2.5  // boost for quiet built-in mics
+    private let targetLevel: Float = -12.0  // target dBFS
+    
     // MARK: - quality control
     private var lastDeviceChangeTime: Date = Date.distantPast
     private var deviceChangeCount: Int = 0
@@ -141,6 +146,20 @@ class MicRecorder: ObservableObject {
         // assess quality
         currentQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
         
+        // configure agc based on device
+        if currentDeviceName.lowercased().contains("airpod") {
+            agcEnabled = false  // airpods have their own processing
+            currentGain = 1.0
+            print("🎧 airpods detected - agc disabled")
+        } else if currentDeviceName.lowercased().contains("mac") || currentDeviceName.lowercased().contains("built") {
+            agcEnabled = true  // built-in mics need boost
+            currentGain = 2.5
+            print("🎚️ built-in mic - agc enabled with 2.5x gain")
+        } else {
+            agcEnabled = false  // other external devices
+            currentGain = 1.0
+        }
+        
         // quality guard - warn on telephony mode
         if currentQuality == .low {
             print("⚠️ low quality detected (\(inputFormat.sampleRate)hz)")
@@ -233,13 +252,21 @@ class MicRecorder: ObservableObject {
             return  // discard this buffer
         }
         
+        // apply agc if enabled (for built-in mic)
+        let processedBuffer: AVAudioPCMBuffer
+        if agcEnabled && currentDeviceName.lowercased().contains("mac") {
+            processedBuffer = applyAGC(to: buffer) ?? buffer
+        } else {
+            processedBuffer = buffer
+        }
+        
         // convert format if needed
         let bufferToWrite: AVAudioPCMBuffer
         if inputFormat != targetFormat {
             // need conversion
             guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat),
                   let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat,
-                                                         frameCapacity: buffer.frameLength) else {
+                                                         frameCapacity: processedBuffer.frameLength) else {
                 print("⚠️ format conversion failed")
                 return
             }
@@ -247,7 +274,7 @@ class MicRecorder: ObservableObject {
             var error: NSError?
             let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
                 outStatus.pointee = .haveData
-                return buffer
+                return processedBuffer
             }
             
             converter.convert(to: convertedBuffer, error: &error, withInputFrom: inputBlock)
@@ -259,7 +286,7 @@ class MicRecorder: ObservableObject {
             
             bufferToWrite = convertedBuffer
         } else {
-            bufferToWrite = buffer
+            bufferToWrite = processedBuffer
         }
         
         // write to file
@@ -372,6 +399,45 @@ class MicRecorder: ObservableObject {
         )
         
         return recordingsFolder.appendingPathComponent(fileName).path
+    }
+    
+    /// applies automatic gain control to boost quiet mics
+    private func applyAGC(to buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let floatData = buffer.floatChannelData else { return buffer }
+        
+        let frameLength = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        
+        // calculate current level (rms)
+        var sum: Float = 0
+        for channel in 0..<channelCount {
+            for frame in 0..<frameLength {
+                let sample = floatData[channel][frame]
+                sum += sample * sample
+            }
+        }
+        let rms = sqrt(sum / Float(frameLength * channelCount))
+        let currentDB = 20 * log10(max(rms, 0.00001))
+        
+        // adjust gain to reach target level
+        if currentDB < targetLevel - 3 {
+            // increase gain (up to 4x)
+            currentGain = min(currentGain * 1.1, 4.0)
+        } else if currentDB > targetLevel + 3 {
+            // decrease gain (down to 1x)
+            currentGain = max(currentGain * 0.9, 1.0)
+        }
+        
+        // apply gain
+        for channel in 0..<channelCount {
+            for frame in 0..<frameLength {
+                floatData[channel][frame] *= currentGain
+                // prevent clipping
+                floatData[channel][frame] = max(-1.0, min(1.0, floatData[channel][frame]))
+            }
+        }
+        
+        return buffer
     }
     
     /// saves session metadata to disk
