@@ -19,10 +19,13 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     weak var audioManager: AudioManager?  // delegate audio to main manager
     var systemAudioFile: AVAudioFile?  // accessible for writing from StreamOutput
     private var recordingStartTimestamp: TimeInterval = 0  // shared timestamp for sync
+    private let audioFileWriteQueue = DispatchQueue(label: "com.ai-and-i.audio.filewrite", qos: .userInitiated)
+    private var firstBufferTimestamp: TimeInterval? = nil  // track when audio actually starts
+    private var actualSampleRate: Double = 48000  // will be updated from actual stream
     
     // MARK: - format configuration
     private let targetSampleRate = 48000  // int for SCStreamConfiguration
-    private let targetChannels = 2  // stereo for system audio
+    private let targetChannels = 1  // mono to match mic file and save space
     
     override init() {
         super.init()
@@ -134,21 +137,31 @@ class ScreenCaptureManager: NSObject, ObservableObject {
         
         do {
             try await stream?.stopCapture()
+            
+            // calculate actual startup delay based on when first buffer arrived
+            let actualDelay: TimeInterval
+            if let firstBufferTime = streamOutput?.firstBufferTimestamp {
+                actualDelay = firstBufferTime - recordingStartTimestamp
+                print("📊 measured system audio delay: \(String(format: "%.3f", actualDelay))s")
+            } else {
+                // use default if we couldn't measure
+                actualDelay = 2.0
+                print("📊 using default system audio delay: 2.0s")
+            }
+            
             stream = nil
             streamOutput = nil
             filter = nil
+            firstBufferTimestamp = nil
             
             isCapturing = false
             
-            // calculate startup delay (if any) for ffmpeg alignment
-            let startupDelay: TimeInterval = 0.050  // typical 50ms delay from permissions
-            
             print("✅ system audio capture stopped")
-            return (recordingStartTimestamp, startupDelay)
+            return (recordingStartTimestamp, actualDelay)
             
         } catch {
             print("❌ stop capture error: \(error)")
-            return (recordingStartTimestamp, 0)
+            return (recordingStartTimestamp, 2.0)  // default delay on error
         }
     }
     
@@ -156,17 +169,27 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     /// writes system audio buffer to file (handles actor isolation)
     nonisolated func writeSystemAudioBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // convert buffer
-        guard let pcmBuffer = convertToAudioBuffer(sampleBuffer) else { return }
+        // convert buffer first (can be done on any thread)
+        guard let pcmBuffer = convertToAudioBuffer(sampleBuffer) else { 
+            print("⚠️ failed to convert system audio buffer")
+            return 
+        }
         
-        // write on main actor
-        Task { @MainActor in
-            guard let audioFile = systemAudioFile else { return }
-            do {
-                try audioFile.write(from: pcmBuffer)
-            } catch {
-                // log errors occasionally to avoid spam
-                print("⚠️ failed to write system audio: \(error)")
+        // write synchronously on dedicated queue to ensure all buffers are written
+        audioFileWriteQueue.sync { [weak self] in
+            // need to access file on main thread due to MainActor isolation
+            DispatchQueue.main.sync {
+                guard let audioFile = self?.systemAudioFile else { 
+                    print("⚠️ system audio file is nil")
+                    return 
+                }
+                
+                do {
+                    try audioFile.write(from: pcmBuffer)
+                    // successful write - no need to log every buffer
+                } catch {
+                    print("❌ failed to write system audio: \(error)")
+                }
             }
         }
     }
@@ -237,6 +260,7 @@ private class StreamOutput: NSObject, SCStreamOutput {
     private var bufferCount = 0
     private var hasLoggedFormat = false
     private var maxAudioLevel: Float = 0.0
+    var firstBufferTimestamp: TimeInterval? = nil  // track when first buffer arrives
     
     init(manager: ScreenCaptureManager) {
         self.manager = manager
@@ -247,6 +271,15 @@ private class StreamOutput: NSObject, SCStreamOutput {
         guard type == .audio else { return }
         
         bufferCount += 1
+        
+        // track when first buffer arrives for delay calculation
+        if firstBufferTimestamp == nil {
+            firstBufferTimestamp = Date().timeIntervalSince1970
+            print("⏱️ first system audio buffer arrived at buffer #\(bufferCount)")
+        }
+        
+        // ALWAYS write the audio buffer to file (not just when checking levels!)
+        manager?.writeSystemAudioBuffer(sampleBuffer)
         
         // log format only once at the beginning
         if !hasLoggedFormat && bufferCount == 25 {  // after ~0.5 seconds
@@ -286,10 +319,6 @@ private class StreamOutput: NSObject, SCStreamOutput {
                         if rms > maxAudioLevel {
                             maxAudioLevel = rms
                         }
-                        
-                        // write audio to file after warmup
-                        // convert and write through manager to handle actor isolation
-                        manager?.writeSystemAudioBuffer(sampleBuffer)
                         
                         // log audio levels
                         if bufferCount % 100 == 0 {  // every ~2 seconds

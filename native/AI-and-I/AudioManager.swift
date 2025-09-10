@@ -209,6 +209,164 @@ enum AudioError: LocalizedError {
     }
 }
 
+// MARK: - audio mixing with ffmpeg
+extension AudioManager {
+    
+    /// mixes mic and system audio files using ffmpeg with delay compensation
+    /// implements your friend's recommended approach with atrim, asetpts, and alimiter
+    @MainActor
+    func mixAudioFiles(timestamp: TimeInterval, systemDelay: TimeInterval = 2.0) async -> Bool {
+        print("🎛️ starting audio mixing with ffmpeg")
+        print("   timestamp: \(Int(timestamp))")
+        print("   system delay: \(String(format: "%.3f", systemDelay))s")
+        
+        // construct file paths
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
+        
+        let micFile = recordingsFolder.appendingPathComponent("mic_\(Int(timestamp)).wav").path
+        let systemFile = recordingsFolder.appendingPathComponent("system_\(Int(timestamp)).wav").path
+        let outputFile = recordingsFolder.appendingPathComponent("mixed_\(Int(timestamp)).wav").path
+        
+        // check if both files exist
+        guard FileManager.default.fileExists(atPath: micFile) else {
+            print("❌ mic file not found: \(micFile)")
+            errorMessage = "mic recording file not found"
+            return false
+        }
+        
+        guard FileManager.default.fileExists(atPath: systemFile) else {
+            print("❌ system file not found: \(systemFile)")
+            errorMessage = "system audio file not found"
+            return false
+        }
+        
+        // determine trim strategy based on delay
+        let absDelay = abs(systemDelay)
+        
+        // clamp tiny offsets (< 100ms) to zero as your friend suggests
+        let shouldTrim = absDelay > 0.1
+        
+        // build ffmpeg command using your friend's recipe
+        var ffmpegArgs: [String] = []
+        
+        if !shouldTrim {
+            // no significant delay, simple mix
+            print("📊 delay < 100ms, using simple mix without trimming")
+            ffmpegArgs = [
+                "-i", micFile,
+                "-i", systemFile,
+                "-filter_complex",
+                "[0:a]highpass=f=90,acompressor=threshold=-24dB:ratio=2:attack=15:release=300,volume=1.4[m];[1:a]volume=0.7[s];[m][s]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0,alimiter=limit=0.89",
+                "-c:a", "pcm_s16le",
+                "-y",  // overwrite if exists
+                outputFile
+            ]
+        } else if systemDelay > 0 {
+            // system is late, trim system by delay (most common case)
+            print("📊 system late by \(String(format: "%.3f", systemDelay))s, trimming system audio")
+            // using your friend's exact recipe with normalize=0 and highpass
+            ffmpegArgs = [
+                "-i", micFile,
+                "-i", systemFile,
+                "-filter_complex",
+                "[0:a]highpass=f=90,acompressor=threshold=-24dB:ratio=2:attack=15:release=300,volume=1.4[m];[1:a]atrim=start=\(String(format: "%.3f", systemDelay)),asetpts=PTS-STARTPTS,volume=0.7[s];[m][s]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0,alimiter=limit=0.89",
+                "-c:a", "pcm_s16le",
+                "-y",
+                outputFile
+            ]
+        } else {
+            // system is early (rare), trim mic by |delay|
+            print("📊 system early by \(String(format: "%.3f", absDelay))s, trimming mic audio")
+            ffmpegArgs = [
+                "-i", micFile,
+                "-i", systemFile,
+                "-filter_complex",
+                "[0:a]atrim=start=\(String(format: "%.3f", absDelay)),asetpts=PTS-STARTPTS,volume=1.2[a0];[1:a]asetpts=PTS-STARTPTS,volume=0.7[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=2,alimiter=limit=0.89",
+                "-c:a", "pcm_s16le",
+                "-y",
+                outputFile
+            ]
+        }
+        
+        // execute ffmpeg
+        print("🔧 executing ffmpeg command...")
+        print("   ffmpeg \(ffmpegArgs.joined(separator: " "))")
+        
+        return await withCheckedContinuation { continuation in
+            Task {
+                do {
+                    let process = Process()
+                    // check both common ffmpeg locations (intel vs apple silicon)
+                    let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+                    var ffmpegPath: String?
+                    
+                    for path in ffmpegPaths {
+                        if FileManager.default.fileExists(atPath: path) {
+                            ffmpegPath = path
+                            break
+                        }
+                    }
+                    
+                    guard let validPath = ffmpegPath else {
+                        print("❌ ffmpeg not found in common locations")
+                        print("   tried: \(ffmpegPaths.joined(separator: ", "))")
+                        print("   install with: brew install ffmpeg")
+                        await MainActor.run {
+                            self.errorMessage = "ffmpeg not installed - run: brew install ffmpeg"
+                        }
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    
+                    process.executableURL = URL(fileURLWithPath: validPath)
+                    process.arguments = ffmpegArgs
+                    
+                    // capture output for debugging
+                    let pipe = Pipe()
+                    process.standardOutput = pipe
+                    process.standardError = pipe
+                    
+                    try process.run()
+                    process.waitUntilExit()
+                    
+                    if process.terminationStatus == 0 {
+                        // get file size for confirmation
+                        if let attrs = try? FileManager.default.attributesOfItem(atPath: outputFile),
+                           let fileSize = attrs[.size] as? Int64 {
+                            let sizeMB = Double(fileSize) / 1_048_576
+                            print("✅ audio mixing complete!")
+                            print("   output: mixed_\(Int(timestamp)).wav")
+                            print("   size: \(String(format: "%.1f", sizeMB)) mb")
+                            print("   volume: mic boosted 1.2x, system reduced to 0.7x")
+                            print("   limiter: -1 dbfs (0.89)")
+                        }
+                        continuation.resume(returning: true)
+                    } else {
+                        // read error output
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("❌ ffmpeg error output:")
+                            print(output)
+                        }
+                        
+                        await MainActor.run {
+                            self.errorMessage = "ffmpeg mixing failed with code \(process.terminationStatus)"
+                        }
+                        continuation.resume(returning: false)
+                    }
+                } catch {
+                    print("❌ failed to run ffmpeg: \(error)")
+                    await MainActor.run {
+                        self.errorMessage = "ffmpeg execution failed: \(error.localizedDescription)"
+                    }
+                    continuation.resume(returning: false)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - system audio mixing
 
 extension AudioManager {

@@ -97,10 +97,21 @@ struct ContentView: View {
             Task {
                 let (timestamp, delay) = await screenCaptureManager.stopCapture()
                 
-                // trigger ffmpeg mixing here (future implementation)
+                // trigger ffmpeg mixing with delay compensation
                 if timestamp > 0 {
-                    print("🎬 ready to mix audio files with timestamp: \(Int(timestamp)), delay: \(delay)s")
-                    // TODO: call ffmpeg to mix mic_\(timestamp).wav + system_\(timestamp).wav
+                    print("🎬 mixing audio files with timestamp: \(Int(timestamp)), delay: \(delay)s")
+                    
+                    // use 2.0s as default delay (can be refined based on actual measurements)
+                    let systemDelay = delay > 0 ? delay : 2.0
+                    
+                    // mix the audio files
+                    let success = await audioManager.mixAudioFiles(timestamp: timestamp, systemDelay: systemDelay)
+                    
+                    if success {
+                        print("🎉 audio mixing successful! check mixed_\(Int(timestamp)).wav")
+                    } else {
+                        print("❌ audio mixing failed - check individual files")
+                    }
                 }
             }
         } else {
