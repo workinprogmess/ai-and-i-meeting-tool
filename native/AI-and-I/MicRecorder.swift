@@ -290,19 +290,72 @@ class MicRecorder: ObservableObject {
     
     /// gets current input device name
     private func getDeviceName() -> String {
-        // on macos, get from audio session or hardware
-        if let preferredInput = AVAudioSession.sharedInstance().preferredInput {
-            return preferredInput.portName
+        // on macos, get from audio hardware
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        let result = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        
+        if result == noErr && deviceID != 0 {
+            // get device name
+            var name: CFString = "" as CFString
+            var nameSize = UInt32(MemoryLayout<CFString>.size)
+            var nameAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioObjectPropertyName,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            
+            let nameResult = AudioObjectGetPropertyData(
+                deviceID,
+                &nameAddress,
+                0,
+                nil,
+                &nameSize,
+                &name
+            )
+            
+            if nameResult == noErr {
+                return name as String
+            }
         }
+        
         return "built-in microphone"
     }
     
     /// gets current input device id
     private func getDeviceID() -> String {
-        if let preferredInput = AVAudioSession.sharedInstance().preferredInput {
-            return preferredInput.uid
-        }
-        return "built-in"
+        // on macos, use the device ID as string
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        
+        return deviceID != 0 ? String(deviceID) : "built-in"
     }
     
     /// creates segment file path

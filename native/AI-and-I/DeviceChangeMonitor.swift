@@ -41,7 +41,7 @@ class DeviceChangeMonitor: ObservableObject {
         // setup core audio property listeners (most reliable on macos)
         setupCoreAudioListeners()
         
-        // setup avaudiosession notifications (backup)
+        // setup macOS-specific notifications (backup)
         setupAVAudioSessionNotifications()
         
         // setup avaudioengine notifications (additional signal)
@@ -213,46 +213,20 @@ class DeviceChangeMonitor: ObservableObject {
         updateCurrentDevices()
     }
     
-    // MARK: - avaudiosession notifications (backup detection)
+    // MARK: - macos-specific notifications (backup detection)
     
     private func setupAVAudioSessionNotifications() {
-        // monitor route changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
+        // on macos, we use different notifications
+        // AVAudioSession is iOS-only, so we rely on:
+        // 1. Core Audio property listeners (primary - already setup)
+        // 2. AVAudioEngine notifications (already setup)
+        // 3. NSSound notifications (less useful for our needs)
         
-        print("✅ avaudiosession route change observer registered")
+        print("✅ macOS audio notifications configured")
+        // core audio property listeners are our primary detection method on macOS
     }
     
-    @objc private func handleAudioRouteChange(notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let reasonValue = userInfo[AVAudioSession.routeChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
-            return
-        }
-        
-        Task { @MainActor in
-            switch reason {
-            case .newDeviceAvailable:
-                print("🎧 new device available (avaudiosession)")
-                handleInputDeviceChange(reason: "new device available")
-                
-            case .oldDeviceUnavailable:
-                print("🎧 device unavailable (avaudiosession)")
-                handleInputDeviceChange(reason: "device unavailable")
-                
-            case .categoryChange:
-                print("🔊 audio category changed")
-                // usually doesn't require action
-                
-            default:
-                break
-            }
-        }
-    }
+    // removed @objc handleAudioRouteChange - AVAudioSession is iOS-only
     
     // MARK: - avaudioengine notifications (additional signal)
     
@@ -401,6 +375,39 @@ class DeviceChangeMonitor: ObservableObject {
     }
     
     deinit {
-        stopMonitoring()
+        // can't call async method from deinit
+        // cleanup will happen when listeners are removed
+        if propertyListenerAdded {
+            // remove listeners synchronously
+            var addresses = [
+                AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                ),
+                AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                ),
+                AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDevices,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+            ]
+            
+            if let listenerBlock = audioObjectPropertyListenerBlock {
+                for var address in addresses {
+                    AudioObjectRemovePropertyListenerBlock(
+                        AudioObjectID(kAudioObjectSystemObject),
+                        &address,
+                        nil,
+                        listenerBlock
+                    )
+                }
+            }
+        }
+        NotificationCenter.default.removeObserver(self)
     }
 }
