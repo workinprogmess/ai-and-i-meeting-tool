@@ -907,6 +907,9 @@ extension AudioManager {
         // create fresh engine
         audioEngine = AVAudioEngine()
         
+        // explicitly select airpods if available
+        configureAudioDeviceForAirPods()
+        
         // Setup mixing nodes only if we're actually going to use system audio
         // For now, keep disabled until we fix format compatibility
         // setupAudioNodesForMixing()
@@ -960,11 +963,11 @@ extension AudioManager {
             
             // setup warmup period based on device type
             if isAirPodsConnected {
-                buffersToDiscard = 50  // ~1 second for bluetooth settling
-                print("🔄 WARMUP: Will discard first 50 buffers (~1s) for AirPods")
+                buffersToDiscard = 25  // ~500ms for bluetooth settling (reduced from 50)
+                print("🔄 WARMUP: Will discard first 25 buffers (~500ms) for AirPods")
             } else {
-                buffersToDiscard = warmupBufferCount  // ~500ms for built-in
-                print("🔄 WARMUP: Will discard first \(warmupBufferCount) buffers (~500ms)")
+                buffersToDiscard = 12  // ~250ms for built-in (reduced from 25)
+                print("🔄 WARMUP: Will discard first 12 buffers (~250ms)")
             }
             discardedBuffers = 0
             isWarmedUp = false
@@ -1416,6 +1419,83 @@ extension AudioManager {
 // MARK: - device management for airpods and other audio devices
 extension AudioManager {
     
+    /// explicitly configures audio input device for airpods if detected
+    /// fixes issue where airpods mic doesn't capture when connected
+    private func configureAudioDeviceForAirPods() {
+        guard let audioUnit = audioEngine?.inputNode.audioUnit else { 
+            print("⚠️ no audio unit available for device configuration")
+            return 
+        }
+        
+        // get all available input devices
+        var propertySize: UInt32 = 0
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        // get size of device list
+        AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),
+                                      &propertyAddress,
+                                      0, nil, &propertySize)
+        
+        let deviceCount = Int(propertySize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = Array(repeating: AudioDeviceID(0), count: deviceCount)
+        
+        // get device list
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                  &propertyAddress,
+                                  0, nil, &propertySize, &deviceIDs)
+        
+        // find airpods or other preferred device
+        var selectedDeviceID: AudioDeviceID? = nil
+        var airpodsDeviceID: AudioDeviceID? = nil
+        
+        for deviceID in deviceIDs {
+            // check if this is an input device
+            var inputChannels: UInt32 = 0
+            propertySize = UInt32(MemoryLayout<UInt32>.size)
+            propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration
+            propertyAddress.mScope = kAudioDevicePropertyScopeInput
+            
+            var bufferList = AudioBufferList()
+            AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &propertySize, &bufferList)
+            
+            if bufferList.mNumberBuffers > 0 {
+                // this is an input device
+                if let deviceName = getDeviceName(deviceID) {
+                    print("🎤 found input device: \(deviceName) (id: \(deviceID))")
+                    
+                    if deviceName.lowercased().contains("airpod") {
+                        airpodsDeviceID = deviceID
+                        print("🎧 found airpods input device!")
+                    }
+                }
+            }
+        }
+        
+        // if airpods found, explicitly set as input device
+        if let airpodsID = airpodsDeviceID {
+            var deviceID = airpodsID
+            let result = AudioUnitSetProperty(audioUnit,
+                                             kAudioOutputUnitProperty_CurrentDevice,
+                                             kAudioUnitScope_Global,
+                                             0,
+                                             &deviceID,
+                                             UInt32(MemoryLayout<AudioDeviceID>.size))
+            
+            if result == noErr {
+                print("✅ explicitly set airpods as input device (id: \(airpodsID))")
+            } else {
+                print("❌ failed to set airpods as input device: \(result)")
+            }
+        } else {
+            print("ℹ️ no airpods found, using system default input")
+        }
+    }
+    
+    
     /// refreshes list of available audio input/output devices
     func refreshAudioDevices() {
         var devices: [AudioDevice] = []
@@ -1541,10 +1621,9 @@ extension AudioManager {
         
         // resume recording with new device if it was active
         if wasRecording {
-            let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount)!
-            mixerNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, time in
-                self?.processAudioBuffer(buffer, at: time)
-            }
+            // tap is already installed from startRealAudioRecording, no need to install again
+            // duplicate taps cause buffer conflicts and periodic dropouts
+            print("📍 device switched - existing tap continues with new input")
         }
         
         print("🎧 switched to device: \(device.displayName)")
