@@ -119,10 +119,11 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             config.channelCount = 2  // stereo for system audio
             config.excludesCurrentProcessAudio = true
             
-            // set minimal video settings to avoid errors
-            config.width = 1
-            config.height = 1
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            // set minimal video settings to avoid errors (match working config)
+            config.width = 1920
+            config.height = 1080
+            config.minimumFrameInterval = CMTime(value: 600, timescale: 1)
+            config.scalesToFit = false
             
             print("📊 stream config: 48000hz, 2ch, display-wide capture")
             
@@ -141,29 +142,18 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime
             framesCaptured = 0
             
-            // create stream
+            // create stream (match working ScreenCaptureManager pattern)
             stream = SCStream(filter: filter!, configuration: config, delegate: nil)
-            print("✅ stream created")
             
             // create output handler
             streamOutput = SystemStreamOutput(recorder: self)
-            print("✅ output handler created")
             
             // add audio output handler
             let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
+            try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
             
-            guard let stream = stream else {
-                print("❌ stream is nil after creation")
-                errorMessage = "stream creation failed"
-                return
-            }
-            
-            try stream.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
-            print("✅ audio output handler added")
-            
-            // start capture
-            try await stream.startCapture()
-            print("✅ stream capture started")
+            // start capture (use optional chaining like working version)
+            try await stream?.startCapture()
             
             print("✅ system segment #\(segmentNumber) started")
             
