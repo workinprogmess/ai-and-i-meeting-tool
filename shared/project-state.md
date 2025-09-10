@@ -4,14 +4,14 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: native foundation (0.1.0) 
-**status**: 🎯 nearing completion (phase 2 step 3 done!)
+**status**: 🎯 phase 4 - device management (critical for meetings)
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
 - ✅ dual-file audio capture (mic + system) with synchronization
 - ✅ ffmpeg mixing with delay compensation
 - ✅ performance monitoring and insights dashboard
-- 🔄 testing with real meetings for transcription quality
+- 🔄 phase 4: seamless device switching during recording
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -35,12 +35,28 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - swiftui integration: @observableobject patterns with async performance
 
 **implementation phases**:
-1. ✅ performancemonitor foundation + baseline measurements (complete)
-2. ✅ minimal audiomanager with state-only recording (checkpoint complete)
-3. ✅ proper audio permissions architecture with user-initiated flow (complete)
-4. ✅ performance monitoring integration + app launch fix (complete)
-5. ✅ core audio integration + mixed capture testing (complete)
-6. ⚠️ full airpods device management + seamless switching (implemented, needs testing)
+1. ✅ phase 1: foundation (complete)
+   - performancemonitor + baseline measurements
+   - minimal audiomanager with state-only recording
+   - proper audio permissions architecture
+   - performance monitoring integration
+   
+2. ✅ phase 2: real-time mixed audio (complete)
+   - core audio integration with avaudioengine
+   - screencapturekit for system audio
+   - dual-file capture with ffmpeg mixing
+   - synchronized timestamps
+   
+3. ⏭️ phase 3: performance optimization (deferred to milestone 4)
+   - will address with polish and reliability
+   - < 200ms recording latency
+   - memory optimization
+   
+4. 🔄 phase 4: device management (current focus)
+   - ⚠️ basic device detection (partial)
+   - ❌ mid-recording device switching
+   - ❌ audio continuity during switches
+   - ❌ seamless airpods transitions
 
 **phase 1 completion (2025-01-05)**:
 - performance monitoring system with microsecond precision ✅
@@ -49,12 +65,19 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - all ui text converted to lowercase per guidelines ✅
 - xcode project properly configured and building ✅
 
-**phase 2 updates (2025-01-10)**:
+**phase 2 completion (2025-01-10)**:
 - dual-file audio capture working (mic + system) ✅
 - ffmpeg mixing with delay compensation ✅
 - fixed mic dropouts (duplicate tap installation bug) ✅
 - implemented airpods device selection (explicit audiounit config) ⚠️
 - reduced warmup buffer discard (better recording start latency) ✅
+
+**phase 4 implementation plan (2025-01-10)**:
+- detect device connection/disconnection events during recording
+- implement audio engine recreation without losing data
+- maintain recording continuity across device switches
+- handle airpods connection mid-meeting seamlessly
+- preserve audio buffers during transition
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅
