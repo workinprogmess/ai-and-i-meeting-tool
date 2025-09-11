@@ -196,13 +196,25 @@ private func shouldSwitchToNewDevice() -> Bool {
 - **production-grade stability**: 2.5s debouncing, thread-safe operations, comprehensive error handling
 - **key achievement**: solved critical core audio callback deadlock that was causing app freezes
 
-### milestone 2: transcription integration (0.2.0)
-**goal**: full transcription pipeline from audio to text  
-- gemini 2.5 flash api integration (reuse electron patterns)
-- audio file processing and upload
-- transcript parsing and display
-- basic error handling and retry logic
-- cost tracking and display
+### milestone 2: transcription integration (0.2.0) - planned
+**goal**: multi-service transcription with comparison capabilities
+- three services in parallel: gemini, deepgram, assembly ai
+- mp3 conversion for file size optimization (10x smaller)
+- admin mode: see all three transcripts with metrics
+- regular users: see best/fastest result only
+- user corrections system: learns vocabulary over time
+- beautiful minimal ui: san francisco font, all lowercase
+- fallback strategy: transcribe separately if mixing fails
+
+**key decisions from planning session**:
+- test multiple services to find best quality/cost/speed balance
+- mp3 conversion essential (wav ~10mb/min → mp3 ~1mb/min)
+- corrections track both wrong and right: "wikus" → "vikas"
+- admin vs regular user modes for testing vs production
+- export: shareable links primary, pdf secondary
+- summaries as separate milestone 3 (not phase of milestone 2)
+
+**detailed plan**: see MILESTONE_2_TRANSCRIPTION_PLAN.md
 
 ### milestone 3: user interface excellence (0.3.0)
 **goal**: professional native mac ui with superior user experience
