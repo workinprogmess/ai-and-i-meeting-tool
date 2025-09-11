@@ -133,10 +133,19 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             segmentFilePath = createSegmentFilePath(sessionTimestamp: sessionTimestamp,
                                                    segmentNumber: segmentNumber)
             
-            // create audio file (48khz stereo for system)
+            // create audio file (48khz stereo for system, 32-bit float)
             let audioFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
+            
+            // keep 32-bit float for system audio (better dynamic range)
+            var settings = audioFormat.settings
+            settings[AVFormatIDKey] = kAudioFormatLinearPCM
+            settings[AVLinearPCMBitDepthKey] = 32
+            settings[AVLinearPCMIsFloatKey] = true
+            settings[AVLinearPCMIsBigEndianKey] = false
+            
             audioFile = try AVAudioFile(forWriting: URL(fileURLWithPath: segmentFilePath),
-                                       settings: audioFormat.settings)
+                                       settings: settings)
+            print("📁 created system audio file: \(segmentFilePath)")
             
             // record segment start time
             segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime

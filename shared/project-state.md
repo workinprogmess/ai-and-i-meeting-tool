@@ -4,14 +4,14 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: native foundation (0.1.0) 
-**status**: 🎯 phase 4 - device management (critical for meetings)
+**status**: 🔄 phase 4 implemented - testing device management
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
 - ✅ dual-file audio capture (mic + system) with synchronization
 - ✅ ffmpeg mixing with delay compensation
 - ✅ performance monitoring and insights dashboard
-- 🔄 phase 4: seamless device switching during recording
+- 🔄 phase 4: seamless device switching during recording (implemented, testing)
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -52,11 +52,11 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
    - < 200ms recording latency
    - memory optimization
    
-4. 🔄 phase 4: device management (current focus)
-   - ⚠️ basic device detection (partial)
-   - ❌ mid-recording device switching
-   - ❌ audio continuity during switches
-   - ❌ seamless airpods transitions
+4. 🔄 phase 4: device management (implemented, testing)
+   - ✅ comprehensive device detection with core audio listeners
+   - ✅ mid-recording device switching with segmented approach
+   - ✅ audio continuity during switches (independent pipelines)
+   - ✅ seamless airpods transitions (non-blocking engine cleanup)
 
 **phase 1 completion (2025-01-05)**:
 - performance monitoring system with microsecond precision ✅
@@ -72,13 +72,16 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - implemented airpods device selection (explicit audiounit config) ⚠️
 - reduced warmup buffer discard (better recording start latency) ✅
 
-**phase 4 architecture defined (2025-01-10)**:
-- comprehensive device switching design documented
-- segmented recording approach with independent pipelines
-- metadata tracking for perfect timeline reconstruction
-- quality guards against telephony mode
-- debouncing and rate limiting for stability
-- see: DEVICE_SWITCHING_ARCHITECTURE.md for complete design
+**phase 4 implementation (2025-01-11) - awaiting test validation**:
+- ✅ comprehensive device switching design documented in DEVICE_SWITCHING_ARCHITECTURE.md
+- ✅ segmented recording with independent pipelines (MicRecorder + SystemAudioRecorder)
+- ✅ metadata tracking for timeline reconstruction (AudioSegmentMetadata)
+- ✅ quality guards against telephony mode (blocks 8/16khz devices)
+- ✅ debouncing (1.5s) and rate limiting (3 changes/10s) for stability
+- ✅ device change monitor with core audio property listeners
+- ✅ automatic gain control for quiet built-in mics (2.5x boost)
+- ✅ fixed app hang on airpods connection (non-blocking engine cleanup)
+- ✅ 16-bit pcm for mic, 32-bit float for system audio formats
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅

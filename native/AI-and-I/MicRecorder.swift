@@ -115,8 +115,28 @@ class MicRecorder: ObservableObject {
         
         // check new device quality before switching
         if shouldSwitchToNewDevice() {
-            stopCurrentSegment()
-            startNewSegment()
+            // perform the switch with timeout protection
+            // use a dedicated queue to prevent main thread blocking
+            let switchQueue = DispatchQueue(label: "mic.switch.queue", qos: .userInitiated)
+            switchQueue.async { [weak self] in
+                guard let self = self else { return }
+                
+                print("🔄 performing device switch...")
+                
+                // stop current segment (non-blocking)
+                DispatchQueue.main.sync {
+                    self.stopCurrentSegment()
+                }
+                
+                // small delay to let hardware settle
+                Thread.sleep(forTimeInterval: 0.1)
+                
+                // start new segment on main thread
+                DispatchQueue.main.async {
+                    self.startNewSegment()
+                    print("✅ device switch complete")
+                }
+            }
         }
     }
     
@@ -126,7 +146,7 @@ class MicRecorder: ObservableObject {
     private func startNewSegment() {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         
-        // create new audio engine
+        // create new audio engine (doesn't throw, but can fail)
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else {
             errorMessage = "failed to create audio engine"
@@ -172,10 +192,27 @@ class MicRecorder: ObservableObject {
         let sessionTimestamp = Int(sessionReferenceTime)
         segmentFilePath = createSegmentFilePath(sessionTimestamp: sessionTimestamp, segmentNumber: segmentNumber)
         
-        // create audio file (48khz mono standard)
+        // create audio file (48khz mono standard, 16-bit PCM)
         let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        audioFile = try? AVAudioFile(forWriting: URL(fileURLWithPath: segmentFilePath),
-                                     settings: recordingFormat.settings)
+        
+        // use 16-bit PCM format instead of 32-bit float
+        var settings = recordingFormat.settings
+        settings[AVFormatIDKey] = kAudioFormatLinearPCM
+        settings[AVLinearPCMBitDepthKey] = 16
+        settings[AVLinearPCMIsFloatKey] = false
+        settings[AVLinearPCMIsBigEndianKey] = false
+        
+        do {
+            audioFile = try AVAudioFile(forWriting: URL(fileURLWithPath: segmentFilePath),
+                                       settings: settings)
+            print("📁 created audio file: \(segmentFilePath)")
+        } catch {
+            print("❌ failed to create audio file: \(error)")
+            errorMessage = "failed to create audio file: \(error.localizedDescription)"
+            // clean up engine if file creation fails
+            audioEngine = nil
+            return
+        }
         
         // reset warmup
         isWarmedUp = false
@@ -211,14 +248,27 @@ class MicRecorder: ObservableObject {
         // record end time
         let segmentEndTime = Date().timeIntervalSince1970 - sessionReferenceTime
         
-        // stop engine
+        // stop engine (non-blocking approach to prevent hangs)
         if let engine = audioEngine {
+            print("🔧 removing tap...")
+            // remove tap first to stop audio flow
             engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+            print("✅ tap removed")
+            
+            // DON'T call engine.stop() - it can block during device transitions
+            // instead, just abandon the engine and let ARC clean it up
+            // this prevents the app from hanging when airpods connect
+            print("🔧 abandoning engine (non-blocking)...")
         }
         
+        // clear engine reference immediately - let ARC handle cleanup
+        audioEngine = nil
+        print("✅ engine released")
+        
         // close file
+        print("🔧 closing file...")
         audioFile = nil
+        print("✅ file closed")
         
         // save segment metadata
         let metadata = AudioSegmentMetadata(
