@@ -1,0 +1,344 @@
+#!/usr/bin/env swift
+
+//
+// mix-audio.swift
+// creates perfectly mixed audio from segmented recordings using metadata
+//
+
+import Foundation
+import AVFoundation
+
+// MARK: - Data Models
+
+struct AudioSegmentMetadata: Codable {
+    let segmentID: String
+    let filePath: String
+    let deviceName: String
+    let deviceID: String
+    let sampleRate: Double
+    let channels: Int
+    let startSessionTime: TimeInterval
+    let endSessionTime: TimeInterval
+    let frameCount: Int
+    let quality: String
+    let error: String?
+}
+
+struct RecordingSessionMetadata: Codable {
+    let sessionID: String
+    let sessionStartTime: Date
+    let sessionEndTime: Date?
+    let micSegments: [AudioSegmentMetadata]
+    let systemSegments: [AudioSegmentMetadata]
+}
+
+// MARK: - Main Script
+
+let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
+
+print("🎬 audio mixer for ai&i")
+print("=" * 60)
+
+// find all metadata files
+let fileManager = FileManager.default
+guard let files = try? fileManager.contentsOfDirectory(at: recordingsFolder, 
+                                                       includingPropertiesForKeys: nil) else {
+    print("❌ couldn't read recordings directory")
+    exit(1)
+}
+
+let metadataFiles = files.filter { $0.pathExtension == "json" }
+                         .sorted { $0.lastPathComponent > $1.lastPathComponent }
+
+if metadataFiles.isEmpty {
+    print("❌ no metadata files found")
+    print("💡 record something with device switches first!")
+    exit(1)
+}
+
+print("📁 found \(metadataFiles.count) metadata file(s)\n")
+
+// process most recent session
+if let latestMetadata = metadataFiles.first {
+    print("📄 processing: \(latestMetadata.lastPathComponent)")
+    print("-" * 40)
+    
+    // load and parse metadata
+    do {
+        let data = try Data(contentsOf: latestMetadata)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        // try both mic and system metadata files
+        var micSegments: [AudioSegmentMetadata] = []
+        var systemSegments: [AudioSegmentMetadata] = []
+        var sessionTimestamp: String = ""
+        
+        // extract timestamp from filename
+        let filename = latestMetadata.lastPathComponent
+        if filename.contains("session_") {
+            let components = filename.split(separator: "_")
+            if components.count >= 2 {
+                sessionTimestamp = String(components[1])
+            }
+        }
+        
+        // check if it's a mic or system metadata file
+        if filename.contains("_metadata.json") {
+            // combined metadata file
+            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
+            micSegments = metadata.micSegments
+            systemSegments = metadata.systemSegments
+        } else if filename.contains("_mic_metadata.json") {
+            // mic-only metadata
+            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
+            micSegments = metadata.micSegments
+        } else if filename.contains("_system_metadata.json") {
+            // system-only metadata
+            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
+            systemSegments = metadata.systemSegments
+        }
+        
+        // also look for the companion metadata file
+        let companionName: String
+        if filename.contains("_mic_metadata.json") {
+            companionName = filename.replacingOccurrences(of: "_mic_metadata", with: "_system_metadata")
+        } else if filename.contains("_system_metadata.json") {
+            companionName = filename.replacingOccurrences(of: "_system_metadata", with: "_metadata")
+        } else {
+            companionName = ""
+        }
+        
+        if !companionName.isEmpty {
+            let companionURL = recordingsFolder.appendingPathComponent(companionName)
+            if let companionData = try? Data(contentsOf: companionURL) {
+                let companionMetadata = try decoder.decode(RecordingSessionMetadata.self, from: companionData)
+                if filename.contains("_mic_metadata.json") {
+                    systemSegments = companionMetadata.systemSegments
+                } else {
+                    micSegments = companionMetadata.micSegments
+                }
+                print("📄 also loaded: \(companionName)")
+            }
+        }
+        
+        // analyze segments
+        print("\n🎤 microphone segments: \(micSegments.count)")
+        if !micSegments.isEmpty {
+            var totalMicAudio: TimeInterval = 0
+            
+            for (index, segment) in micSegments.enumerated() {
+                let duration = segment.endSessionTime - segment.startSessionTime
+                totalMicAudio += duration
+                
+                print("  segment #\(index + 1):")
+                print("    device: \(segment.deviceName)")
+                print("    timing: \(String(format: "%.3f", segment.startSessionTime))s - \(String(format: "%.3f", segment.endSessionTime))s")
+                print("    duration: \(String(format: "%.3f", duration))s")
+                
+                if index > 0 {
+                    let prevSegment = micSegments[index - 1]
+                    let gap = segment.startSessionTime - prevSegment.endSessionTime
+                    if gap > 0.1 {
+                        print("    🔇 gap: \(String(format: "%.3f", gap))s")
+                    }
+                }
+            }
+            
+            print("  total audio: \(String(format: "%.3f", totalMicAudio))s")
+            
+            if micSegments.count > 1 {
+                let firstStart = micSegments.first!.startSessionTime
+                let lastEnd = micSegments.last!.endSessionTime
+                let totalTimeline = lastEnd - firstStart
+                let totalGaps = totalTimeline - totalMicAudio
+                print("  total gaps: \(String(format: "%.3f", totalGaps))s")
+                print("  timeline span: \(String(format: "%.3f", totalTimeline))s")
+            }
+        }
+        
+        print("\n🔊 system audio segments: \(systemSegments.count)")
+        if !systemSegments.isEmpty {
+            for (index, segment) in systemSegments.enumerated() {
+                let duration = segment.endSessionTime - segment.startSessionTime
+                print("  segment #\(index + 1):")
+                print("    timing: \(String(format: "%.3f", segment.startSessionTime))s - \(String(format: "%.3f", segment.endSessionTime))s")
+                print("    duration: \(String(format: "%.3f", duration))s")
+            }
+        }
+        
+        // generate ffmpeg command for perfect mixing
+        if !micSegments.isEmpty && !systemSegments.isEmpty {
+            print("\n🎬 generating ffmpeg command for perfect mixing...")
+            print("=" * 60)
+            
+            // build the command step by step for clarity
+            var ffmpegCmd = "ffmpeg"
+            
+            // add all mic segment inputs
+            for (index, segment) in micSegments.enumerated() {
+                let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_00\(index + 1).wav"
+                ffmpegCmd += " -i \(filename)"
+            }
+            
+            // add system audio input
+            let systemFilename = URL(string: systemSegments.first?.filePath ?? "")?.lastPathComponent ?? "system_\(sessionTimestamp)_001.wav"
+            ffmpegCmd += " -i \(systemFilename)"
+            
+            // build filter complex
+            ffmpegCmd += " -filter_complex \""
+            
+            // add delays for each mic segment with dynamic volume based on device
+            var micFilters: [String] = []
+            for (index, segment) in micSegments.enumerated() {
+                let delayMs = Int(segment.startSessionTime * 1000)
+                
+                // detect if using airpods or built-in mic
+                let isAirPods = segment.deviceName.lowercased().contains("airpods")
+                let micBoost = isAirPods ? "8dB" : "12dB"  // more boost for built-in mic
+                
+                // add volume boost for mic (dynamic based on device)
+                if delayMs > 0 {
+                    micFilters.append("[\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)]")
+                } else {
+                    micFilters.append("[\(index)]volume=\(micBoost)[m\(index)]")
+                }
+            }
+            
+            // join mic filters
+            ffmpegCmd += micFilters.joined(separator: "; ")
+            
+            // mix all mic segments together
+            if micSegments.count > 1 {
+                let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
+                ffmpegCmd += "; \(micLabels)amix=inputs=\(micSegments.count):duration=longest[mic]"
+            } else {
+                ffmpegCmd += "; [m0]acopy[mic]"
+            }
+            
+            // add system audio delay with dynamic volume reduction
+            // check if any segments use built-in mic (need more aggressive reduction)
+            let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
+            let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"  // more reduction if built-in mic used
+            
+            let systemIndex = micSegments.count
+            let systemDelayMs = Int((systemSegments.first?.startSessionTime ?? 0) * 1000)
+            if systemDelayMs > 0 {
+                ffmpegCmd += "; [\(systemIndex)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys]"
+            } else {
+                ffmpegCmd += "; [\(systemIndex)]volume=\(systemReduction)[sys]"
+            }
+            
+            // final mix (equal weights now since we adjusted volumes)
+            ffmpegCmd += "; [mic][sys]amix=inputs=2:duration=longest[out]\""
+            
+            // output settings
+            let outputFile = "mixed_\(sessionTimestamp).wav"
+            ffmpegCmd += " -map \"[out]\" -acodec pcm_s16le -ar 48000 \(outputFile)"
+            
+            // print the command in a copy-friendly format
+            print("\n# copy and run this command:")
+            print("cd ~/Documents/ai\\&i-recordings")
+            print("")
+            
+            // pretty print for readability
+            print("ffmpeg \\")
+            for (index, segment) in micSegments.enumerated() {
+                let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_00\(index + 1).wav"
+                print("  -i \(filename) \\")
+            }
+            print("  -i \(systemFilename) \\")
+            print("  -filter_complex \"")
+            
+            // pretty print filters with dynamic volume adjustments
+            for (index, segment) in micSegments.enumerated() {
+                let delayMs = Int(segment.startSessionTime * 1000)
+                let isAirPods = segment.deviceName.lowercased().contains("airpods")
+                let micBoost = isAirPods ? "8dB" : "12dB"
+                let deviceType = isAirPods ? "airpods" : "built-in"
+                let comment = "  # \(deviceType) mic +\(micBoost), delay \(delayMs)ms"
+                if delayMs > 0 {
+                    print("    [\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)];\(comment) \\")
+                } else {
+                    print("    [\(index)]volume=\(micBoost)[m\(index)];\(comment) \\")
+                }
+            }
+            
+            if micSegments.count > 1 {
+                let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
+                print("    \(micLabels)amix=inputs=\(micSegments.count):duration=longest[mic]; \\")
+            } else {
+                print("    [m0]acopy[mic]; \\")
+            }
+            
+            // use the systemReduction already calculated above
+            if systemDelayMs > 0 {
+                print("    [\(systemIndex)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys];  # system \(systemReduction) \\")
+            } else {
+                print("    [\(systemIndex)]volume=\(systemReduction)[sys];  # system \(systemReduction) \\")
+            }
+            
+            print("    [mic][sys]amix=inputs=2:duration=longest[out]\" \\")
+            print("  -map \"[out]\" \\")
+            print("  -acodec pcm_s16le \\")
+            print("  -ar 48000 \\")
+            print("  \(outputFile)")
+            
+            print("\n✅ command generated successfully!")
+            
+            // show timing summary
+            print("\n📊 mixing summary:")
+            print("  mic segments: \(micSegments.count)")
+            print("  devices used: \(Set(micSegments.map { $0.deviceName }).joined(separator: ", "))")
+            print("  total mic audio: \(String(format: "%.1f", micSegments.reduce(0) { $0 + ($1.endSessionTime - $1.startSessionTime) }))s")
+            print("  system audio: \(String(format: "%.1f", systemSegments.reduce(0) { $0 + ($1.endSessionTime - $1.startSessionTime) }))s")
+            
+            let totalGaps = micSegments.enumerated().reduce(0.0) { result, item in
+                let (index, segment) = item
+                if index > 0 {
+                    return result + (segment.startSessionTime - micSegments[index - 1].endSessionTime)
+                }
+                return result
+            }
+            print("  total gaps: \(String(format: "%.1f", totalGaps))s")
+            print("  output file: \(outputFile)")
+        } else if !micSegments.isEmpty {
+            print("\n⚠️ only mic segments found - no system audio to mix")
+        } else if !systemSegments.isEmpty {
+            print("\n⚠️ only system segments found - no mic audio to mix")
+        }
+        
+    } catch {
+        print("❌ error reading metadata: \(error)")
+        
+        // try simple JSON parsing as fallback
+        if let data = try? Data(contentsOf: latestMetadata),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("\n📋 falling back to simple JSON parsing...")
+            
+            if let micSegments = json["micSegments"] as? [[String: Any]] {
+                print("\nmic segments found: \(micSegments.count)")
+                
+                for (index, segment) in micSegments.enumerated() {
+                    if let start = segment["startSessionTime"] as? Double,
+                       let end = segment["endSessionTime"] as? Double,
+                       let device = segment["deviceName"] as? String {
+                        print("  #\(index + 1): \(String(format: "%.1f", start))s - \(String(format: "%.1f", end))s (\(device))")
+                    }
+                }
+            }
+        }
+    }
+}
+
+print("\n" + "=" * 60)
+print("💡 tip: run this script after recording with device switches")
+print("📝 note: the generated command assumes you're in ~/Documents/ai&i-recordings")
+
+// helper to repeat string
+extension String {
+    static func *(lhs: String, rhs: Int) -> String {
+        return String(repeating: lhs, count: rhs)
+    }
+}

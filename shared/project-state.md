@@ -3,8 +3,8 @@
 ## current focus: native macos app
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
-## current milestone: native foundation (0.1.0) 
-**status**: ✅ phase 4 complete - seamless device switching working!
+## current milestone: native foundation (0.1.0) ✅ COMPLETE
+**status**: production-ready segmented recording with seamless device switching
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
@@ -16,7 +16,7 @@ ai meeting intelligence - native swiftui application for world-class user experi
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
 
-### milestone 1: core foundation (0.1.0) - current  
+### milestone 1: core foundation (0.1.0) ✅ COMPLETE (2025-09-11)
 **goal**: performance-first mixed audio capture with professional-grade speed and precision
 
 **core philosophy**: build performance-first from the beginning - near-magic user experience
@@ -95,7 +95,7 @@ private func shouldSwitchToNewDevice() -> Bool {
 - 5-second gap: occurs during device switch (2.5s debounce + ~2.5s reinit)
 - system audio continues uninterrupted while mic has switching gap
 
-**phase 4 implementation - ✅ COMPLETE**:
+**phase 4 implementation - ✅ COMPLETE (2025-09-11)**:
 - ✅ comprehensive device switching design documented in DEVICE_SWITCHING_ARCHITECTURE.md
 - ✅ segmented recording with independent pipelines (MicRecorder + SystemAudioRecorder)
 - ✅ metadata tracking for timeline reconstruction (AudioSegmentMetadata)
@@ -105,6 +105,8 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ automatic gain control for quiet built-in mics (2.5x boost)
 - ✅ **CRITICAL FIX: app hang on airpods connection resolved**
 - ✅ 16-bit pcm for mic, 32-bit float for system audio formats
+- ✅ metadata-driven audio mixing with mix-audio.swift script
+- ✅ dynamic volume normalization (airpods +8db, built-in +12db, system -6/-10db)
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅
@@ -185,6 +187,14 @@ private func shouldSwitchToNewDevice() -> Bool {
 - component testing: launch speed, recording latency, device switching, audio quality
 - precision validation: millisecond-level timing accuracy, complete audio capture
 - real-world scenarios: airpods connect/disconnect during recording, multiple cycles
+
+**milestone 1 completion summary (2025-09-11)**:
+- **seamless device switching**: airpods can connect/disconnect without app hanging
+- **segmented recording**: mic and system audio operate independently with automatic segment creation
+- **perfect audio mixing**: metadata-driven ffmpeg commands with precise alignment
+- **dynamic volume normalization**: adjusts levels based on device type for optimal clarity
+- **production-grade stability**: 2.5s debouncing, thread-safe operations, comprehensive error handling
+- **key achievement**: solved critical core audio callback deadlock that was causing app freezes
 
 ### milestone 2: transcription integration (0.2.0)
 **goal**: full transcription pipeline from audio to text  
