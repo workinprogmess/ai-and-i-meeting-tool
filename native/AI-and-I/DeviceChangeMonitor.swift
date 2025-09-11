@@ -328,7 +328,13 @@ class DeviceChangeMonitor: ObservableObject {
             &deviceID
         )
         
-        if result == noErr && deviceID != 0 {
+        // Check for errors - device might be transitioning
+        if result != noErr {
+            print("⚠️ couldn't get input device (error: \(result))")
+            return "transitioning"
+        }
+        
+        if deviceID != 0 {
             return getDeviceName(deviceID) ?? "unknown"
         }
         

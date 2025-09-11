@@ -4,14 +4,14 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: native foundation (0.1.0) 
-**status**: 🔄 phase 4 implemented - testing device management
+**status**: ✅ phase 4 complete - seamless device switching working!
 - ✅ strategic pivot complete: electron → native macos  
 - ✅ clean project structure: native/, shared/, electron-archive/
 - ✅ xcode project with swiftui + core audio configuration
 - ✅ dual-file audio capture (mic + system) with synchronization
 - ✅ ffmpeg mixing with delay compensation
 - ✅ performance monitoring and insights dashboard
-- 🔄 phase 4: seamless device switching during recording (implemented, testing)
+- ✅ phase 4: seamless device switching during recording (airpods hang fixed!)
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -72,15 +72,38 @@ based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLE
 - implemented airpods device selection (explicit audiounit config) ⚠️
 - reduced warmup buffer discard (better recording start latency) ✅
 
-**phase 4 implementation (2025-01-11) - awaiting test validation**:
+**phase 4: critical airpods hang breakthrough (2025-09-11)**:
+
+the app was hanging completely when airpods connected mid-recording. after extensive debugging with friend's production advice, discovered the root cause:
+
+**the problem**: creating `AVAudioEngine` or calling core audio apis during device transition causes indefinite blocking
+```swift
+// this was causing the hang!
+private func shouldSwitchToNewDevice() -> Bool {
+    let newDevice = AVAudioEngine().inputNode  // blocks during transition!
+```
+
+**the solution**:
+1. removed device quality check that created test engine during transition
+2. deferred all device name/id queries until after engine starts successfully  
+3. increased debounce to 2.5s (airpods need 2-3s to fully connect)
+4. added retry logic for -10851 errors when engine can't initialize
+
+**timing insights from testing**:
+- mic segments: 43s + 41s = 84s total recording time
+- system audio: 89s continuous (no interruption)
+- 5-second gap: occurs during device switch (2.5s debounce + ~2.5s reinit)
+- system audio continues uninterrupted while mic has switching gap
+
+**phase 4 implementation - ✅ COMPLETE**:
 - ✅ comprehensive device switching design documented in DEVICE_SWITCHING_ARCHITECTURE.md
 - ✅ segmented recording with independent pipelines (MicRecorder + SystemAudioRecorder)
 - ✅ metadata tracking for timeline reconstruction (AudioSegmentMetadata)
 - ✅ quality guards against telephony mode (blocks 8/16khz devices)
-- ✅ debouncing (1.5s) and rate limiting (3 changes/10s) for stability
+- ✅ debouncing (2.5s for airpods) and rate limiting (3 changes/10s) for stability
 - ✅ device change monitor with core audio property listeners
 - ✅ automatic gain control for quiet built-in mics (2.5x boost)
-- ✅ fixed app hang on airpods connection (non-blocking engine cleanup)
+- ✅ **CRITICAL FIX: app hang on airpods connection resolved**
 - ✅ 16-bit pcm for mic, 32-bit float for system audio formats
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅

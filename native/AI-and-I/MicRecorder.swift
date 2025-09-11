@@ -63,7 +63,7 @@ class MicRecorder: ObservableObject {
     private var lastDeviceChangeTime: Date = Date.distantPast
     private var deviceChangeCount: Int = 0
     private let deviceChangeWindow: TimeInterval = 10.0  // for rate limiting
-    private let debounceInterval: TimeInterval = 1.5     // airpods jitter protection
+    private let debounceInterval: TimeInterval = 2.5     // airpods need 2-3s to fully connect
     
     // MARK: - public interface
     
@@ -119,12 +119,12 @@ class MicRecorder: ObservableObject {
         // cancel existing debounce timer if any
         debounceTimer?.cancel()
         
-        // schedule new debounce (1.5s for airpods stability)
+        // schedule new debounce (2.5s for airpods stability - they need time to fully connect)
         let workItem = DispatchWorkItem { [weak self] in
             self?.performDebouncedSwitch()
         }
         debounceTimer = workItem
-        controllerQueue.asyncAfter(deadline: .now() + 1.5, execute: workItem)
+        controllerQueue.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
     
     /// performs the actual switch after debounce (on controller queue)
@@ -163,11 +163,9 @@ class MicRecorder: ObservableObject {
         // let hardware settle
         Thread.sleep(forTimeInterval: 0.2)
         
-        // check device quality
-        if shouldSwitchToNewDevice() {
-            // safe startup on controller queue
-            startNewSegmentSafely()
-        }
+        // don't check quality - just switch (checking creates AVAudioEngine which can hang)
+        // safe startup on controller queue
+        startNewSegmentSafely()
         
         state = .recording
         print("✅ device switch complete")
@@ -193,6 +191,9 @@ class MicRecorder: ObservableObject {
     private func startNewSegmentInternal() {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         
+        // skip device ID check - it can block during transitions
+        // we'll get the device info after engine is created
+        
         // create new audio engine (doesn't throw, but can fail)
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else {
@@ -203,30 +204,22 @@ class MicRecorder: ObservableObject {
         // don't try to set device - avaudioengine uses system default automatically
         let inputNode = engine.inputNode  // inputNode is not optional
         
-        // get device info
+        // get format first (safe to query from engine)
         let inputFormat = inputNode.inputFormat(forBus: 0)
-        currentDeviceID = getDeviceID()
-        currentDeviceName = getDeviceName()
         
-        print("🎤 device: \(currentDeviceName)")
+        // defer device name/ID queries until after engine starts
+        // for now, use placeholder values
+        currentDeviceID = "pending"
+        currentDeviceName = "initializing..."
+        
         print("📊 format: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
         
         // assess quality
         currentQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
         
-        // configure agc based on device
-        if currentDeviceName.lowercased().contains("airpod") {
-            agcEnabled = false  // airpods have their own processing
-            currentGain = 1.0
-            print("🎧 airpods detected - agc disabled")
-        } else if currentDeviceName.lowercased().contains("mac") || currentDeviceName.lowercased().contains("built") {
-            agcEnabled = true  // built-in mics need boost
-            currentGain = 2.5
-            print("🎚️ built-in mic - agc enabled with 2.5x gain")
-        } else {
-            agcEnabled = false  // other external devices
-            currentGain = 1.0
-        }
+        // configure agc - will be adjusted after we get device name
+        agcEnabled = true  // default to enabled
+        currentGain = 2.5
         
         // quality guard - warn on telephony mode
         if currentQuality == .low {
@@ -277,17 +270,58 @@ class MicRecorder: ObservableObject {
             }
         }
         
-        // prepare and start engine
+        // prepare and start engine (with retry for -10851)
         engine.prepare()
         do {
             try engine.start()
+            
+            // NOW it's safe to query device info after engine is running
+            currentDeviceID = getDeviceID()
+            currentDeviceName = getDeviceName()
+            
+            // adjust AGC based on actual device
+            if currentDeviceName.lowercased().contains("airpod") {
+                agcEnabled = false  // airpods have their own processing
+                currentGain = 1.0
+                print("🎧 airpods detected - agc disabled")
+            } else if currentDeviceName.lowercased().contains("mac") || currentDeviceName.lowercased().contains("built") {
+                agcEnabled = true  // built-in mics need boost
+                currentGain = 2.5
+                print("🎚️ built-in mic - agc enabled with 2.5x gain")
+            } else {
+                agcEnabled = false  // other external devices
+                currentGain = 1.0
+            }
+            
             print("✅ mic segment #\(segmentNumber) started - recording with \(currentDeviceName)")
         } catch {
-            errorMessage = "failed to start audio engine: \(error)"
-            print("❌ engine start failed: \(error)")
-            // clean up on failure
-            audioEngine = nil
-            audioFile = nil
+            let nsError = error as NSError
+            if nsError.code == -10851 {
+                // device still transitioning - need to retry
+                print("⚠️ engine start failed with -10851 (device transitioning)")
+                errorMessage = "device still transitioning - retrying..."
+                
+                // clean up this attempt
+                engine.inputNode.removeTap(onBus: 0)
+                audioEngine = nil
+                audioFile = nil
+                
+                // retry after delay
+                controllerQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self else { return }
+                    if self.state == .switching || self.state == .recording {
+                        print("🔄 retrying segment start after -10851 error...")
+                        self.startNewSegmentInternal()
+                    }
+                }
+            } else {
+                errorMessage = "failed to start audio engine: \(error)"
+                print("❌ engine start failed: \(error)")
+                // clean up on failure
+                engine.inputNode.removeTap(onBus: 0)
+                audioEngine = nil
+                audioFile = nil
+            }
         }
     }
     

@@ -104,7 +104,8 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         print("🔄 system audio change: \(reason)")
         
-        // NEVER do capture work in the callback - just set flag
+        // CRITICAL: Never do any work in device change callbacks
+        // Just set flag and schedule deferred work to avoid deadlock
         needsSwitch = true
         
         // cancel existing debounce timer if any
@@ -113,6 +114,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
         
         // schedule new debounce (1s for system audio stability)
+        // this gives hardware time to settle and prevents rapid switches
         let workItem = DispatchWorkItem { [weak self] in
             Task {
                 await self?.performDebouncedSwitch()
@@ -158,10 +160,19 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         print("📝 starting new system segment #\(segmentNumber + 1)")
         
         do {
-            // get shareable content
+            // get shareable content (may fail during display changes)
             print("🔍 requesting shareable content...")
-            let content = try await SCShareableContent.current
-            print("✅ got shareable content")
+            let content: SCShareableContent
+            do {
+                content = try await SCShareableContent.current
+                print("✅ got shareable content")
+            } catch {
+                // display might be transitioning (external monitor plug/unplug)
+                errorMessage = "display transitioning: \(error.localizedDescription)"
+                print("⚠️ can't get shareable content (display transitioning): \(error)")
+                return
+            }
+            
             guard let display = content.displays.first else {
                 errorMessage = "no display found"
                 print("❌ no display found for system audio")
@@ -244,17 +255,21 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         // record end time
         let segmentEndTime = Date().timeIntervalSince1970 - sessionReferenceTime
         
-        // stop stream
-        do {
-            try await stream?.stopCapture()
-        } catch {
-            print("⚠️ stream stop error: \(error)")
+        // stop stream (may fail if device is disconnected)
+        if let activeStream = stream {
+            do {
+                try await activeStream.stopCapture()
+                print("✅ stream stopped cleanly")
+            } catch {
+                // this is expected during device disconnection
+                print("⚠️ stream stop error (expected during transition): \(error)")
+            }
         }
         
         // close file
         audioFile = nil
         
-        // cleanup
+        // cleanup - nil out references immediately
         stream = nil
         streamOutput = nil
         filter = nil
