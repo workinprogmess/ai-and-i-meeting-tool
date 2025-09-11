@@ -29,6 +29,19 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private let segmentQueue = DispatchQueue(label: "system.segment.queue", qos: .userInitiated)
     private let fileWriteQueue = DispatchQueue(label: "system.file.write", qos: .userInitiated)
     
+    // MARK: - thread safety (production-grade)
+    private let controllerQueue = DispatchQueue(label: "system.controller.queue", qos: .userInitiated)
+    private var needsSwitch = false  // atomic flag for pending switches
+    private var debounceTimer: DispatchWorkItem?
+    
+    // MARK: - state machine
+    private enum RecordingState {
+        case idle
+        case recording
+        case switching
+    }
+    private var state: RecordingState = .idle
+    
     // MARK: - session timing
     private var sessionID: String = ""
     private var sessionStartTime: Date = Date()
@@ -55,9 +68,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         segmentNumber = 0
         segmentMetadata.removeAll()
         
+        // set state first
+        state = .recording
+        isRecording = true
+        
         // start first segment
         await startNewSegment()
-        isRecording = true
     }
     
     /// ends the recording session and saves metadata
@@ -66,24 +82,73 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         guard isRecording else { return }
         
+        // cancel any pending switches
+        await MainActor.run {
+            debounceTimer?.cancel()
+        }
+        needsSwitch = false
+        
         // stop current segment
         await stopCurrentSegment()
         
         // save session metadata
         saveSessionMetadata()
         
+        state = .idle
         isRecording = false
     }
     
-    /// handles display/system audio device changes
+    /// handles display/system audio device changes (production-safe)
     func handleDeviceChange(reason: String) async {
         guard isRecording else { return }
         
         print("🔄 system audio change: \(reason)")
         
-        // system audio changes are less frequent, no debouncing needed
+        // NEVER do capture work in the callback - just set flag
+        needsSwitch = true
+        
+        // cancel existing debounce timer if any
+        await MainActor.run {
+            debounceTimer?.cancel()
+        }
+        
+        // schedule new debounce (1s for system audio stability)
+        let workItem = DispatchWorkItem { [weak self] in
+            Task {
+                await self?.performDebouncedSwitch()
+            }
+        }
+        
+        await MainActor.run {
+            debounceTimer = workItem
+            controllerQueue.asyncAfter(deadline: .now() + 1.0, execute: workItem)
+        }
+    }
+    
+    /// performs the actual switch after debounce
+    private func performDebouncedSwitch() async {
+        guard needsSwitch else { return }
+        guard state != .switching else {
+            print("⏳ already switching - ignoring")
+            return
+        }
+        
+        state = .switching
+        needsSwitch = false
+        
+        print("🔄 performing debounced system audio switch...")
+        
+        // safe teardown
         await stopCurrentSegment()
+        
+        // let hardware settle
+        try? await Task.sleep(nanoseconds: 200_000_000)  // 0.2s
+        
+        // safe restart
         await startNewSegment()
+        
+        state = .recording
+        print("✅ system audio switch complete")
     }
     
     // MARK: - private implementation

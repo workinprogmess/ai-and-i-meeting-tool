@@ -25,6 +25,20 @@ class MicRecorder: ObservableObject {
     private var segmentMetadata: [AudioSegmentMetadata] = []
     private let segmentQueue = DispatchQueue(label: "mic.segment.queue", qos: .userInitiated)
     
+    // MARK: - thread safety (production-grade)
+    private let controllerQueue = DispatchQueue(label: "mic.controller.queue", qos: .userInitiated)
+    private let writerQueue = DispatchQueue(label: "mic.writer.queue", qos: .userInitiated)
+    private var needsSwitch = false  // atomic flag for pending switches
+    private var debounceTimer: DispatchWorkItem?
+    
+    // MARK: - state machine
+    private enum RecordingState {
+        case idle
+        case recording
+        case switching
+    }
+    private var state: RecordingState = .idle
+    
     // MARK: - session timing
     private var sessionID: String = ""
     private var sessionStartTime: Date = Date()
@@ -65,9 +79,12 @@ class MicRecorder: ObservableObject {
         segmentMetadata.removeAll()
         deviceChangeCount = 0
         
-        // start first segment
-        startNewSegment()
+        // set state first
+        state = .recording
         isRecording = true
+        
+        // start first segment on controller queue
+        startNewSegment()
     }
     
     /// ends the recording session and saves metadata
@@ -76,74 +93,104 @@ class MicRecorder: ObservableObject {
         
         guard isRecording else { return }
         
+        // cancel any pending switches
+        debounceTimer?.cancel()
+        needsSwitch = false
+        
         // stop current segment
         stopCurrentSegment()
         
         // save session metadata
         saveSessionMetadata()
         
+        state = .idle
         isRecording = false
     }
     
-    /// handles device change during recording
+    /// handles device change during recording (production-safe)
     func handleDeviceChange(reason: String) {
         guard isRecording else { return }
         
         print("🔄 mic device change: \(reason)")
         
-        // debounce rapid changes
-        let timeSinceLastChange = Date().timeIntervalSince(lastDeviceChangeTime)
-        if timeSinceLastChange < debounceInterval {
-            print("⏱️ debouncing device change (too rapid)")
+        // NEVER do audio work in the callback - just set flag and schedule
+        needsSwitch = true
+        
+        // cancel existing debounce timer if any
+        debounceTimer?.cancel()
+        
+        // schedule new debounce (1.5s for airpods stability)
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performDebouncedSwitch()
+        }
+        debounceTimer = workItem
+        controllerQueue.asyncAfter(deadline: .now() + 1.5, execute: workItem)
+    }
+    
+    /// performs the actual switch after debounce (on controller queue)
+    private func performDebouncedSwitch() {
+        // check conditions
+        guard needsSwitch else { return }
+        guard state != .switching else {
+            print("⏳ already switching - ignoring")
             return
         }
         
-        // rate limiting
+        // rate limiting check
         deviceChangeCount += 1
         if deviceChangeCount > 3 {
             let windowStart = Date().addingTimeInterval(-deviceChangeWindow)
             if lastDeviceChangeTime > windowStart {
-                print("⚠️ device changes too frequent - ignoring")
+                print("⚠️ device changes too frequent - holding current mic")
                 errorMessage = "devices changing rapidly - holding current mic"
+                needsSwitch = false
                 return
             }
-            // reset counter if outside window
             deviceChangeCount = 1
         }
         
         lastDeviceChangeTime = Date()
         
-        // check new device quality before switching
+        // begin switch
+        state = .switching
+        needsSwitch = false
+        
+        print("🔄 performing debounced device switch...")
+        
+        // safe teardown on controller queue
+        stopCurrentSegmentSafely()
+        
+        // let hardware settle
+        Thread.sleep(forTimeInterval: 0.2)
+        
+        // check device quality
         if shouldSwitchToNewDevice() {
-            // perform the switch with timeout protection
-            // use a dedicated queue to prevent main thread blocking
-            let switchQueue = DispatchQueue(label: "mic.switch.queue", qos: .userInitiated)
-            switchQueue.async { [weak self] in
-                guard let self = self else { return }
-                
-                print("🔄 performing device switch...")
-                
-                // stop current segment (non-blocking)
-                DispatchQueue.main.sync {
-                    self.stopCurrentSegment()
-                }
-                
-                // small delay to let hardware settle
-                Thread.sleep(forTimeInterval: 0.1)
-                
-                // start new segment on main thread
-                DispatchQueue.main.async {
-                    self.startNewSegment()
-                    print("✅ device switch complete")
-                }
-            }
+            // safe startup on controller queue
+            startNewSegmentSafely()
         }
+        
+        state = .recording
+        print("✅ device switch complete")
     }
     
     // MARK: - private implementation
     
-    /// starts a new segment
+    /// starts a new segment (safe version for controller queue)
+    private func startNewSegmentSafely() {
+        // this runs on controller queue - safe to touch audio
+        startNewSegmentInternal()
+    }
+    
+    /// starts a new segment (public interface)
     private func startNewSegment() {
+        // dispatch to controller queue for safety
+        controllerQueue.async { [weak self] in
+            self?.startNewSegmentInternal()
+        }
+    }
+    
+    /// internal segment start (must be on controller queue)
+    private func startNewSegmentInternal() {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         
         // create new audio engine (doesn't throw, but can fail)
@@ -222,9 +269,12 @@ class MicRecorder: ObservableObject {
         // record segment start time
         segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime
         
-        // install tap with warmup logic
+        // install tap with warmup logic (NEVER do heavy work in tap callback)
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
-            self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
+            // enqueue to writer queue - don't process in callback
+            self?.writerQueue.async {
+                self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
+            }
         }
         
         // prepare and start engine
@@ -241,8 +291,22 @@ class MicRecorder: ObservableObject {
         }
     }
     
-    /// stops current segment and saves metadata
+    /// stops current segment safely (for controller queue)
+    private func stopCurrentSegmentSafely() {
+        // this runs on controller queue - safe to touch audio
+        stopCurrentSegmentInternal()
+    }
+    
+    /// stops current segment (public interface)
     private func stopCurrentSegment() {
+        // dispatch to controller queue for safety
+        controllerQueue.sync {
+            stopCurrentSegmentInternal()
+        }
+    }
+    
+    /// internal segment stop (must be on controller queue)
+    private func stopCurrentSegmentInternal() {
         print("⏹️ stopping mic segment #\(segmentNumber)")
         
         // record end time
