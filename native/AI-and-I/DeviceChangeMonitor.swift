@@ -179,6 +179,9 @@ class DeviceChangeMonitor: ObservableObject {
     @MainActor
     private func handleCoreAudioPropertyChange(addresses: UnsafePointer<AudioObjectPropertyAddress>,
                                               count: UInt32) {
+        // CRITICAL: Never call Core Audio functions inside a Core Audio callback!
+        // Just schedule the work for later to avoid deadlock
+        
         // debounce rapid changes
         let now = Date()
         if now.timeIntervalSince(lastChangeTime) < debounceInterval {
@@ -187,30 +190,39 @@ class DeviceChangeMonitor: ObservableObject {
         }
         lastChangeTime = now
         
-        // check what changed
+        // check what changed and schedule deferred handling
         for i in 0..<Int(count) {
             let address = addresses[i]
             
             switch address.mSelector {
             case kAudioHardwarePropertyDefaultInputDevice:
                 print("🎤 default input device changed")
-                handleInputDeviceChange(reason: "default input changed")
+                // Defer the actual work to avoid deadlock
+                DispatchQueue.main.async { [weak self] in
+                    self?.handleInputDeviceChange(reason: "default input changed")
+                    self?.updateCurrentDevices()
+                }
                 
             case kAudioHardwarePropertyDefaultOutputDevice:
                 print("🔊 default output device changed")
-                handleOutputDeviceChange(reason: "default output changed")
+                // Defer the actual work to avoid deadlock
+                DispatchQueue.main.async { [weak self] in
+                    self?.handleOutputDeviceChange(reason: "default output changed")
+                    self?.updateCurrentDevices()
+                }
                 
             case kAudioHardwarePropertyDevices:
                 print("📱 device list changed (hotplug event)")
-                handleDeviceListChange()
+                // Defer the actual work to avoid deadlock
+                DispatchQueue.main.async { [weak self] in
+                    self?.handleDeviceListChange()
+                    self?.updateCurrentDevices()
+                }
                 
             default:
                 break
             }
         }
-        
-        // update current device names
-        updateCurrentDevices()
     }
     
     // MARK: - macos-specific notifications (backup detection)
