@@ -10,6 +10,7 @@ struct ContentView: View {
     @StateObject private var audioManager = AudioManager()
     @StateObject private var screenCaptureManager = ScreenCaptureManager()
     @State private var showInsights = false
+    @State private var showTranscriptionTest = false  // for testing transcription services
     @State private var useNewRecorders = true  // toggle for testing
     
     var body: some View {
@@ -227,6 +228,18 @@ struct ContentView: View {
                 }
             }
         }
+        
+        // test transcription button (admin mode only)
+        if performanceMonitor.isAdminMode && !useNewRecorders {
+            Button("test transcription") {
+                showTranscriptionTest.toggle()
+            }
+            .padding(.top)
+        }
+    }
+    .sheet(isPresented: $showTranscriptionTest) {
+        TranscriptionTestView()
+            .frame(minWidth: 800, minHeight: 600)
     }
 }
 
