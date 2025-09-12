@@ -253,7 +253,7 @@ class TranscriptionCoordinator: ObservableObject {
     }
     
     /// convert wav to mp3 for smaller file size
-    private func convertToMP3(_ wavURL: URL) async throws -> URL {
+    func convertToMP3(_ wavURL: URL) async throws -> URL {
         let mp3URL = wavURL.deletingPathExtension().appendingPathExtension("mp3")
         
         // if already mp3, return as is
