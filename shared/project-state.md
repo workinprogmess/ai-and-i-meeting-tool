@@ -225,6 +225,22 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ enhanced ui showing quality scores and specific issues
 - **key findings**: gemini performs best (near perfect) and is cheapest ($0.002/min)
 - **issues identified**: deepgram missing last 15-30s, assembly ai missing lines
+
+**ui/ux design system created (2025-09-13)**:
+- ✅ japanese-inspired color palette (kinari, gofun, etc)
+- ✅ typography system with san francisco font
+- ✅ wireframes for all major views
+- ✅ landing page approach instead of sidebar
+- ✅ floating action tray design
+- ✅ recording flow with confirmations
+
+**revised phase structure**:
+- **phase 1-2**: ✅ complete (core transcription + quality metrics)
+- **phase 3**: ui basics (1.5 days) - next
+- **phase 4**: ui advanced + corrections (2 days)
+- **phase 5**: testing & optimization (1.5 days)
+- **phase 6**: admin dashboard (deferred)
+- **total remaining**: ~5 days
 - three services in parallel: gemini, deepgram, assembly ai
 - mp3 conversion for file size optimization (10x smaller)
 - admin mode: see all three transcripts with metrics
