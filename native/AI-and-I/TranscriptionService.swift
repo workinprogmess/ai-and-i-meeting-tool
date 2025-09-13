@@ -323,7 +323,7 @@ enum TranscriptionError: LocalizedError {
 
 // MARK: - admin mode support
 
-/// tracks metrics for admin comparison
+/// tracks metrics for admin comparison with quality analysis
 struct ServiceMetrics: Codable {
     let serviceName: String
     let processingTime: TimeInterval
@@ -331,30 +331,176 @@ struct ServiceMetrics: Codable {
     let wordCount: Int
     let confidence: Float?
     let timestamp: Date
+    
+    // quality metrics (populated during comparison)
+    var coveragePercentage: Double?      // % of audio transcribed
+    var missingSegments: [MissingSegment]? // gaps in transcription
+    var qualityScore: Double?            // calculated quality score (0-100)
+    var issues: [QualityIssue]?          // identified problems
 }
 
-/// comparison view model for admin mode
+/// represents a gap in the transcription
+struct MissingSegment: Codable {
+    let startTime: TimeInterval
+    let endTime: TimeInterval
+    let duration: TimeInterval
+    let description: String  // e.g., "missed last 15 seconds"
+}
+
+/// identified quality issue
+struct QualityIssue: Codable {
+    let type: IssueType
+    let severity: Severity
+    let description: String
+    
+    enum IssueType: String, Codable {
+        case incompleteCoverage = "incomplete_coverage"
+        case missingContent = "missing_content"  
+        case lowWordCount = "low_word_count"
+        case lowConfidence = "low_confidence"
+    }
+    
+    enum Severity: String, Codable {
+        case info = "info"
+        case warning = "warning"
+        case critical = "critical"
+    }
+}
+
+/// comparison view model for admin mode with quality analysis
 @MainActor
 class TranscriptionComparison: ObservableObject {
     @Published var metrics: [ServiceMetrics] = []
     @Published var selectedService: String = ""
     @Published var showDifferences = false
+    @Published var qualityIssuesFound = false
     
-    func compareResults(_ results: [TranscriptionResult]) {
-        metrics = results.map { result in
+    func compareResults(_ results: [TranscriptionResult], audioDuration: TimeInterval? = nil) {
+        // create basic metrics
+        var allMetrics = results.map { result in
             ServiceMetrics(
                 serviceName: result.service,
                 processingTime: result.processingTime,
                 cost: result.cost,
                 wordCount: result.transcript.wordCount,
                 confidence: result.confidence,
-                timestamp: result.createdAt
+                timestamp: result.createdAt,
+                coveragePercentage: nil,
+                missingSegments: nil,
+                qualityScore: nil,
+                issues: nil
             )
         }
         
-        // select fastest by default
-        if let fastest = metrics.min(by: { $0.processingTime < $1.processingTime }) {
-            selectedService = fastest.serviceName
+        // analyze quality if we have audio duration
+        if let duration = audioDuration {
+            analyzeQuality(&allMetrics, results: results, audioDuration: duration)
+        }
+        
+        // sort by quality score (if available) or processing time
+        allMetrics.sort { 
+            if let score1 = $0.qualityScore, let score2 = $1.qualityScore {
+                return score1 > score2
+            }
+            return $0.processingTime < $1.processingTime
+        }
+        
+        self.metrics = allMetrics
+        
+        // select best service (highest quality or fastest)
+        if let best = allMetrics.first {
+            selectedService = best.serviceName
+        }
+        
+        // check if any critical issues found
+        qualityIssuesFound = allMetrics.contains { metric in
+            metric.issues?.contains { $0.severity == .critical } ?? false
+        }
+    }
+    
+    private func analyzeQuality(_ metrics: inout [ServiceMetrics], results: [TranscriptionResult], audioDuration: TimeInterval) {
+        // calculate median word count for comparison
+        let wordCounts = metrics.map { $0.wordCount }.sorted()
+        let medianWordCount = wordCounts.isEmpty ? 0 : wordCounts[wordCounts.count / 2]
+        
+        // analyze each service
+        for i in 0..<metrics.count {
+            let result = results[i]
+            var issues: [QualityIssue] = []
+            var missingSegments: [MissingSegment] = []
+            
+            // check coverage using timestamps
+            let segments = result.transcript.segments
+            let firstTime = segments.compactMap { $0.timestamp }.min() ?? 0
+            let lastTime = segments.compactMap { $0.timestamp }.max() ?? audioDuration
+            let transcribedDuration = lastTime - firstTime
+            let coverage = audioDuration > 0 ? transcribedDuration / audioDuration : 1.0
+            
+            metrics[i].coveragePercentage = coverage
+            
+            // check for missing end content (like deepgram missing 30-45s)
+            if audioDuration - lastTime > 5.0 {
+                let missingDuration = audioDuration - lastTime
+                missingSegments.append(MissingSegment(
+                    startTime: lastTime,
+                    endTime: audioDuration,
+                    duration: missingDuration,
+                    description: "missed last \(Int(missingDuration)) seconds"
+                ))
+                
+                issues.append(QualityIssue(
+                    type: .missingContent,
+                    severity: missingDuration > 10 ? .critical : .warning,
+                    description: "\(result.service) missed last \(Int(missingDuration)) seconds of audio"
+                ))
+            }
+            
+            // check for missing beginning
+            if firstTime > 5.0 {
+                missingSegments.append(MissingSegment(
+                    startTime: 0,
+                    endTime: firstTime,
+                    duration: firstTime,
+                    description: "missed first \(Int(firstTime)) seconds"
+                ))
+                
+                issues.append(QualityIssue(
+                    type: .missingContent,
+                    severity: .warning,
+                    description: "\(result.service) missed first \(Int(firstTime)) seconds"
+                ))
+            }
+            
+            // check for low word count compared to median
+            let wordDeviation = medianWordCount > 0 ? 
+                Double(abs(metrics[i].wordCount - medianWordCount)) / Double(medianWordCount) : 0
+            
+            if wordDeviation > 0.3 {  // more than 30% deviation
+                issues.append(QualityIssue(
+                    type: .lowWordCount,
+                    severity: wordDeviation > 0.5 ? .critical : .warning,
+                    description: "\(result.service) has \(Int(wordDeviation * 100))% word count deviation"
+                ))
+            }
+            
+            // check coverage percentage
+            if coverage < 0.9 {
+                issues.append(QualityIssue(
+                    type: .incompleteCoverage,
+                    severity: coverage < 0.7 ? .critical : .warning,
+                    description: "\(result.service) only covered \(Int(coverage * 100))% of audio"
+                ))
+            }
+            
+            // calculate quality score
+            var score = 100.0
+            score -= (1.0 - coverage) * 40  // coverage penalty
+            score -= min(wordDeviation * 20, 20)  // word count penalty
+            score -= Double(missingSegments.count) * 10  // missing segments penalty
+            
+            metrics[i].qualityScore = max(0, min(100, score))
+            metrics[i].missingSegments = missingSegments.isEmpty ? nil : missingSegments
+            metrics[i].issues = issues.isEmpty ? nil : issues
         }
     }
 }
