@@ -212,7 +212,19 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ transcriptiontester and transcriptiontestview ui
 - ✅ api keys configured and tested
 - ✅ fixed ffmpeg path detection for apple silicon (/opt/homebrew vs /usr/local)
-- ⚠️ **blocked by mixing integration gap**: no mixed files to transcribe automatically
+- ✅ **mixing integration completed**: automatic mixing on recording stop
+- ✅ mix-audio.swift now executes ffmpeg (not just generates commands)
+- ✅ full pipeline working: record → automatic mix → transcribe
+
+**quality metrics implementation (2025-09-13)**:
+- ✅ extended ServiceMetrics with quality tracking
+- ✅ coverage percentage calculation (% of audio transcribed)
+- ✅ missing segment detection (beginning/middle/end)
+- ✅ quality score algorithm (0-100 based on coverage, word count, gaps)
+- ✅ issue detection with severity levels (critical/warning/info)
+- ✅ enhanced ui showing quality scores and specific issues
+- **key findings**: gemini performs best (near perfect) and is cheapest ($0.002/min)
+- **issues identified**: deepgram missing last 15-30s, assembly ai missing lines
 - three services in parallel: gemini, deepgram, assembly ai
 - mp3 conversion for file size optimization (10x smaller)
 - admin mode: see all three transcripts with metrics
