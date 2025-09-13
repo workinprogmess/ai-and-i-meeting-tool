@@ -133,11 +133,11 @@ class AssemblyAITranscriptionService: TranscriptionService {
         
         // add custom spelling if we have corrections
         if !userDictionary.corrections.isEmpty {
-            var customSpelling: [[String: String]] = []
+            var customSpelling: [[String: Any]] = []
             for correction in userDictionary.corrections {
                 customSpelling.append([
-                    "from": [correction.wrong],
-                    "to": correction.correct
+                    "from": [correction.wrong],  // array of strings
+                    "to": correction.correct      // single string
                 ])
             }
             requestBody["custom_spelling"] = customSpelling

@@ -33,7 +33,7 @@ struct TranscriptionResult: Codable {
     let service: String
     let transcript: Transcript
     let cost: Double
-    let processingTime: TimeInterval
+    var processingTime: TimeInterval  // changed to var
     let confidence: Float?
     let createdAt = Date()
 }
@@ -261,9 +261,9 @@ class TranscriptionCoordinator: ObservableObject {
             return wavURL
         }
         
-        // check if ffmpeg exists
-        let ffmpegPath = "/usr/local/bin/ffmpeg"
-        guard FileManager.default.fileExists(atPath: ffmpegPath) else {
+        // check if ffmpeg exists (try both Apple Silicon and Intel paths)
+        let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        guard let ffmpegPath = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
             throw TranscriptionError.ffmpegNotFound
         }
         

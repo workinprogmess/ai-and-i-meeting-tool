@@ -104,6 +104,12 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             
+            // test transcription button (for development testing)
+            Button("test transcription services") {
+                showTranscriptionTest = true
+            }
+            .padding(.top, 10)
+            
             // admin insights toggle (hidden shortcut)
             Button("") {
                 print("🔍 insights shortcut pressed")
@@ -117,6 +123,10 @@ struct ContentView: View {
         .sheet(isPresented: $showInsights) {
             InsightsDashboard()
                 .environmentObject(performanceMonitor)
+        }
+        .sheet(isPresented: $showTranscriptionTest) {
+            TranscriptionTestView()
+                .frame(minWidth: 800, minHeight: 600)
         }
         .onAppear {
             if useNewRecorders {
@@ -228,18 +238,6 @@ struct ContentView: View {
                 }
             }
         }
-        
-        // test transcription button (admin mode only)
-        if performanceMonitor.isAdminMode && !useNewRecorders {
-            Button("test transcription") {
-                showTranscriptionTest.toggle()
-            }
-            .padding(.top)
-        }
-    }
-    .sheet(isPresented: $showTranscriptionTest) {
-        TranscriptionTestView()
-            .frame(minWidth: 800, minHeight: 600)
     }
 }
 
