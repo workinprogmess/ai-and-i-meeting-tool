@@ -8,6 +8,7 @@
 
 import Foundation
 import SwiftUI
+import AVFoundation
 
 /// view model for testing transcription services
 @MainActor
@@ -16,6 +17,7 @@ class TranscriptionTester: ObservableObject {
     @Published var results: [TranscriptionResult] = []
     @Published var errorMessage: String?
     @Published var testStatus = "ready to test"
+    @Published var comparison: TranscriptionComparison?
     
     private let coordinator: TranscriptionCoordinator
     
@@ -71,6 +73,16 @@ class TranscriptionTester: ObservableObject {
             testStatus = "all services failed"
         } else {
             testStatus = "completed - \(results.count) services succeeded"
+            
+            // analyze quality metrics
+            comparison = TranscriptionComparison()
+            
+            // get audio duration for quality analysis
+            if let duration = getAudioDuration(url: audioURL) {
+                comparison?.compareResults(results, audioDuration: duration)
+            } else {
+                comparison?.compareResults(results)
+            }
         }
     }
     
@@ -104,6 +116,19 @@ class TranscriptionTester: ObservableObject {
             
         } catch {
             print("error finding recordings: \(error)")
+            return nil
+        }
+    }
+    
+    /// get audio file duration
+    private func getAudioDuration(url: URL) -> TimeInterval? {
+        do {
+            let audioFile = try AVAudioFile(forReading: url)
+            let frames = audioFile.length
+            let sampleRate = audioFile.processingFormat.sampleRate
+            return Double(frames) / sampleRate
+        } catch {
+            print("couldn't get audio duration: \(error)")
             return nil
         }
     }
@@ -153,41 +178,108 @@ struct TranscriptionTestView: View {
                 Text("results")
                     .font(.headline)
                 
-                // comparison table
+                // comparison table with quality metrics
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(tester.results, id: \.id) { result in
-                        HStack {
-                            // service name
-                            Text(result.service)
-                                .frame(width: 100, alignment: .leading)
-                                .fontWeight(.medium)
-                            
-                            // processing time
-                            Text("\(String(format: "%.1f", result.processingTime))s")
-                                .frame(width: 60, alignment: .trailing)
-                                .foregroundColor(.secondary)
-                            
-                            // cost
-                            Text("$\(String(format: "%.4f", result.cost))")
-                                .frame(width: 80, alignment: .trailing)
-                                .foregroundColor(.secondary)
-                            
-                            // word count
-                            Text("\(result.transcript.wordCount) words")
-                                .frame(width: 100, alignment: .trailing)
-                                .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            // view button
-                            Button("view") {
-                                selectedResult = result
+                    if let comparison = tester.comparison {
+                        ForEach(comparison.metrics, id: \.serviceName) { metric in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    // service name with quality score
+                                    VStack(alignment: .leading) {
+                                        Text(metric.serviceName)
+                                            .fontWeight(.medium)
+                                        if let score = metric.qualityScore {
+                                            Text("quality: \(Int(score))%")
+                                                .font(.caption2)
+                                                .foregroundColor(score > 80 ? .green : score > 60 ? .yellow : .red)
+                                        }
+                                    }
+                                    .frame(width: 100, alignment: .leading)
+                                    
+                                    // processing time
+                                    Text("\(String(format: "%.1f", metric.processingTime))s")
+                                        .frame(width: 60, alignment: .trailing)
+                                        .foregroundColor(.secondary)
+                                    
+                                    // cost
+                                    Text("$\(String(format: "%.4f", metric.cost))")
+                                        .frame(width: 80, alignment: .trailing)
+                                        .foregroundColor(.secondary)
+                                    
+                                    // word count
+                                    Text("\(metric.wordCount) words")
+                                        .frame(width: 100, alignment: .trailing)
+                                        .foregroundColor(.secondary)
+                                    
+                                    // coverage
+                                    if let coverage = metric.coveragePercentage {
+                                        Text("\(Int(coverage * 100))% coverage")
+                                            .frame(width: 100, alignment: .trailing)
+                                            .foregroundColor(coverage > 0.9 ? .green : .orange)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // view button
+                                    if let result = tester.results.first(where: { $0.service == metric.serviceName }) {
+                                        Button("view") {
+                                            selectedResult = result
+                                        }
+                                        .font(.caption)
+                                    }
+                                }
+                                
+                                // show issues if any
+                                if let issues = metric.issues {
+                                    ForEach(issues, id: \.description) { issue in
+                                        HStack {
+                                            Circle()
+                                                .fill(issue.severity == .critical ? Color.red : 
+                                                     issue.severity == .warning ? Color.orange : Color.blue)
+                                                .frame(width: 6, height: 6)
+                                            Text(issue.description)
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(.leading, 20)
+                                    }
+                                }
                             }
-                            .font(.caption)
+                            .padding(.vertical, 4)
+                            
+                            Divider()
                         }
-                        .padding(.vertical, 4)
-                        
-                        Divider()
+                    } else {
+                        // fallback to simple display
+                        ForEach(tester.results, id: \.id) { result in
+                            HStack {
+                                Text(result.service)
+                                    .frame(width: 100, alignment: .leading)
+                                    .fontWeight(.medium)
+                                
+                                Text("\(String(format: "%.1f", result.processingTime))s")
+                                    .frame(width: 60, alignment: .trailing)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("$\(String(format: "%.4f", result.cost))")
+                                    .frame(width: 80, alignment: .trailing)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("\(result.transcript.wordCount) words")
+                                    .frame(width: 100, alignment: .trailing)
+                                    .foregroundColor(.secondary)
+                                
+                                Spacer()
+                                
+                                Button("view") {
+                                    selectedResult = result
+                                }
+                                .font(.caption)
+                            }
+                            .padding(.vertical, 4)
+                            
+                            Divider()
+                        }
                     }
                 }
                 
