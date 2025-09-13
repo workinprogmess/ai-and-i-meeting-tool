@@ -9,7 +9,7 @@ import SwiftUI
 
 // MARK: - data models
 
-struct Meeting: Identifiable, Codable {
+struct Meeting: Identifiable, Codable, Hashable {
     let id = UUID()
     let timestamp: Date
     let duration: TimeInterval
