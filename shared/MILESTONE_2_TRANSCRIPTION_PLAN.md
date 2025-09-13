@@ -32,18 +32,18 @@ segmented recordings → mix-audio.swift → mixed wav → mp3 conversion → pa
 - **correction learning**: track what was wrong + what's correct
 - **fallback strategy**: if mixing fails, transcribe separately and stitch
 
-## implementation phases
+## implementation phases (revised 2025-09-13)
 
-### phase 1: multi-service integration (2 days)
+### ✅ phase 1: multi-service integration (COMPLETE)
 **goal**: integrate gemini, deepgram, and assembly ai in parallel
 
-#### tasks
-- [ ] set up google ai swift sdk for gemini
-- [ ] integrate deepgram sdk with api key from electron
-- [ ] add assembly ai sdk (api key to be provided)
-- [ ] create abstraction layer for all three services
-- [ ] implement parallel processing coordinator
-- [ ] add mp3 conversion step before upload
+#### completed
+- ✅ all three services integrated and working
+- ✅ parallel processing with quality metrics
+- ✅ mp3 conversion working (10x size reduction)
+- ✅ automatic mixing integration
+- ✅ api limits verified (gemini 20mb inline, 2gb files api)
+- ✅ discovered gemini best quality + cheapest ($0.002/min)
 
 #### service abstraction
 ```swift
@@ -264,6 +264,40 @@ struct AdminTranscriptView: View {
 - likely gemini (cheapest + good quality)
 - fallback to deepgram if gemini fails
 - assembly ai for specific high-accuracy needs
+
+## revised phase structure (2025-09-13)
+
+### completed
+- ✅ **phase 1-2**: core transcription pipeline with quality metrics
+
+### remaining phases
+
+#### phase 3: ui basics (1.5 days)
+- meetings list landing page
+- recording flow with animations
+- clean transcript view
+- japanese color palette
+- san francisco typography
+- floating action tray
+
+#### phase 4: ui advanced + corrections (2 days)
+- corrections ui (click to correct)
+- user dictionary persistence
+- learning from corrections
+- prompt injection to services
+- share/export functionality
+- performance optimizations
+
+#### phase 5: testing & optimization (1.5 days)
+- long recording tests
+- memory optimization
+- edge case handling
+- performance tuning
+
+#### phase 6: admin dashboard (deferred)
+- may not be needed if current comparison view works well
+
+**total remaining**: ~5 days
 
 ## implementation notes
 
