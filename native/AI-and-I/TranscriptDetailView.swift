@@ -60,7 +60,7 @@ struct TranscriptDetailView: View {
                 }
             }
         }
-        .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             viewModel.loadTranscript(for: meeting)
         }
