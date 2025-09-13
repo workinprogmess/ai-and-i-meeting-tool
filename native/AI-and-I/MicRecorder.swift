@@ -43,6 +43,11 @@ class MicRecorder: ObservableObject {
     private var sessionID: String = ""
     private var sessionStartTime: Date = Date()
     private var sessionReferenceTime: TimeInterval = 0  // mach time for precision
+    
+    /// public accessor for the session timestamp (used for mixing)
+    var currentSessionTimestamp: Int {
+        Int(sessionReferenceTime)
+    }
     private var segmentStartTime: TimeInterval = 0
     private var segmentNumber: Int = 0
     private var segmentFilePath: String = ""
