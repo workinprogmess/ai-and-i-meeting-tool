@@ -3,16 +3,21 @@
 ## current focus: native macos app
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
-## current milestone: native foundation (0.1.0) ✅ COMPLETE
-**status**: production-ready segmented recording with seamless device switching
-- ✅ strategic pivot complete: electron → native macos  
-- ✅ clean project structure: native/, shared/, electron-archive/
-- ✅ xcode project with swiftui + core audio configuration
-- ✅ dual-file audio capture (mic + system) with synchronization
-- ✅ ffmpeg mixing with delay compensation
-- ✅ performance monitoring and insights dashboard
-- ✅ phase 4: seamless device switching during recording (airpods hang fixed!)
-- ⚠️ **critical gap**: mixing script completed but not integrated into app flow
+## current milestone: transcription integration (0.2.0) 🚧 IN PROGRESS
+**status**: phase 3 ui complete - beautiful minimal interface with japanese aesthetics
+- ✅ milestone 1 complete: seamless device switching with perfect audio mixing
+- ✅ phase 1-2: all three transcription services integrated (gemini, deepgram, assembly ai)
+- ✅ parallel processing with quality metrics and comparison
+- ✅ mp3 conversion working (10x file size reduction)
+- ✅ automatic mixing integration fixed
+- ✅ phase 3: beautiful minimal ui with japanese color palette
+  - ✅ meetings list landing page
+  - ✅ recording flow with animations  
+  - ✅ clean transcript detail view
+  - ✅ floating action tray with share/copy/export/corrections
+  - ✅ user corrections system with dictionary persistence
+- ⏳ phase 4: ui advanced + corrections integration (2 days)
+- ⏳ phase 5: testing & optimization + files api (1.5 days)
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -234,13 +239,24 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ floating action tray design
 - ✅ recording flow with confirmations
 
+**phase 3 ui implementation (2025-09-13) - ✅ COMPLETE (untested)**:
+- ✅ designsystem.swift: japanese color palette (kinari, gofun, sumi, hai, usugrey)
+- ✅ meetingslistview.swift: landing page with meeting history
+- ✅ transcriptdetailview.swift: beautiful minimal transcript display
+- ✅ correctionview.swift: user dictionary system for corrections
+- ✅ recordingview: animated recording interface
+- ✅ floating action tray: share/copy/export/corrections icons
+- ✅ all lowercase ui text throughout
+- ✅ san francisco typography system
+- **note**: components built but not yet tested in xcode
+
 **revised phase structure**:
 - **phase 1-2**: ✅ complete (core transcription + quality metrics)
-- **phase 3**: ui basics (1.5 days) - next
-- **phase 4**: ui advanced + corrections (2 days)
-- **phase 5**: testing & optimization (1.5 days)
+- **phase 3**: ✅ complete (ui basics - untested)
+- **phase 4**: ui advanced + corrections integration (2 days) - next
+- **phase 5**: testing & optimization + files api (1.5 days)
 - **phase 6**: admin dashboard (deferred)
-- **total remaining**: ~5 days
+- **total remaining**: ~3.5 days
 - three services in parallel: gemini, deepgram, assembly ai
 - mp3 conversion for file size optimization (10x smaller)
 - admin mode: see all three transcripts with metrics
