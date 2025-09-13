@@ -60,7 +60,9 @@ struct TranscriptDetailView: View {
                 }
             }
         }
+        #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        #endif
         .onAppear {
             viewModel.loadTranscript(for: meeting)
         }
