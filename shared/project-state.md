@@ -12,6 +12,7 @@ ai meeting intelligence - native swiftui application for world-class user experi
 - ✅ ffmpeg mixing with delay compensation
 - ✅ performance monitoring and insights dashboard
 - ✅ phase 4: seamless device switching during recording (airpods hang fixed!)
+- ⚠️ **critical gap**: mixing script completed but not integrated into app flow
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -107,6 +108,10 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ 16-bit pcm for mic, 32-bit float for system audio formats
 - ✅ metadata-driven audio mixing with mix-audio.swift script
 - ✅ dynamic volume normalization (airpods +8db, built-in +12db, system -6/-10db)
+- ⚠️ **integration gap discovered (2025-09-13)**: mix-audio.swift works perfectly but is not called automatically
+  - mixing script exists and tested, but contentview still has todo comment
+  - requires manual execution: `swift mix-audio.swift <timestamp>`
+  - this blocks automatic transcription flow (no mixed file = no transcription)
 - minimal audiomanager.swift with state-only recording flow ✅
 - user-initiated permissions architecture (no app launch dialogs) ✅
 - established stable foundation checkpoint for phase 2 audio implementation ✅
@@ -196,8 +201,18 @@ private func shouldSwitchToNewDevice() -> Bool {
 - **production-grade stability**: 2.5s debouncing, thread-safe operations, comprehensive error handling
 - **key achievement**: solved critical core audio callback deadlock that was causing app freezes
 
-### milestone 2: transcription integration (0.2.0) - planned
+### milestone 2: transcription integration (0.2.0) - in progress
 **goal**: multi-service transcription with comparison capabilities
+
+**phase 1 implementation (2025-09-13)**:
+- ✅ transcriptionservice.swift protocol and data models
+- ✅ three service implementations: gemini, deepgram, assembly ai
+- ✅ parallel processing with transcriptioncoordinator
+- ✅ mp3 conversion for file size (wav to mp3)
+- ✅ transcriptiontester and transcriptiontestview ui
+- ✅ api keys configured and tested
+- ✅ fixed ffmpeg path detection for apple silicon (/opt/homebrew vs /usr/local)
+- ⚠️ **blocked by mixing integration gap**: no mixed files to transcribe automatically
 - three services in parallel: gemini, deepgram, assembly ai
 - mp3 conversion for file size optimization (10x smaller)
 - admin mode: see all three transcripts with metrics
