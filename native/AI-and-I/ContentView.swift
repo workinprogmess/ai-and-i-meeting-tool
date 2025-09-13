@@ -155,6 +155,42 @@ struct ContentView: View {
         }
     }
     
+    private func runMixingScript(timestamp: Int) async {
+        // path to the mixing script
+        let scriptPath = Bundle.main.path(forResource: "mix-audio", ofType: "swift") 
+            ?? "/Users/workinprogmess/ai-and-i/native/AI-and-I/mix-audio.swift"
+        
+        // run the swift script with the timestamp
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
+        process.arguments = [scriptPath, String(timestamp)]
+        
+        // capture output
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            // read output
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                print("mixing output:\n\(output)")
+            }
+            
+            if process.terminationStatus == 0 {
+                print("✅ audio mixing completed successfully")
+                print("📍 mixed file: ~/Documents/ai&i-recordings/mixed_\(timestamp).wav")
+            } else {
+                print("❌ mixing failed with status: \(process.terminationStatus)")
+            }
+        } catch {
+            print("❌ failed to run mixing script: \(error)")
+        }
+    }
+    
     private func toggleRecording() {
         if useNewRecorders {
             // new segmented recording approach
@@ -168,14 +204,13 @@ struct ContentView: View {
                     await systemRecorder.endSession()
                     
                     print("🎬 recording ended - segments saved")
-                    print("📝 todo: implement segment stitching with ffmpeg")
                     
-                    // TODO: implement segment stitching
-                    // 1. load metadata files
-                    // 2. generate ffmpeg concat lists
-                    // 3. stitch mic segments
-                    // 4. stitch system segments
-                    // 5. mix final files
+                    // get the session timestamp for mixing
+                    let sessionTimestamp = micRecorder.currentSessionTimestamp
+                    
+                    // run the mixing script
+                    print("🎵 starting audio mixing for session \(sessionTimestamp)")
+                    await runMixingScript(timestamp: sessionTimestamp)
                 }
             } else {
                 // start recording
