@@ -303,6 +303,23 @@ if let latestMetadata = metadataFiles.first {
             }
             print("  total gaps: \(String(format: "%.1f", totalGaps))s")
             print("  output file: \(outputFile)")
+            
+            // actually execute the ffmpeg command
+            print("\n🚀 executing ffmpeg command...")
+            let recordingsPath = NSString(string: "~/Documents/ai&i-recordings").expandingTildeInPath
+            let result = executeFFmpegMixing(
+                micSegments: micSegments,
+                systemSegments: systemSegments,
+                sessionTimestamp: Int(sessionTimestamp) ?? 0,
+                recordingsPath: recordingsPath
+            )
+            
+            if result {
+                print("✅ mixing completed successfully!")
+                print("📍 output: \(recordingsPath)/\(outputFile)")
+            } else {
+                print("❌ mixing failed - check the command above")
+            }
         } else if !micSegments.isEmpty {
             print("\n⚠️ only mic segments found - no system audio to mix")
         } else if !systemSegments.isEmpty {
@@ -340,5 +357,92 @@ print("📝 note: the generated command assumes you're in ~/Documents/ai&i-recor
 extension String {
     static func *(lhs: String, rhs: Int) -> String {
         return String(repeating: lhs, count: rhs)
+    }
+}
+
+// MARK: - ffmpeg execution
+
+func executeFFmpegMixing(
+    micSegments: [AudioSegmentMetadata],
+    systemSegments: [AudioSegmentMetadata],
+    sessionTimestamp: Int,
+    recordingsPath: String
+) -> Bool {
+    // build ffmpeg arguments
+    var args: [String] = []
+    
+    // add input files
+    for segment in micSegments {
+        let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_001.wav"
+        args.append("-i")
+        args.append("\(recordingsPath)/\(filename)")
+    }
+    
+    // add system audio
+    let systemFilename = "system_\(sessionTimestamp)_001.wav"
+    args.append("-i")
+    args.append("\(recordingsPath)/\(systemFilename)")
+    
+    // build filter complex
+    var filterParts: [String] = []
+    
+    // process mic segments
+    for (index, segment) in micSegments.enumerated() {
+        let delayMs = Int(segment.startSessionTime * 1000)
+        let isAirPods = segment.deviceName.lowercased().contains("airpods")
+        let micBoost = isAirPods ? "8dB" : "12dB"
+        
+        filterParts.append("[\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)]")
+    }
+    
+    // concatenate mic segments if multiple
+    if micSegments.count > 1 {
+        let concatInputs = (0..<micSegments.count).map { "[m\($0)]" }.joined()
+        filterParts.append("\(concatInputs)concat=n=\(micSegments.count):v=0:a=1[mic]")
+    } else {
+        filterParts.append("[m0]acopy[mic]")
+    }
+    
+    // process system audio
+    let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
+    let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"
+    let systemDelayMs = Int(systemSegments[0].startSessionTime * 1000)
+    filterParts.append("[\(micSegments.count)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys]")
+    
+    // mix together
+    filterParts.append("[mic][sys]amix=inputs=2:duration=longest[out]")
+    
+    let filterComplex = filterParts.joined(separator: ";")
+    args.append("-filter_complex")
+    args.append(filterComplex)
+    
+    // output options
+    args.append("-map")
+    args.append("[out]")
+    args.append("-acodec")
+    args.append("pcm_s16le")
+    args.append("-ar")
+    args.append("48000")
+    args.append("\(recordingsPath)/mixed_\(sessionTimestamp).wav")
+    
+    // find ffmpeg
+    let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+    guard let ffmpegPath = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+        print("❌ ffmpeg not found")
+        return false
+    }
+    
+    // execute ffmpeg
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: ffmpegPath)
+    process.arguments = args
+    
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        print("❌ failed to run ffmpeg: \(error)")
+        return false
     }
 }
