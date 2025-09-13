@@ -123,7 +123,7 @@ struct CorrectionView: View {
                         
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: Spacing.gapSmall) {
-                                ForEach(userDictionary.recentCorrections, id: \.id) { correction in
+                                ForEach(Array(userDictionary.recentCorrections.enumerated()), id: \.offset) { _, correction in
                                     CorrectionChip(correction: correction)
                                 }
                             }
@@ -161,7 +161,6 @@ struct CorrectionView: View {
             wrong: findDifference(original: originalText, corrected: correctedText).wrong,
             correct: findDifference(original: originalText, corrected: correctedText).correct,
             context: originalText,
-            type: correctionType.rawValue,
             addedAt: Date()
         )
         
@@ -310,55 +309,8 @@ class UserDictionaryManager: ObservableObject {
     
     // generate prompt injection for transcription services
     func generatePromptAddition() -> String {
-        var additions: [String] = []
-        
-        if !dictionary.names.isEmpty {
-            additions.append("names: \(dictionary.names.joined(separator: ", "))")
-        }
-        
-        if !dictionary.companies.isEmpty {
-            additions.append("companies: \(dictionary.companies.joined(separator: ", "))")
-        }
-        
-        if !dictionary.phrases.isEmpty {
-            additions.append("common phrases: \(dictionary.phrases.joined(separator: ", "))")
-        }
-        
-        if !dictionary.corrections.isEmpty {
-            let correctionPairs = dictionary.corrections.suffix(10).map { 
-                "'\($0.wrong)' should be '\($0.correct)'"
-            }.joined(separator: ", ")
-            additions.append("corrections: \(correctionPairs)")
-        }
-        
-        if additions.isEmpty {
-            return ""
-        }
-        
-        return """
-        
-        note: user vocabulary includes:
-        - \(additions.joined(separator: "\n- "))
-        """
+        dictionary.promptInjection
     }
-}
-
-// MARK: - user dictionary model
-
-struct UserDictionary: Codable {
-    var corrections: [UserCorrection] = []
-    var names: Set<String> = []
-    var companies: Set<String> = []
-    var phrases: Set<String> = []
-}
-
-struct UserCorrection: Codable, Identifiable {
-    let id = UUID()
-    let wrong: String      // "wikus"
-    let correct: String    // "vikas"
-    let context: String?   // "hi wikus" → "hi vikas"
-    let type: String       // "name", "company", "phrase", "general"
-    let addedAt: Date
 }
 
 // MARK: - preview
