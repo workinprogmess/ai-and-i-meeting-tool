@@ -11,8 +11,8 @@ import SwiftUI
 import AVFoundation
 
 // hex color extension for this file only
-fileprivate extension Color {
-    init(hex: String) {
+extension Color {
+    fileprivate init(hexString hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
@@ -323,7 +323,7 @@ struct TranscriptionTestView: View {
                                 HStack(alignment: .top) {
                                     Text(segment.speaker.label)
                                         .fontWeight(.medium)
-                                        .foregroundColor(Color(hex: segment.speaker.color))
+                                        .foregroundColor(Color(hexString: segment.speaker.color))
                                         .frame(width: 80, alignment: .leading)
                                     
                                     Text(segment.text)
