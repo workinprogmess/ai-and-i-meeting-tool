@@ -99,7 +99,7 @@ struct TranscriptDetailView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 400)
-            .onChange(of: selectedServiceIndex) { newIndex in
+            .onChange(of: selectedServiceIndex) { _, newIndex in
                 viewModel.selectService(at: newIndex)
             }
             
@@ -210,28 +210,26 @@ struct TranscriptDetailView: View {
             }
             .lowercased()
             
-            // service info (if admin mode)
-            if viewModel.isAdminMode {
-                HStack {
-                    Text("transcribed by")
-                        .font(Typography.metadata)
+            // service info
+            HStack {
+                Text("transcribed by")
+                    .font(Typography.metadata)
+                    .foregroundColor(.usugrey)
+                
+                Text(viewModel.serviceName)
+                    .font(Typography.metadata)
+                    .foregroundColor(.hai)
+                
+                if let cost = viewModel.cost {
+                    Text("•")
                         .foregroundColor(.usugrey)
                     
-                    Text(viewModel.serviceName)
+                    Text(String(format: "$%.3f", cost))
                         .font(Typography.metadata)
                         .foregroundColor(.hai)
-                    
-                    if let cost = viewModel.cost {
-                        Text("•")
-                            .foregroundColor(.usugrey)
-                        
-                        Text(String(format: "$%.3f", cost))
-                            .font(Typography.metadata)
-                            .foregroundColor(.hai)
-                    }
                 }
-                .lowercased()
             }
+            .lowercased()
         }
     }
     
