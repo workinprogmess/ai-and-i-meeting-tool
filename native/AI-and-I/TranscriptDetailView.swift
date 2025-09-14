@@ -13,7 +13,6 @@ struct TranscriptDetailView: View {
     let meeting: Meeting
     @StateObject private var viewModel = TranscriptDetailViewModel()
     @State private var selectedText: String = ""
-    @State private var showingActions = false
     @State private var showingCorrection = false
     @Environment(\.dismiss) private var dismiss
     
@@ -49,14 +48,22 @@ struct TranscriptDetailView: View {
                                 )
                             }
                         }
+                        .frame(maxWidth: 800)
                         .padding(Spacing.margins)
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 
-                // floating action tray
-                if showingActions {
+            }
+            
+            // floating action tray - always visible
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
                     floatingActionTray
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.trailing, Spacing.margins * 2)
+                        .padding(.bottom, Spacing.margins * 2)
                 }
             }
         }
@@ -75,40 +82,31 @@ struct TranscriptDetailView: View {
     
     private var headerView: some View {
         HStack {
-            Button(action: { dismiss() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14))
-                    Text("back")
+            // breadcrumb
+            HStack(spacing: 4) {
+                Button(action: { dismiss() }) {
+                    Text("meetings")
+                        .font(.system(size: 12))
+                        .foregroundColor(.hai)
+                        .lowercased()
                 }
-                .foregroundColor(.hai)
-                .lowercased()
+                .buttonStyle(PlainButtonStyle())
+                
+                Text("/")
+                    .font(.system(size: 12))
+                    .foregroundColor(.usugrey)
+                
+                Text(meeting.title)
+                    .font(.system(size: 12))
+                    .foregroundColor(.sumi)
+                    .lowercased()
             }
-            .buttonStyle(PlainButtonStyle())
             
             Spacer()
-            
-            Text(meeting.title)
-                .font(Typography.title)
-                .foregroundColor(.sumi)
-                .lowercased()
-            
-            Spacer()
-            
-            // actions button
-            Button(action: { 
-                withAnimation(.standard) {
-                    showingActions.toggle()
-                }
-            }) {
-                Image(systemName: showingActions ? "xmark" : "ellipsis")
-                    .foregroundColor(.hai)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(PlainButtonStyle())
         }
+        .frame(maxWidth: 800)
         .padding(.horizontal, Spacing.margins)
-        .padding(.vertical, Spacing.gapMedium)
+        .padding(.vertical, Spacing.gapSmall)
         .background(Color.kinari)
     }
     
@@ -164,7 +162,7 @@ struct TranscriptDetailView: View {
     }
     
     private var floatingActionTray: some View {
-        HStack(spacing: Spacing.gapLarge) {
+        VStack(spacing: Spacing.gapSmall) {
             // link/share
             FloatingActionButton(icon: "link") {
                 viewModel.shareTranscript()
@@ -185,13 +183,12 @@ struct TranscriptDetailView: View {
                 showingCorrection = true
             }
         }
-        .padding(Spacing.gapMedium)
+        .padding(Spacing.gapSmall)
         .background(
-            RoundedRectangle(cornerRadius: 24)
+            RoundedRectangle(cornerRadius: 20)
                 .fill(Color.gofun)
-                .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
+                .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
         )
-        .padding(.bottom, Spacing.margins)
     }
 }
 
@@ -206,9 +203,9 @@ struct TranscriptSegmentView: View {
         HStack(alignment: .top, spacing: Spacing.gapMedium) {
             // speaker label
             Text(segment.speakerLabel)
-                .font(Typography.speakerLabel)
-                .foregroundColor(segment.speaker == .me ? .hai : .sumi)
-                .frame(width: 80, alignment: .trailing)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(segment.speaker == .me ? .speakerMe : .speakerOther)
+                .frame(width: 60, alignment: .trailing)
                 .lowercased()
             
             // transcript text
@@ -257,66 +254,30 @@ class TranscriptDetailViewModel: ObservableObject {
     
     func loadTranscript(for meeting: Meeting) {
         // load from saved transcript files
-        // for now, use mock data
-        segments = [
-            TranscriptSegment(
-                speaker: .me,
-                text: "hey everyone, thanks for joining the standup. let's go around and share updates.",
-                timestamp: 0,
-                confidence: 0.95
-            ),
-            TranscriptSegment(
-                speaker: .other("sarah"),
-                text: "sure! i finished the authentication flow yesterday. the login and signup are both working with email verification.",
-                timestamp: 8,
-                confidence: 0.92
-            ),
-            TranscriptSegment(
-                speaker: .other("sarah"),
-                text: "today i'm starting on the password reset functionality. should have that done by end of day.",
-                timestamp: 18,
-                confidence: 0.94
-            ),
-            TranscriptSegment(
-                speaker: .me,
-                text: "awesome, that's great progress. any blockers?",
-                timestamp: 25,
-                confidence: 0.96
-            ),
-            TranscriptSegment(
-                speaker: .other("sarah"),
-                text: "nope, all good on my end.",
-                timestamp: 28,
-                confidence: 0.93
-            ),
-            TranscriptSegment(
-                speaker: .other("alex"),
-                text: "i've been working on the api integration. ran into some cors issues yesterday but got them resolved.",
-                timestamp: 32,
-                confidence: 0.91
-            ),
-            TranscriptSegment(
-                speaker: .other("alex"),
-                text: "the endpoints for user data and settings are complete. working on the analytics endpoints today.",
-                timestamp: 40,
-                confidence: 0.90
-            ),
-            TranscriptSegment(
-                speaker: .me,
-                text: "nice. make sure to add proper error handling for those analytics calls.",
-                timestamp: 48,
-                confidence: 0.95
-            ),
-            TranscriptSegment(
-                speaker: .other("alex"),
-                text: "will do. i'll add retry logic and fallback behavior.",
-                timestamp: 52,
-                confidence: 0.92
-            )
-        ]
+        guard let audioURL = meeting.audioFileURL else { return }
         
-        // calculate cost based on duration
-        cost = meeting.duration * 0.002 / 60 // $0.002 per minute for gemini
+        // get session directory from audio path
+        let sessionDir = audioURL.deletingLastPathComponent()
+        let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
+        
+        // load transcription results
+        if let data = try? Data(contentsOf: resultsPath),
+           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
+           let bestResult = results.first {
+            
+            // load segments from best result
+            segments = bestResult.transcript.segments
+            cost = bestResult.cost
+            serviceName = bestResult.service
+            
+            // check for admin mode
+            isAdminMode = UserDefaults.standard.bool(forKey: "adminMode")
+        } else {
+            // fallback to empty
+            segments = []
+            cost = nil
+            serviceName = "unknown"
+        }
     }
     
     func shareTranscript() {
