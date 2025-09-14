@@ -62,41 +62,52 @@ class MeetingsListViewModel: ObservableObject {
     
     func loadMeetings() {
         // load from documents folder
-        // for now, use mock data
-        meetings = [
-            Meeting(
-                timestamp: Date(),
-                duration: 45 * 60,
-                title: "team standup",
-                speakerCount: 3,
-                audioFileURL: nil,
-                transcriptAvailable: true
-            ),
-            Meeting(
-                timestamp: Date().addingTimeInterval(-3600),
-                duration: 23 * 60,
-                title: "1:1 with sarah",
-                speakerCount: 2,
-                audioFileURL: nil,
-                transcriptAvailable: true
-            ),
-            Meeting(
-                timestamp: Date().addingTimeInterval(-86400),
-                duration: 67 * 60,
-                title: "design review",
-                speakerCount: 5,
-                audioFileURL: nil,
-                transcriptAvailable: true
-            ),
-            Meeting(
-                timestamp: Date().addingTimeInterval(-86400 * 2),
-                duration: 52 * 60,
-                title: "all hands",
-                speakerCount: 12,
-                audioFileURL: nil,
-                transcriptAvailable: true
-            )
-        ]
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let aiAndIPath = documentsPath.appendingPathComponent("ai-and-i")
+        let sessionsPath = aiAndIPath.appendingPathComponent("sessions")
+        
+        // find all session folders
+        guard let sessionDirs = try? FileManager.default.contentsOfDirectory(
+            at: sessionsPath,
+            includingPropertiesForKeys: nil
+        ) else {
+            meetings = []
+            return
+        }
+        
+        // load transcripts from each session
+        var loadedMeetings: [Meeting] = []
+        for sessionDir in sessionDirs {
+            // look for transcription results
+            let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
+            if let data = try? Data(contentsOf: resultsPath),
+               let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
+               let bestResult = results.first {
+                
+                // extract title from first few words or use "untitled"
+                let title = bestResult.transcript.segments.first?.text
+                    .split(separator: " ")
+                    .prefix(4)
+                    .joined(separator: " ")
+                    .lowercased() ?? "untitled meeting"
+                
+                // count unique speakers
+                let speakers = Set(bestResult.transcript.segments.map { $0.speaker })
+                
+                let meeting = Meeting(
+                    timestamp: bestResult.createdAt,
+                    duration: bestResult.transcript.duration,
+                    title: title,
+                    speakerCount: speakers.count,
+                    audioFileURL: sessionDir.appendingPathComponent("mixed.mp3"),
+                    transcriptAvailable: true
+                )
+                loadedMeetings.append(meeting)
+            }
+        }
+        
+        // sort by most recent first
+        meetings = loadedMeetings.sorted { $0.timestamp > $1.timestamp }
     }
     
     func startNewMeeting() {
@@ -128,6 +139,54 @@ class MeetingsListViewModel: ObservableObject {
                 transcriptAvailable: false
             )
             meetings.insert(meeting, at: 0)
+            
+            // trigger transcription process
+            Task {
+                await processRecording(for: meeting)
+            }
+        }
+    }
+    
+    @MainActor
+    private func processRecording(for meeting: Meeting) async {
+        // get the latest session directory
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let sessionsPath = documentsPath.appendingPathComponent("ai-and-i").appendingPathComponent("sessions")
+        
+        // find the most recent session folder
+        guard let sessionDirs = try? FileManager.default.contentsOfDirectory(
+            at: sessionsPath,
+            includingPropertiesForKeys: [.creationDateKey]
+        ).sorted(by: { url1, url2 in
+            let date1 = (try? url1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+            let date2 = (try? url2.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+            return date1 > date2
+        }).first else { return }
+        
+        // wait for mixed audio file
+        let mixedPath = sessionDirs.appendingPathComponent("mixed.wav")
+        var attempts = 0
+        while !FileManager.default.fileExists(atPath: mixedPath.path) && attempts < 30 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            attempts += 1
+        }
+        
+        // run transcription
+        if FileManager.default.fileExists(atPath: mixedPath.path) {
+            // use transcription coordinator to transcribe
+            let coordinator = TranscriptionCoordinator()
+            let results = await coordinator.transcribeWithAllServices(audioURL: mixedPath)
+            
+            // save results
+            if !results.isEmpty {
+                let resultsPath = sessionDirs.appendingPathComponent("transcription-results.json")
+                if let data = try? JSONEncoder().encode(results) {
+                    try? data.write(to: resultsPath)
+                }
+                
+                // reload meetings to show the new transcript
+                loadMeetings()
+            }
         }
     }
     
@@ -174,12 +233,15 @@ struct MeetingsListView: View {
                         VStack(spacing: Spacing.gapLarge) {
                             // start meeting button
                             startMeetingButton
+                                .frame(maxWidth: 400)
                             
                             // meetings list
                             meetingsList
                         }
+                        .frame(maxWidth: 600)
                         .padding(Spacing.margins)
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
             .navigationDestination(item: $selectedMeeting) { meeting in
@@ -195,27 +257,33 @@ struct MeetingsListView: View {
     
     private var headerView: some View {
         HStack {
-            Text("ai & i")
+            // search on left
+            Button(action: {}) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.hai)
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Spacer()
+            
+            // logo centered
+            Text("ai&i")
                 .font(Typography.title)
                 .foregroundColor(.sumi)
                 .lowercased()
             
             Spacer()
             
-            // search field (future)
-            if !viewModel.meetings.isEmpty {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.hai)
-                    .padding(.trailing, Spacing.gapSmall)
-            }
-            
-            // settings
+            // settings on right
             Button(action: {}) {
                 Image(systemName: "gearshape")
                     .foregroundColor(.hai)
+                    .font(.system(size: 14))
             }
             .buttonStyle(PlainButtonStyle())
         }
+        .frame(maxWidth: 800)
         .padding(.horizontal, Spacing.margins)
         .padding(.vertical, Spacing.gapMedium)
         .background(Color.kinari)
@@ -266,9 +334,9 @@ struct MeetingsListView: View {
             }
         }) {
             HStack {
-                Circle()
-                    .fill(meeting.transcriptAvailable ? Color.hai : Color.usugrey)
-                    .frame(width: 6, height: 6)
+                Text("&i")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(meeting.transcriptAvailable ? Color.hai : Color.usugrey)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(meeting.title)
@@ -354,14 +422,14 @@ struct RecordingView: View {
                 
                 // recording indicator
                 VStack(spacing: Spacing.gapLarge) {
-                    Text("recording in progress")
-                        .font(Typography.title)
-                        .foregroundColor(.sumi)
+                    Text("recording")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.hai)
                         .lowercased()
                     
                     Text(formattedDuration)
-                        .font(.system(size: 48, weight: .light, design: .monospaced))
-                        .foregroundColor(.sumi)
+                        .font(.system(size: 36, weight: .light, design: .monospaced))
+                        .foregroundColor(.hai.opacity(0.8))
                     
                     // audio wave animation
                     AudioWaveView()
@@ -406,9 +474,9 @@ struct AudioWaveView: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(0..<20) { index in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.hai.opacity(0.6))
-                    .frame(width: 3)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.hai.opacity(0.3))
+                    .frame(width: 2)
                     .scaleEffect(y: animating ? Double.random(in: 0.3...1.0) : 0.5)
                     .animation(
                         .easeInOut(duration: Double.random(in: 0.4...0.8))
