@@ -14,6 +14,7 @@ struct TranscriptDetailView: View {
     @StateObject private var viewModel = TranscriptDetailViewModel()
     @State private var selectedText: String = ""
     @State private var showingCorrection = false
+    @State private var selectedServiceIndex = 0
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -25,6 +26,13 @@ struct TranscriptDetailView: View {
             VStack(spacing: 0) {
                 // header
                 headerView
+                
+                // service selector tabs and metrics
+                if !viewModel.allResults.isEmpty {
+                    serviceControlsView
+                        .padding(.horizontal, Spacing.margins)
+                        .padding(.vertical, Spacing.gapMedium)
+                }
                 
                 // transcript content
                 ScrollViewReader { proxy in
@@ -79,6 +87,72 @@ struct TranscriptDetailView: View {
     }
     
     // MARK: - subviews
+    
+    private var serviceControlsView: some View {
+        VStack(spacing: Spacing.gapMedium) {
+            // service selector tabs
+            Picker("", selection: $selectedServiceIndex) {
+                ForEach(Array(viewModel.allResults.enumerated()), id: \.offset) { index, result in
+                    Text(result.service.lowercased())
+                        .tag(index)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 400)
+            .onChange(of: selectedServiceIndex) { newIndex in
+                viewModel.selectService(at: newIndex)
+            }
+            
+            // metrics for selected service
+            if selectedServiceIndex < viewModel.allResults.count {
+                let result = viewModel.allResults[selectedServiceIndex]
+                HStack(spacing: Spacing.gapLarge) {
+                    // processing time
+                    VStack(spacing: 2) {
+                        Text("time")
+                            .font(.system(size: 10))
+                            .foregroundColor(.usugrey)
+                        Text(String(format: "%.1fs", result.processingTime))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.hai)
+                    }
+                    
+                    // cost
+                    VStack(spacing: 2) {
+                        Text("cost")
+                            .font(.system(size: 10))
+                            .foregroundColor(.usugrey)
+                        Text(String(format: "$%.4f", result.cost))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.hai)
+                    }
+                    
+                    // word count
+                    VStack(spacing: 2) {
+                        Text("words")
+                            .font(.system(size: 10))
+                            .foregroundColor(.usugrey)
+                        Text("\(result.transcript.wordCount)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.hai)
+                    }
+                    
+                    // confidence if available
+                    if let confidence = result.confidence {
+                        VStack(spacing: 2) {
+                            Text("confidence")
+                                .font(.system(size: 10))
+                                .foregroundColor(.usugrey)
+                            Text(String(format: "%.0f%%", confidence * 100))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(confidence > 0.9 ? .hai : .usugrey)
+                        }
+                    }
+                }
+                .frame(maxWidth: 400)
+            }
+        }
+    }
     
     private var headerView: some View {
         HStack {
@@ -248,7 +322,7 @@ struct TranscriptSegmentView: View {
 @MainActor
 class TranscriptDetailViewModel: ObservableObject {
     @Published var segments: [TranscriptSegment] = []
-    @Published var isAdminMode = false
+    @Published var allResults: [TranscriptionResult] = []
     @Published var serviceName = "gemini"
     @Published var cost: Double?
     
@@ -260,24 +334,35 @@ class TranscriptDetailViewModel: ObservableObject {
         let sessionDir = audioURL.deletingLastPathComponent()
         let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
         
-        // load transcription results
+        // load ALL transcription results for comparison
         if let data = try? Data(contentsOf: resultsPath),
-           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
-           let bestResult = results.first {
+           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data) {
             
-            // load segments from best result
-            segments = bestResult.transcript.segments
-            cost = bestResult.cost
-            serviceName = bestResult.service
+            // store all results
+            allResults = results
             
-            // check for admin mode
-            isAdminMode = UserDefaults.standard.bool(forKey: "adminMode")
+            // start with first service's segments
+            if let firstResult = results.first {
+                segments = firstResult.transcript.segments
+                cost = firstResult.cost
+                serviceName = firstResult.service
+            }
         } else {
             // fallback to empty
+            allResults = []
             segments = []
             cost = nil
             serviceName = "unknown"
         }
+    }
+    
+    func selectService(at index: Int) {
+        guard index < allResults.count else { return }
+        
+        let selected = allResults[index]
+        segments = selected.transcript.segments
+        cost = selected.cost
+        serviceName = selected.service
     }
     
     func shareTranscript() {
