@@ -239,9 +239,10 @@ class MeetingsListViewModel: ObservableObject {
                 AssemblyAITranscriptionService(apiKey: "789a50c24ad24f29beb085339c29bce2")
             ]
             let coordinator = TranscriptionCoordinator(services: services)
-            let transcriptionResults = await coordinator.transcribeWithAllServices(audioURL: mixedPath)
+            await coordinator.transcribeWithAllServices(audioURL: mixedPath)
             
-            // save results
+            // save results from coordinator
+            let transcriptionResults = coordinator.results
             if !transcriptionResults.isEmpty {
                 let resultsPath = sessionDirs.appendingPathComponent("transcription-results.json")
                 if let data = try? JSONEncoder().encode(transcriptionResults) {
