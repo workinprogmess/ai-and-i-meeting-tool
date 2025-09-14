@@ -67,7 +67,7 @@ struct TranscriptSegment: Codable, Identifiable {
 }
 
 /// speaker identification
-enum Speaker: Codable, Equatable {
+enum Speaker: Codable, Equatable, Hashable {
     case me
     case other(String) // "speaker1", "speaker2", etc.
     
