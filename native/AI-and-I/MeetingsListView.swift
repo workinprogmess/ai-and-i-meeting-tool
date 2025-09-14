@@ -232,8 +232,13 @@ class MeetingsListViewModel: ObservableObject {
         
         // run transcription
         if FileManager.default.fileExists(atPath: mixedPath.path) {
-            // use transcription coordinator to transcribe
-            let coordinator = TranscriptionCoordinator()
+            // use transcription coordinator to transcribe with all services
+            let services: [TranscriptionService] = [
+                GeminiTranscriptionService(),
+                DeepgramTranscriptionService(),
+                AssemblyAITranscriptionService()
+            ]
+            let coordinator = TranscriptionCoordinator(services: services)
             let results = await coordinator.transcribeWithAllServices(audioURL: mixedPath)
             
             // save results
