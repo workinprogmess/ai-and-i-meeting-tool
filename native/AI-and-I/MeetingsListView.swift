@@ -53,6 +53,9 @@ class MeetingsListViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var searchText = ""
     
+    // recording components from ContentView
+    private let micRecorder = MicRecorder()
+    private let systemRecorder = SystemAudioRecorder()
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
     
@@ -121,6 +124,13 @@ class MeetingsListViewModel: ObservableObject {
                 self.recordingDuration = Date().timeIntervalSince(start)
             }
         }
+        
+        // start both recorders (from ContentView logic)
+        Task {
+            micRecorder.startSession()
+            await systemRecorder.startSession()
+            print("🎬 segmented recording started")
+        }
     }
     
     func endMeeting() {
@@ -128,22 +138,71 @@ class MeetingsListViewModel: ObservableObject {
         recordingTimer?.invalidate()
         recordingTimer = nil
         
-        // create new meeting entry
-        if let start = recordingStartTime {
-            let meeting = Meeting(
-                timestamp: start,
-                duration: recordingDuration,
-                title: "processing...",
-                speakerCount: 0,
-                audioFileURL: nil,
-                transcriptAvailable: false
-            )
-            meetings.insert(meeting, at: 0)
+        Task {
+            // stop both recorders
+            micRecorder.endSession()
+            await systemRecorder.endSession()
+            print("🎬 recording ended - segments saved")
             
-            // trigger transcription process
-            Task {
+            // get the session timestamp for mixing
+            let sessionTimestamp = micRecorder.currentSessionTimestamp
+            
+            // run the mixing script
+            print("🎵 starting audio mixing for session \(sessionTimestamp)")
+            await runMixingScript(timestamp: sessionTimestamp)
+            
+            // create new meeting entry
+            if let start = recordingStartTime {
+                let meeting = Meeting(
+                    timestamp: start,
+                    duration: recordingDuration,
+                    title: "processing...",
+                    speakerCount: 0,
+                    audioFileURL: nil,
+                    transcriptAvailable: false
+                )
+                await MainActor.run {
+                    meetings.insert(meeting, at: 0)
+                }
+                
+                // wait for mixing to complete, then transcribe
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
                 await processRecording(for: meeting)
             }
+        }
+    }
+    
+    private func runMixingScript(timestamp: Int) async {
+        // path to the mixing script
+        let scriptPath = "/Users/workinprogmess/ai-and-i/native/AI-and-I/mix-audio.swift"
+        
+        // run the swift script with the timestamp
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
+        process.arguments = [scriptPath, String(timestamp)]
+        
+        // capture output
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            // read output
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                print("mixing output:\n\(output)")
+            }
+            
+            if process.terminationStatus == 0 {
+                print("✅ audio mixing completed successfully")
+            } else {
+                print("❌ mixing failed with status: \(process.terminationStatus)")
+            }
+        } catch {
+            print("❌ failed to run mixing script: \(error)")
         }
     }
     
