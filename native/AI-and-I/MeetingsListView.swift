@@ -234,17 +234,17 @@ class MeetingsListViewModel: ObservableObject {
         if FileManager.default.fileExists(atPath: mixedPath.path) {
             // use transcription coordinator to transcribe with all services
             let services: [TranscriptionService] = [
-                GeminiTranscriptionService(),
-                DeepgramTranscriptionService(),
-                AssemblyAITranscriptionService()
+                GeminiTranscriptionService(apiKey: "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA"),
+                DeepgramTranscriptionService(apiKey: "ea1942496aa5a53bed2c7f5641fecf0ba1646963"),
+                AssemblyAITranscriptionService(apiKey: "789a50c24ad24f29beb085339c29bce2")
             ]
             let coordinator = TranscriptionCoordinator(services: services)
-            let results = await coordinator.transcribeWithAllServices(audioURL: mixedPath)
+            let transcriptionResults = await coordinator.transcribeWithAllServices(audioURL: mixedPath)
             
             // save results
-            if !results.isEmpty {
+            if !transcriptionResults.isEmpty {
                 let resultsPath = sessionDirs.appendingPathComponent("transcription-results.json")
-                if let data = try? JSONEncoder().encode(results) {
+                if let data = try? JSONEncoder().encode(transcriptionResults) {
                     try? data.write(to: resultsPath)
                 }
                 
