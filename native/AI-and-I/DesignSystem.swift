@@ -17,8 +17,9 @@ extension Color {
     static let hai = Color(red: 0.420, green: 0.420, blue: 0.420)        // #6b6b6b - ash grey - secondary text
     static let usugrey = Color(red: 0.616, green: 0.616, blue: 0.616)    // #9d9d9d - light grey - disabled
     
-    // speaker label (uniform for now)
-    static let speakerLabel = Color(red: 0.906, green: 0.906, blue: 0.922)  // #e7e7eb
+    // speaker colors - subtle earthy japanese tones
+    static let speakerMe = Color(red: 0.827, green: 0.576, blue: 0.439)     // #d39370 - warm terracotta
+    static let speakerOther = Color(red: 0.584, green: 0.647, blue: 0.651)  // #9595a6 - sage grey
     
     // actions
     static let primaryButton = Color(red: 0.918, green: 0.898, blue: 0.890)     // #eae5e3
