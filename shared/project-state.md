@@ -236,6 +236,20 @@ private func shouldSwitchToNewDevice() -> Bool {
   - fix: ignore new events if already debouncing, let timer complete fully
   - result: airpods get full 2.5s to stabilize, eliminating audio artifacts
 
+### testing insights (2025-09-15)
+- **transcription quality ranking**: gemini > deepgram > assembly ai
+  - gemini: handles mixed audio well, some speaker confusion
+  - deepgram: good flow, poor speaker identification, misses hindi
+  - assembly: poor - single paragraph, misses multilingual content
+- **ui issues identified**:
+  - service tabs need better visual separation
+  - speaker count now shows all unique speakers
+  - meeting titles extracted from first 3 segments
+  - transcripts properly display in lowercase
+- **remaining issues**:
+  - airpods still creating double segments (4s + rest)
+  - -10877 errors persist but don't break functionality
+
 **validation approach**: test individual components first, then integrated system
 - performance benchmarks: measure against voice memos and industry standards  
 - component testing: launch speed, recording latency, device switching, audio quality
@@ -283,7 +297,7 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ floating action tray design
 - ✅ recording flow with confirmations
 
-**phase 3 ui implementation (2025-09-14) - ✅ REFINED**:
+**phase 3 ui implementation (2025-09-14) - ✅ COMPLETE & TESTED**:
 - ✅ proper content areas with 600-800px max width (jony ive restraint)
 - ✅ 'ai&i' logo centered, search left, settings right
 - ✅ '&i' as meeting list bullet instead of circles
@@ -293,15 +307,20 @@ private func shouldSwitchToNewDevice() -> Bool {
 - ✅ floating action tray always visible (vertical stack)
 - ✅ real transcript data loading from json files
 - ✅ automatic transcription after recording ends
-- **key refinements**: focused on restraint, subtlety, and proper spacing
+- ✅ three-service comparison with tabs (gemini, deepgram, assembly)
+- ✅ entry point switched to MeetingsListView
+- **testing results (2025-09-15)**: core functionality working, needs polish
 
 **revised phase structure**:
 - **phase 1-2**: ✅ complete (core transcription + quality metrics)
-- **phase 3**: ✅ complete (ui basics - untested)
-- **phase 4**: ui advanced + corrections integration (2 days) - next
-- **phase 5**: testing & optimization + files api (1.5 days)
-- **phase 6**: admin dashboard (deferred)
-- **total remaining**: ~3.5 days
+- **phase 3**: ✅ complete (ui implemented and tested)
+- **phase 4**: polish & transcription quality (1-2 days) - IN PROGRESS
+  - ui fixes: tabs, colors, airpods issues
+  - transcription improvements: better prompts, language detection
+  - confidence scores implementation
+  - defer: corrections, sharing, admin to later milestones
+- **phase 5**: merged into phase 4 (optimization complete)
+- **next**: milestone 3 - human-like summaries (2-3 days)
 - three services in parallel: gemini, deepgram, assembly ai
 - mp3 conversion for file size optimization (10x smaller)
 - admin mode: see all three transcripts with metrics
