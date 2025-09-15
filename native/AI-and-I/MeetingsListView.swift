@@ -62,6 +62,27 @@ class MeetingsListViewModel: ObservableObject {
     
     init() {
         loadMeetings()
+        setupDeviceMonitoring()
+    }
+    
+    private func setupDeviceMonitoring() {
+        // start monitoring for device changes
+        deviceMonitor.startMonitoring()
+        
+        // connect device change callbacks
+        deviceMonitor.onMicDeviceChange = { [weak self] reason in
+            // handle mic device changes (airpods connect/disconnect)
+            self?.micRecorder.handleDeviceChange(reason: reason)
+        }
+        
+        deviceMonitor.onSystemDeviceChange = { [weak self] reason in
+            Task {
+                // handle system audio device changes
+                await self?.systemRecorder.handleDeviceChange(reason: reason)
+            }
+        }
+        
+        print("📱 device monitoring started - will handle airpods switching")
     }
     
     func loadMeetings() {
@@ -119,6 +140,10 @@ class MeetingsListViewModel: ObservableObject {
         recordingStartTime = Date()
         recordingDuration = 0
         
+        // restart device monitoring for this session
+        deviceMonitor.startMonitoring()
+        print("📱 device monitoring restarted for new recording")
+        
         // start timer to update duration
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             if let start = self.recordingStartTime {
@@ -144,6 +169,10 @@ class MeetingsListViewModel: ObservableObject {
             micRecorder.endSession()
             await systemRecorder.endSession()
             print("🎬 recording ended - segments saved")
+            
+            // stop device monitoring after recording
+            deviceMonitor.stopMonitoring()
+            print("📱 device monitoring stopped")
             
             // get the session timestamp for mixing
             let sessionTimestamp = micRecorder.currentSessionTimestamp
