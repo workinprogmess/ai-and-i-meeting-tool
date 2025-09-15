@@ -90,15 +90,8 @@ struct TranscriptDetailView: View {
     
     private var serviceControlsView: some View {
         VStack(spacing: Spacing.gapMedium) {
-            // service comparison label
-            Text("compare transcription services")
-                .font(.system(size: 11))
-                .foregroundColor(.usugrey)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-            
-            // service selector tabs with proper colors
-            Picker("service", selection: $selectedServiceIndex) {
+            // service selector tabs - gemini, deepgram, assembly
+            Picker("", selection: $selectedServiceIndex) {
                 ForEach(Array(viewModel.allResults.enumerated()), id: \.offset) { index, result in
                     Text(result.service.lowercased())
                         .tag(index)
@@ -106,8 +99,12 @@ struct TranscriptDetailView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 400)
-            .background(Color.kinari.opacity(0.5))
+            .background(Color.gofun)
             .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.hai.opacity(0.4), lineWidth: 1)
+            )
             .onChange(of: selectedServiceIndex) { _, newIndex in
                 viewModel.selectService(at: newIndex)
             }
