@@ -53,9 +53,10 @@ class MeetingsListViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var searchText = ""
     
-    // recording components from ContentView
-    private let micRecorder = MicRecorder()
-    private let systemRecorder = SystemAudioRecorder()
+    // recording components - need to be persistent objects
+    let micRecorder = MicRecorder()
+    let systemRecorder = SystemAudioRecorder()
+    let deviceMonitor = DeviceChangeMonitor()
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
     
@@ -149,7 +150,11 @@ class MeetingsListViewModel: ObservableObject {
             
             // run the mixing script
             print("🎵 starting audio mixing for session \(sessionTimestamp)")
-            await runMixingScript(timestamp: sessionTimestamp)
+            if sessionTimestamp > 0 {
+                await runMixingScript(timestamp: sessionTimestamp)
+            } else {
+                print("❌ no valid session timestamp - recording may have failed")
+            }
             
             // create new meeting entry
             if let start = recordingStartTime {
@@ -167,7 +172,7 @@ class MeetingsListViewModel: ObservableObject {
                 
                 // wait for mixing to complete, then transcribe
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                await processRecording(for: meeting)
+                await processRecording(for: meeting, sessionTimestamp: sessionTimestamp)
             }
         }
     }
@@ -207,23 +212,19 @@ class MeetingsListViewModel: ObservableObject {
     }
     
     @MainActor
-    private func processRecording(for meeting: Meeting) async {
-        // get the latest session directory
+    private func processRecording(for meeting: Meeting, sessionTimestamp: Int) async {
+        // get the specific session directory
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let sessionsPath = documentsPath.appendingPathComponent("ai-and-i").appendingPathComponent("sessions")
+        let sessionDir = sessionsPath.appendingPathComponent("session_\(sessionTimestamp)")
         
-        // find the most recent session folder
-        guard let sessionDirs = try? FileManager.default.contentsOfDirectory(
-            at: sessionsPath,
-            includingPropertiesForKeys: [.creationDateKey]
-        ).sorted(by: { url1, url2 in
-            let date1 = (try? url1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
-            let date2 = (try? url2.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
-            return date1 > date2
-        }).first else { return }
+        guard FileManager.default.fileExists(atPath: sessionDir.path) else {
+            print("❌ session directory not found: \(sessionDir.path)")
+            return
+        }
         
         // wait for mixed audio file
-        let mixedPath = sessionDirs.appendingPathComponent("mixed.wav")
+        let mixedPath = sessionDir.appendingPathComponent("mixed.wav")
         var attempts = 0
         while !FileManager.default.fileExists(atPath: mixedPath.path) && attempts < 30 {
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
@@ -244,7 +245,7 @@ class MeetingsListViewModel: ObservableObject {
             // save results from coordinator
             let transcriptionResults = coordinator.results
             if !transcriptionResults.isEmpty {
-                let resultsPath = sessionDirs.appendingPathComponent("transcription-results.json")
+                let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
                 if let data = try? JSONEncoder().encode(transcriptionResults) {
                     try? data.write(to: resultsPath)
                 }
