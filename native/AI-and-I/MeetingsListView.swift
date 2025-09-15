@@ -141,19 +141,20 @@ class MeetingsListViewModel: ObservableObject {
         recordingStartTime = Date()
         recordingDuration = 0
         
-        // restart device monitoring for this session
-        deviceMonitor.startMonitoring()
-        print("📱 device monitoring restarted for new recording")
-        
-        // start timer to update duration
+        // start timer immediately (before async recording setup)
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             if let start = self.recordingStartTime {
                 self.recordingDuration = Date().timeIntervalSince(start)
             }
         }
         
-        // start both recorders (from ContentView logic)
+        // start recording setup asynchronously to avoid UI freeze
         Task {
+            // restart device monitoring for this session
+            deviceMonitor.startMonitoring()
+            print("📱 device monitoring restarted for new recording")
+            
+            // start both recorders
             micRecorder.startSession()
             await systemRecorder.startSession()
             print("🎬 segmented recording started")
@@ -273,11 +274,47 @@ class MeetingsListViewModel: ObservableObject {
         
         // run transcription
         if FileManager.default.fileExists(atPath: mixedPath.path) {
-            // convert to mp3 first
+            // convert to mp3 first (required for transcription services!)
             await updateMeetingStatus(meeting, status: "converting to mp3...")
             
-            // use transcription with individual service updates
-            await transcribeWithProgress(meeting: meeting, audioURL: mixedPath, sessionDir: sessionDir)
+            let mp3URL = mixedPath.deletingPathExtension().appendingPathExtension("mp3")
+            
+            // find ffmpeg (check both Apple Silicon and Intel paths)
+            let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+            guard let ffmpegPath = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                print("❌ ffmpeg not found")
+                await updateMeetingStatus(meeting, status: "error: ffmpeg not installed")
+                return
+            }
+            
+            // use ffmpeg to convert wav to mp3
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: ffmpegPath)
+            process.arguments = [
+                "-i", mixedPath.path,
+                "-b:a", "128k",     // 128kbps bitrate
+                "-ar", "16000",     // 16khz sample rate (optimal for speech)
+                "-ac", "1",         // mono
+                "-y",               // overwrite if exists
+                mp3URL.path
+            ]
+            
+            do {
+                try process.run()
+                process.waitUntilExit()
+                
+                if process.terminationStatus == 0 {
+                    print("✅ converted to mp3: \(mp3URL.lastPathComponent)")
+                    // use transcription with individual service updates
+                    await transcribeWithProgress(meeting: meeting, audioURL: mp3URL, sessionDir: sessionDir)
+                } else {
+                    print("❌ mp3 conversion failed")
+                    await updateMeetingStatus(meeting, status: "error: mp3 conversion failed")
+                }
+            } catch {
+                print("❌ failed to convert to mp3: \(error)")
+                await updateMeetingStatus(meeting, status: "error: mp3 conversion failed")
+            }
         } else {
             await updateMeetingStatus(meeting, status: "error: no mixed audio")
         }
@@ -304,26 +341,38 @@ class MeetingsListViewModel: ObservableObject {
             // start gemini
             group.addTask {
                 await self.updateMeetingStatus(meeting, status: "transcribing with gemini...")
-                if let result = try? await gemini.transcribe(audioURL: audioURL) {
+                do {
+                    let result = try await gemini.transcribe(audioURL: audioURL)
+                    print("✅ gemini transcription complete")
                     return ("gemini", result)
+                } catch {
+                    print("❌ gemini transcription failed: \(error)")
+                    return ("gemini", nil)
                 }
-                return ("gemini", nil)
             }
             
             // start deepgram
             group.addTask {
-                if let result = try? await deepgram.transcribe(audioURL: audioURL) {
+                do {
+                    let result = try await deepgram.transcribe(audioURL: audioURL)
+                    print("✅ deepgram transcription complete")
                     return ("deepgram", result)
+                } catch {
+                    print("❌ deepgram transcription failed: \(error)")
+                    return ("deepgram", nil)
                 }
-                return ("deepgram", nil)
             }
             
             // start assembly ai
             group.addTask {
-                if let result = try? await assembly.transcribe(audioURL: audioURL) {
+                do {
+                    let result = try await assembly.transcribe(audioURL: audioURL)
+                    print("✅ assembly ai transcription complete")
                     return ("assembly", result)
+                } catch {
+                    print("❌ assembly ai transcription failed: \(error)")
+                    return ("assembly", nil)
                 }
-                return ("assembly", nil)
             }
             
             // collect results as they complete
@@ -349,12 +398,16 @@ class MeetingsListViewModel: ObservableObject {
             let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
             if let data = try? JSONEncoder().encode(results) {
                 try? data.write(to: resultsPath)
+                print("💾 saved \(results.count) transcription results to \(resultsPath.lastPathComponent)")
             }
             
             // reload to show completed transcript
             await MainActor.run {
                 loadMeetings()
             }
+        } else {
+            print("❌ all transcription services failed!")
+            await updateMeetingStatus(meeting, status: "transcription failed - check console")
         }
     }
     
