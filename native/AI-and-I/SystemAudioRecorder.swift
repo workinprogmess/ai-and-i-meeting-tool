@@ -108,9 +108,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         // Just set flag and schedule deferred work to avoid deadlock
         needsSwitch = true
         
-        // cancel existing debounce timer if any
-        await MainActor.run {
-            debounceTimer?.cancel()
+        // if we're already debouncing, don't restart the timer - let it complete
+        // this prevents rapid events from constantly resetting the delay
+        let timerExists = await MainActor.run { debounceTimer != nil }
+        if timerExists {
+            print("⏱️ already debouncing - ignoring new event to let timer complete")
+            return
         }
         
         // schedule new debounce (1s for system audio stability)
@@ -118,6 +121,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         let workItem = DispatchWorkItem { [weak self] in
             Task {
                 await self?.performDebouncedSwitch()
+                await MainActor.run {
+                    self?.debounceTimer = nil  // clear timer after execution
+                }
             }
         }
         

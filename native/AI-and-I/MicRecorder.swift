@@ -121,12 +121,17 @@ class MicRecorder: ObservableObject {
         // NEVER do audio work in the callback - just set flag and schedule
         needsSwitch = true
         
-        // cancel existing debounce timer if any
-        debounceTimer?.cancel()
+        // if we're already debouncing, don't restart the timer - let it complete
+        // this prevents rapid events from constantly resetting the 2.5s delay
+        if debounceTimer != nil {
+            print("⏱️ already debouncing - ignoring new event to let timer complete")
+            return
+        }
         
         // schedule new debounce (2.5s for airpods stability - they need time to fully connect)
         let workItem = DispatchWorkItem { [weak self] in
             self?.performDebouncedSwitch()
+            self?.debounceTimer = nil  // clear timer after execution
         }
         debounceTimer = workItem
         controllerQueue.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
