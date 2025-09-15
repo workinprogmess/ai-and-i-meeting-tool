@@ -87,49 +87,38 @@ class MeetingsListViewModel: ObservableObject {
     }
     
     func loadMeetings() {
-        // load from documents folder
+        // load from recordings folder (where files are actually saved)
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let aiAndIPath = documentsPath.appendingPathComponent("ai-and-i")
-        let sessionsPath = aiAndIPath.appendingPathComponent("sessions")
+        let sessionsPath = documentsPath.appendingPathComponent("ai&i-recordings")
         
-        // find all session folders
-        guard let sessionDirs = try? FileManager.default.contentsOfDirectory(
-            at: sessionsPath,
-            includingPropertiesForKeys: nil
-        ) else {
-            meetings = []
-            return
-        }
+        // for now, look for transcription-results.json in the root recordings folder
+        // (later we'll organize into session subdirectories)
+        let resultsPath = sessionsPath.appendingPathComponent("transcription-results.json")
         
-        // load transcripts from each session
         var loadedMeetings: [Meeting] = []
-        for sessionDir in sessionDirs {
-            // look for transcription results
-            let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
-            if let data = try? Data(contentsOf: resultsPath),
-               let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
-               let bestResult = results.first {
-                
-                // extract title from first few words or use "untitled"
-                let title = bestResult.transcript.segments.first?.text
-                    .split(separator: " ")
-                    .prefix(4)
-                    .joined(separator: " ")
-                    .lowercased() ?? "untitled meeting"
-                
-                // count unique speakers
-                let speakers = Set(bestResult.transcript.segments.map { $0.speaker })
-                
-                let meeting = Meeting(
-                    timestamp: bestResult.createdAt,
-                    duration: bestResult.transcript.duration,
-                    title: title,
-                    speakerCount: speakers.count,
-                    audioFileURL: sessionDir.appendingPathComponent("mixed.mp3"),
-                    transcriptAvailable: true
-                )
-                loadedMeetings.append(meeting)
-            }
+        if let data = try? Data(contentsOf: resultsPath),
+           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
+           let bestResult = results.first {
+            
+            // extract title from first few words or use "untitled"
+            let title = bestResult.transcript.segments.first?.text
+                .split(separator: " ")
+                .prefix(4)
+                .joined(separator: " ")
+                .lowercased() ?? "untitled meeting"
+            
+            // count unique speakers
+            let speakers = Set(bestResult.transcript.segments.map { $0.speaker })
+            
+            let meeting = Meeting(
+                timestamp: bestResult.createdAt,
+                duration: bestResult.transcript.duration,
+                title: title,
+                speakerCount: speakers.count,
+                audioFileURL: sessionsPath.appendingPathComponent("mixed.mp3"),
+                transcriptAvailable: true
+            )
+            loadedMeetings.append(meeting)
         }
         
         // sort by most recent first
@@ -148,15 +137,19 @@ class MeetingsListViewModel: ObservableObject {
             }
         }
         
-        // start recording setup asynchronously to avoid UI freeze
-        Task {
+        // start recording setup on background thread to avoid UI freeze
+        Task.detached {
             // restart device monitoring for this session
-            deviceMonitor.startMonitoring()
+            await MainActor.run {
+                self.deviceMonitor.startMonitoring()
+            }
             print("📱 device monitoring restarted for new recording")
             
-            // start both recorders
-            micRecorder.startSession()
-            await systemRecorder.startSession()
+            // start both recorders (on background thread)
+            await MainActor.run {
+                self.micRecorder.startSession()
+            }
+            await self.systemRecorder.startSession()
             print("🎬 segmented recording started")
         }
     }
@@ -254,18 +247,20 @@ class MeetingsListViewModel: ObservableObject {
     
     @MainActor
     private func processRecording(for meeting: Meeting, sessionTimestamp: Int) async {
-        // get the specific session directory
+        // get the recordings directory (where files are actually saved)
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let sessionsPath = documentsPath.appendingPathComponent("ai-and-i").appendingPathComponent("sessions")
-        let sessionDir = sessionsPath.appendingPathComponent("session_\(sessionTimestamp)")
+        let recordingsPath = documentsPath.appendingPathComponent("ai&i-recordings")
+        
+        // for now, all files are in the root recordings folder, not in session subdirectories
+        let sessionDir = recordingsPath
         
         guard FileManager.default.fileExists(atPath: sessionDir.path) else {
             print("❌ session directory not found: \(sessionDir.path)")
             return
         }
         
-        // wait for mixed audio file
-        let mixedPath = sessionDir.appendingPathComponent("mixed.wav")
+        // wait for mixed audio file (named mixed_<sessionTimestamp>.wav)
+        let mixedPath = sessionDir.appendingPathComponent("mixed_\(sessionTimestamp).wav")
         var attempts = 0
         while !FileManager.default.fileExists(atPath: mixedPath.path) && attempts < 30 {
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
