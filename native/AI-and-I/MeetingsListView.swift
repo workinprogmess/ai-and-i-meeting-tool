@@ -137,19 +137,13 @@ class MeetingsListViewModel: ObservableObject {
             }
         }
         
-        // start recording setup on background thread to avoid UI freeze
-        Task.detached {
-            // restart device monitoring for this session
-            await MainActor.run {
-                self.deviceMonitor.startMonitoring()
-            }
-            print("📱 device monitoring restarted for new recording")
+        // start recording (matching the working version's simple approach)
+        Task {
+            // device monitoring is already running from onAppear, no need to restart
             
-            // start both recorders (on background thread)
-            await MainActor.run {
-                self.micRecorder.startSession()
-            }
-            await self.systemRecorder.startSession()
+            // start both recorders independently (simple and clean like working version)
+            micRecorder.startSession()
+            await systemRecorder.startSession()
             print("🎬 segmented recording started")
         }
     }
