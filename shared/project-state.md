@@ -4,7 +4,7 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: transcription integration (0.2.0) 🚧 IN PROGRESS
-**status**: phase 3 ui complete - beautiful minimal interface with japanese aesthetics
+**status**: critical issues fixed - ready for full workflow testing
 - ✅ milestone 1 complete: seamless device switching with perfect audio mixing
 - ✅ phase 1-2: all three transcription services integrated (gemini, deepgram, assembly ai)
 - ✅ parallel processing with quality metrics and comparison
@@ -16,8 +16,15 @@ ai meeting intelligence - native swiftui application for world-class user experi
   - ✅ clean transcript detail view
   - ✅ floating action tray with share/copy/export/corrections
   - ✅ user corrections system with dictionary persistence
-- ⏳ phase 4: ui advanced + corrections integration (2 days)
-- ⏳ phase 5: testing & optimization + files api (1.5 days)
+- ✅ critical fixes (2025-09-15):
+  - ✅ fixed audio mixing: concatenate sequential segments instead of overlapping
+  - ✅ fixed robotic system audio with airpods (aresample to 48khz)
+  - ✅ fixed recording duration extension (5:52 → 14:04 issue)
+  - ✅ fixed timer freezing at 00:00 (moved to sync execution)
+  - ✅ fixed transcription hanging (restored mp3 conversion step)
+  - ✅ added proper error handling and logging
+- ⏳ phase 4: ui polish + corrections integration (1 day)
+- ⏳ phase 5: testing & optimization + files api (1 day)
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -190,6 +197,36 @@ private func shouldSwitchToNewDevice() -> Bool {
   - limiter at -1 dbfs for safety
 - perfect timestamp alignment achieved
 - acoustic bleed identified (speakers → mic) - normal for speaker playback
+
+## critical lessons learned (2025-09-15)
+
+### audio mixing issues
+- **problem**: segments treated as overlapping instead of sequential
+  - symptom: 5:52 recording became 14:04 mixed file
+  - cause: using adelay filters with amix assuming all segments start from time 0
+  - fix: use concat for sequential segments, not amix with delays
+
+- **problem**: robotic/ghostly system audio with airpods
+  - symptom: distorted voice in system audio when airpods connected
+  - cause: sample rate mismatch (44.1khz vs 48khz)
+  - fix: add aresample=48000 to all inputs in ffmpeg filter
+
+### ui/transcription issues
+- **problem**: timer freezes at 00:00 for 2 seconds
+  - cause: async recording initialization blocking ui
+  - fix: start timer before async task
+
+- **problem**: transcription hanging forever
+  - cause: sending huge wav files (50-100mb) instead of mp3s (5-10mb)
+  - root: when moving from contentview to meetingslistview, lost mp3 conversion step
+  - fix: restore mp3 conversion before calling transcription services
+
+### key insights
+- always preserve critical processing steps when refactoring
+- audio format consistency is crucial (sample rates, channels)
+- sequential segments need concatenation, not mixing with delays
+- error handling with try? hides failures - use proper do/catch
+- file size matters for api uploads (wav too large, mp3 just right)
 - recommendation: use headphones for best quality, but speaker bleed acceptable
 
 **validation approach**: test individual components first, then integrated system
