@@ -189,49 +189,41 @@ if let latestMetadata = metadataFiles.first {
             // build filter complex
             ffmpegCmd += " -filter_complex \""
             
-            // add delays for each mic segment with dynamic volume based on device
+            // IMPORTANT: mic segments are sequential (stop/restart), not overlapping
+            // so we concatenate them, not mix with delays
             var micFilters: [String] = []
             for (index, segment) in micSegments.enumerated() {
-                let delayMs = Int(segment.startSessionTime * 1000)
-                
                 // detect if using airpods or built-in mic
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
                 let micBoost = isAirPods ? "8dB" : "12dB"  // more boost for built-in mic
                 
-                // add volume boost for mic (dynamic based on device)
-                if delayMs > 0 {
-                    micFilters.append("[\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)]")
-                } else {
-                    micFilters.append("[\(index)]volume=\(micBoost)[m\(index)]")
-                }
+                // resample to 48khz (fixes robotic audio) and apply volume boost
+                micFilters.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
             }
             
             // join mic filters
             ffmpegCmd += micFilters.joined(separator: "; ")
             
-            // mix all mic segments together
+            // concatenate mic segments sequentially (not mix!)
             if micSegments.count > 1 {
                 let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
-                ffmpegCmd += "; \(micLabels)amix=inputs=\(micSegments.count):duration=longest[mic]"
+                ffmpegCmd += "; \(micLabels)concat=n=\(micSegments.count):v=0:a=1[mic]"
             } else {
                 ffmpegCmd += "; [m0]acopy[mic]"
             }
             
-            // add system audio delay with dynamic volume reduction
+            // process system audio with resampling and volume reduction
             // check if any segments use built-in mic (need more aggressive reduction)
             let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
             let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"  // more reduction if built-in mic used
             
             let systemIndex = micSegments.count
-            let systemDelayMs = Int((systemSegments.first?.startSessionTime ?? 0) * 1000)
-            if systemDelayMs > 0 {
-                ffmpegCmd += "; [\(systemIndex)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys]"
-            } else {
-                ffmpegCmd += "; [\(systemIndex)]volume=\(systemReduction)[sys]"
-            }
+            // resample system audio to 48khz and reduce volume
+            ffmpegCmd += "; [\(systemIndex)]aresample=48000,volume=\(systemReduction)[sys]"
             
-            // final mix (equal weights now since we adjusted volumes)
-            ffmpegCmd += "; [mic][sys]amix=inputs=2:duration=longest[out]\""
+            // final mix of concatenated mic with system audio
+            // use 'first' duration since mic is concatenated to match recording length
+            ffmpegCmd += "; [mic][sys]amix=inputs=2:duration=first[out]\""
             
             // output settings
             let outputFile = "mixed_\(sessionTimestamp).wav"
@@ -253,33 +245,24 @@ if let latestMetadata = metadataFiles.first {
             
             // pretty print filters with dynamic volume adjustments
             for (index, segment) in micSegments.enumerated() {
-                let delayMs = Int(segment.startSessionTime * 1000)
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
                 let micBoost = isAirPods ? "8dB" : "12dB"
                 let deviceType = isAirPods ? "airpods" : "built-in"
-                let comment = "  # \(deviceType) mic +\(micBoost), delay \(delayMs)ms"
-                if delayMs > 0 {
-                    print("    [\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)];\(comment) \\")
-                } else {
-                    print("    [\(index)]volume=\(micBoost)[m\(index)];\(comment) \\")
-                }
+                let comment = "  # \(deviceType) mic resampled +\(micBoost)"
+                print("    [\(index)]aresample=48000,volume=\(micBoost)[m\(index)];\(comment) \\")
             }
             
             if micSegments.count > 1 {
                 let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
-                print("    \(micLabels)amix=inputs=\(micSegments.count):duration=longest[mic]; \\")
+                print("    \(micLabels)concat=n=\(micSegments.count):v=0:a=1[mic];  # concatenate segments \\")
             } else {
                 print("    [m0]acopy[mic]; \\")
             }
             
             // use the systemReduction already calculated above
-            if systemDelayMs > 0 {
-                print("    [\(systemIndex)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys];  # system \(systemReduction) \\")
-            } else {
-                print("    [\(systemIndex)]volume=\(systemReduction)[sys];  # system \(systemReduction) \\")
-            }
+            print("    [\(systemIndex)]aresample=48000,volume=\(systemReduction)[sys];  # system resampled and \(systemReduction) \\")
             
-            print("    [mic][sys]amix=inputs=2:duration=longest[out]\" \\")
+            print("    [mic][sys]amix=inputs=2:duration=first[out]\"  # mix with 'first' duration \\")
             print("  -map \"[out]\" \\")
             print("  -acodec pcm_s16le \\")
             print("  -ar 48000 \\")
@@ -386,13 +369,12 @@ func executeFFmpegMixing(
     // build filter complex
     var filterParts: [String] = []
     
-    // process mic segments
+    // process mic segments with resampling
     for (index, segment) in micSegments.enumerated() {
-        let delayMs = Int(segment.startSessionTime * 1000)
         let isAirPods = segment.deviceName.lowercased().contains("airpods")
         let micBoost = isAirPods ? "8dB" : "12dB"
         
-        filterParts.append("[\(index)]volume=\(micBoost),adelay=\(delayMs)|\(delayMs)[m\(index)]")
+        filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
     }
     
     // concatenate mic segments if multiple
@@ -403,14 +385,13 @@ func executeFFmpegMixing(
         filterParts.append("[m0]acopy[mic]")
     }
     
-    // process system audio
+    // process system audio with resampling
     let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
     let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"
-    let systemDelayMs = Int(systemSegments[0].startSessionTime * 1000)
-    filterParts.append("[\(micSegments.count)]volume=\(systemReduction),adelay=\(systemDelayMs)|\(systemDelayMs)[sys]")
+    filterParts.append("[\(micSegments.count)]aresample=48000,volume=\(systemReduction)[sys]")
     
-    // mix together
-    filterParts.append("[mic][sys]amix=inputs=2:duration=longest[out]")
+    // mix together (use 'first' duration since mic is concatenated to correct length)
+    filterParts.append("[mic][sys]amix=inputs=2:duration=first[out]")
     
     let filterComplex = filterParts.joined(separator: ";")
     args.append("-filter_complex")
