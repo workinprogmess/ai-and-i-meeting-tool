@@ -229,6 +229,13 @@ private func shouldSwitchToNewDevice() -> Bool {
 - file size matters for api uploads (wav too large, mp3 just right)
 - recommendation: use headphones for best quality, but speaker bleed acceptable
 
+### airpods switching fixes (2025-09-15)
+- **problem**: core audio -10877 errors and glitchy "choo choo" sounds
+  - cause: rapid device change events kept resetting debounce timer
+  - symptom: 2.5s timer never completed, switching happened too quickly
+  - fix: ignore new events if already debouncing, let timer complete fully
+  - result: airpods get full 2.5s to stabilize, eliminating audio artifacts
+
 **validation approach**: test individual components first, then integrated system
 - performance benchmarks: measure against voice memos and industry standards  
 - component testing: launch speed, recording latency, device switching, audio quality
