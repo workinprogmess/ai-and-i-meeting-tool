@@ -13,10 +13,11 @@ struct Meeting: Identifiable, Codable, Hashable {
     let id = UUID()
     let timestamp: Date
     let duration: TimeInterval
-    let title: String
+    var title: String  // changed to var for updating
     let speakerCount: Int
     let audioFileURL: URL?
-    let transcriptAvailable: Bool
+    var transcriptAvailable: Bool  // changed to var
+    var processingStatus: String?  // "gemini done, waiting for deepgram..."
     
     // computed properties
     var formattedDuration: String {
@@ -187,13 +188,14 @@ class MeetingsListViewModel: ObservableObject {
             
             // create new meeting entry
             if let start = recordingStartTime {
-                let meeting = Meeting(
+                var meeting = Meeting(
                     timestamp: start,
                     duration: recordingDuration,
-                    title: "processing...",
+                    title: "mixing audio...",
                     speakerCount: 0,
                     audioFileURL: nil,
-                    transcriptAvailable: false
+                    transcriptAvailable: false,
+                    processingStatus: "mixing audio segments"
                 )
                 await MainActor.run {
                     meetings.insert(meeting, at: 0)
@@ -201,6 +203,15 @@ class MeetingsListViewModel: ObservableObject {
                 
                 // wait for mixing to complete, then transcribe
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                
+                // update status
+                await MainActor.run {
+                    if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+                        meetings[index].title = "transcribing..."
+                        meetings[index].processingStatus = "starting transcription"
+                    }
+                }
+                
                 await processRecording(for: meeting, sessionTimestamp: sessionTimestamp)
             }
         }
@@ -262,24 +273,86 @@ class MeetingsListViewModel: ObservableObject {
         
         // run transcription
         if FileManager.default.fileExists(atPath: mixedPath.path) {
-            // use transcription coordinator to transcribe with all services
-            let services: [TranscriptionService] = [
-                GeminiTranscriptionService(apiKey: "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA"),
-                DeepgramTranscriptionService(apiKey: "ea1942496aa5a53bed2c7f5641fecf0ba1646963"),
-                AssemblyAITranscriptionService(apiKey: "789a50c24ad24f29beb085339c29bce2")
-            ]
-            let coordinator = TranscriptionCoordinator(services: services)
-            await coordinator.transcribeWithAllServices(audioURL: mixedPath)
+            // convert to mp3 first
+            await updateMeetingStatus(meeting, status: "converting to mp3...")
             
-            // save results from coordinator
-            let transcriptionResults = coordinator.results
-            if !transcriptionResults.isEmpty {
-                let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
-                if let data = try? JSONEncoder().encode(transcriptionResults) {
-                    try? data.write(to: resultsPath)
+            // use transcription with individual service updates
+            await transcribeWithProgress(meeting: meeting, audioURL: mixedPath, sessionDir: sessionDir)
+        } else {
+            await updateMeetingStatus(meeting, status: "error: no mixed audio")
+        }
+    }
+    
+    @MainActor
+    private func updateMeetingStatus(_ meeting: Meeting, status: String) async {
+        if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+            meetings[index].processingStatus = status
+        }
+    }
+    
+    private func transcribeWithProgress(meeting: Meeting, audioURL: URL, sessionDir: URL) async {
+        // create services
+        let gemini = GeminiTranscriptionService(apiKey: "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA")
+        let deepgram = DeepgramTranscriptionService(apiKey: "ea1942496aa5a53bed2c7f5641fecf0ba1646963")
+        let assembly = AssemblyAITranscriptionService(apiKey: "789a50c24ad24f29beb085339c29bce2")
+        
+        var results: [TranscriptionResult] = []
+        var completedServices: [String] = []
+        
+        // run all three in parallel with status updates
+        await withTaskGroup(of: (String, TranscriptionResult?).self) { group in
+            // start gemini
+            group.addTask {
+                await self.updateMeetingStatus(meeting, status: "transcribing with gemini...")
+                if let result = try? await gemini.transcribe(audioURL: audioURL) {
+                    return ("gemini", result)
                 }
-                
-                // reload meetings to show the new transcript
+                return ("gemini", nil)
+            }
+            
+            // start deepgram
+            group.addTask {
+                if let result = try? await deepgram.transcribe(audioURL: audioURL) {
+                    return ("deepgram", result)
+                }
+                return ("deepgram", nil)
+            }
+            
+            // start assembly ai
+            group.addTask {
+                if let result = try? await assembly.transcribe(audioURL: audioURL) {
+                    return ("assembly", result)
+                }
+                return ("assembly", nil)
+            }
+            
+            // collect results as they complete
+            for await (service, result) in group {
+                if let result = result {
+                    results.append(result)
+                    completedServices.append(service)
+                    
+                    // update status with completed services
+                    let statusText = completedServices.joined(separator: ", ") + " done"
+                    let remainingCount = 3 - completedServices.count
+                    let finalStatus = remainingCount > 0 
+                        ? "\(statusText), waiting for \(remainingCount) more..." 
+                        : "all services complete!"
+                    
+                    await updateMeetingStatus(meeting, status: finalStatus)
+                }
+            }
+        }
+        
+        // save results
+        if !results.isEmpty {
+            let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
+            if let data = try? JSONEncoder().encode(results) {
+                try? data.write(to: resultsPath)
+            }
+            
+            // reload to show completed transcript
+            await MainActor.run {
                 loadMeetings()
             }
         }
@@ -439,7 +512,12 @@ struct MeetingsListView: View {
                         .foregroundColor(.sumi)
                         .lowercased()
                     
-                    if meeting.speakerCount > 0 {
+                    if let status = meeting.processingStatus {
+                        Text(status)
+                            .font(Typography.timestamp)
+                            .foregroundColor(.hai)
+                            .lowercased()
+                    } else if meeting.speakerCount > 0 {
                         Text("\(meeting.speakerCount) speakers")
                             .font(Typography.timestamp)
                             .foregroundColor(.hai)
