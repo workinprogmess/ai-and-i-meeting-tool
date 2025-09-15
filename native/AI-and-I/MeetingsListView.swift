@@ -100,21 +100,30 @@ class MeetingsListViewModel: ObservableObject {
            let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
            let bestResult = results.first {
             
-            // extract title from first few words or use "untitled"
-            let title = bestResult.transcript.segments.first?.text
-                .split(separator: " ")
-                .prefix(4)
+            // extract meaningful title from transcript (lowercase)
+            let title = bestResult.transcript.segments
+                .prefix(3)  // look at first 3 segments
+                .map { $0.text }
                 .joined(separator: " ")
-                .lowercased() ?? "untitled meeting"
+                .split(separator: " ")
+                .prefix(6)  // take first 6 words
+                .joined(separator: " ")
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalTitle = title.isEmpty ? "untitled meeting" : title
             
-            // count unique speakers
-            let speakers = Set(bestResult.transcript.segments.map { $0.speaker })
+            // count unique speakers across all transcripts
+            var allSpeakers = Set<Speaker>()
+            for result in allResults.compactMap({ $0 }) {
+                let speakers = Set(result.transcript.segments.map { $0.speaker })
+                allSpeakers.formUnion(speakers)
+            }
             
             let meeting = Meeting(
                 timestamp: bestResult.createdAt,
                 duration: bestResult.transcript.duration,
-                title: title,
-                speakerCount: speakers.count,
+                title: finalTitle,
+                speakerCount: allSpeakers.count,
                 audioFileURL: sessionsPath.appendingPathComponent("mixed.mp3"),
                 transcriptAvailable: true
             )

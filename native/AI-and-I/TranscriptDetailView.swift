@@ -280,8 +280,8 @@ struct TranscriptSegmentView: View {
                 .frame(width: 60, alignment: .trailing)
                 .lowercased()
             
-            // transcript text
-            Text(segment.text)
+            // transcript text (lowercase)
+            Text(segment.text.lowercased())
                 .font(Typography.transcript)
                 .foregroundColor(.sumi)
                 .frame(maxWidth: .infinity, alignment: .leading)
