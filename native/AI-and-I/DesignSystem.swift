@@ -166,11 +166,15 @@ struct FloatingActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 18))
-                .foregroundColor(.hai)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.sumi)
                 .frame(width: 40, height: 40)
-                .background(Color.gofun)
+                .background(Color.kinari)
                 .cornerRadius(20)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.usugrey.opacity(0.2), lineWidth: 1)
+                )
         }
         .buttonStyle(PlainButtonStyle())
         .onHover { hovering in

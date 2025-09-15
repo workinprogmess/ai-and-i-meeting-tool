@@ -264,8 +264,8 @@ struct TranscriptDetailView: View {
         .padding(Spacing.gapSmall)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.gofun)
-                .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                .fill(Color.kinari.opacity(0.9))
+                .shadow(color: .sumi.opacity(0.1), radius: 6, y: 2)
         )
     }
 }
