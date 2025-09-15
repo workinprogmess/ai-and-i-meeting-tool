@@ -23,6 +23,10 @@
 		BE95EACD2E736DB8001435A4 /* DeepgramTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EAC82E736DB8001435A4 /* DeepgramTranscriptionService.swift */; };
 		BE95EACE2E736DB8001435A4 /* GeminiTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EAC92E736DB8001435A4 /* GeminiTranscriptionService.swift */; };
 		BE95EAD02E73EBA0001435A4 /* TranscriptionTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EACF2E73EBA0001435A4 /* TranscriptionTester.swift */; };
+		BE95EADC2E788173001435A4 /* MeetingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EADA2E788173001435A4 /* MeetingsListView.swift */; };
+		BE95EADD2E788173001435A4 /* TranscriptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EADB2E788173001435A4 /* TranscriptDetailView.swift */; };
+		BE95EADE2E788173001435A4 /* CorrectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EAD92E788173001435A4 /* CorrectionView.swift */; };
+		BE95EAE02E78817E001435A4 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE95EADF2E78817E001435A4 /* DesignSystem.swift */; };
 		BEEFFE382E6B55AE00A0CF8F /* InsightsDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */; };
 		BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */; };
 		BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */; };
@@ -67,6 +71,10 @@
 		BE95EAC92E736DB8001435A4 /* GeminiTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiTranscriptionService.swift; sourceTree = "<group>"; };
 		BE95EACA2E736DB8001435A4 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
 		BE95EACF2E73EBA0001435A4 /* TranscriptionTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTester.swift; sourceTree = "<group>"; };
+		BE95EAD92E788173001435A4 /* CorrectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionView.swift; sourceTree = "<group>"; };
+		BE95EADA2E788173001435A4 /* MeetingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsListView.swift; sourceTree = "<group>"; };
+		BE95EADB2E788173001435A4 /* TranscriptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailView.swift; sourceTree = "<group>"; };
+		BE95EADF2E78817E001435A4 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsDashboard.swift; sourceTree = "<group>"; };
 		BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitor.swift; sourceTree = "<group>"; };
 		BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
@@ -111,6 +119,10 @@
 		A1234567890ABCDEF027 /* AI-and-I */ = {
 			isa = PBXGroup;
 			children = (
+				BE95EADF2E78817E001435A4 /* DesignSystem.swift */,
+				BE95EAD92E788173001435A4 /* CorrectionView.swift */,
+				BE95EADA2E788173001435A4 /* MeetingsListView.swift */,
+				BE95EADB2E788173001435A4 /* TranscriptDetailView.swift */,
 				BE95EACF2E73EBA0001435A4 /* TranscriptionTester.swift */,
 				BE95EAC72E736DB8001435A4 /* AssemblyAITranscriptionService.swift */,
 				BE95EAC82E736DB8001435A4 /* DeepgramTranscriptionService.swift */,
@@ -301,12 +313,16 @@
 				BEEFFE382E6B55AE00A0CF8F /* InsightsDashboard.swift in Sources */,
 				BE95EACB2E736DB8001435A4 /* TranscriptionService.swift in Sources */,
 				BE95EACC2E736DB8001435A4 /* AssemblyAITranscriptionService.swift in Sources */,
+				BE95EADC2E788173001435A4 /* MeetingsListView.swift in Sources */,
+				BE95EADD2E788173001435A4 /* TranscriptDetailView.swift in Sources */,
+				BE95EADE2E788173001435A4 /* CorrectionView.swift in Sources */,
 				BE95EACD2E736DB8001435A4 /* DeepgramTranscriptionService.swift in Sources */,
 				BE95EACE2E736DB8001435A4 /* GeminiTranscriptionService.swift in Sources */,
 				BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */,
 				BEEFFE402E6DD97300A0CF8F /* ScreenCaptureManager.swift in Sources */,
 				A1234567890ABCDEF003 /* ContentView.swift in Sources */,
 				BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */,
+				BE95EAE02E78817E001435A4 /* DesignSystem.swift in Sources */,
 				BE95EAC12E71EB38001435A4 /* DeviceChangeMonitor.swift in Sources */,
 				BE95EAD02E73EBA0001435A4 /* TranscriptionTester.swift in Sources */,
 				BE95EAC22E71EB38001435A4 /* MicRecorder.swift in Sources */,
