@@ -45,6 +45,7 @@ struct Transcript: Codable, Identifiable {
     let segments: [TranscriptSegment]
     let metadata: TranscriptMetadata
     let duration: TimeInterval
+    let title: String?  // optional ai-generated title
     
     /// total word count
     var wordCount: Int {

@@ -255,7 +255,8 @@ class AssemblyAITranscriptionService: TranscriptionService {
                 mixingMethod: .mixed,
                 deviceInfo: "ai&i native"
             ),
-            duration: audioDuration
+            duration: audioDuration,
+            title: nil  // assembly ai doesn't generate titles yet
         )
     }
     

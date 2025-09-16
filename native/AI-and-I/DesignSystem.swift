@@ -10,9 +10,12 @@ import SwiftUI
 // MARK: - colors
 
 extension Color {
-    // japanese-inspired palette
+    // japanese-inspired palette from nuevo.tokyo 2023
     static let kinari = Color(red: 0.984, green: 0.980, blue: 0.961)      // #fbfaf5 - natural/dough - background
     static let gofun = Color(red: 1.0, green: 1.0, blue: 0.988)          // #fffffc - chalk white - surface
+    static let shironeri = Color(red: 0.953, green: 0.953, blue: 0.949)   // #f3f3f2 - silk white kneading
+    static let soshoku = Color(red: 0.918, green: 0.898, blue: 0.890)     // #eae5e3 - base color
+    static let nyuhakushoku = Color(red: 0.953, green: 0.953, blue: 0.953) // #f3f3f3 - milky white
     static let sumi = Color(red: 0.173, green: 0.173, blue: 0.173)       // #2c2c2c - charcoal - primary text
     static let hai = Color(red: 0.420, green: 0.420, blue: 0.420)        // #6b6b6b - ash grey - secondary text
     static let usugrey = Color(red: 0.616, green: 0.616, blue: 0.616)    // #9d9d9d - light grey - disabled
@@ -136,7 +139,7 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundColor(.hai)
             .padding(.horizontal, Spacing.gapLarge)
             .padding(.vertical, Spacing.gapSmall + 2)
-            .background(Color.primaryButton)
+            .background(Color.soshoku)
             .cornerRadius(6)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(.standard, value: configuration.isPressed)

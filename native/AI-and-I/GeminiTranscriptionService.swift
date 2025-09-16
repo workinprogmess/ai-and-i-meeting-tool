@@ -100,6 +100,10 @@ class GeminiTranscriptionService: TranscriptionService {
         var prompt = """
         transcribe this audio recording into a conversation format.
         
+        first, provide a title (4-7 words) that captures the essence of the meeting.
+        format as: TITLE: [your title]
+        
+        then provide the transcript.
         format each line as:
         @speaker: what they said
         
@@ -155,8 +159,8 @@ class GeminiTranscriptionService: TranscriptionService {
             throw TranscriptionError.apiError("invalid response format")
         }
         
-        // parse transcript text into segments
-        let segments = parseTranscriptText(text)
+        // parse transcript text into segments and extract title
+        let (title, segments) = parseTranscriptText(text)
         
         // create transcript
         return Transcript(
@@ -168,17 +172,25 @@ class GeminiTranscriptionService: TranscriptionService {
                 mixingMethod: .mixed,
                 deviceInfo: "ai&i native"
             ),
-            duration: 0 // will be set by coordinator
+            duration: 0, // will be set by coordinator
+            title: title
         )
     }
     
-    private func parseTranscriptText(_ text: String) -> [TranscriptSegment] {
+    private func parseTranscriptText(_ text: String) -> (title: String?, segments: [TranscriptSegment]) {
         var segments: [TranscriptSegment] = []
+        var title: String?
         let lines = text.components(separatedBy: .newlines)
         
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
+            
+            // extract title if present
+            if trimmed.hasPrefix("TITLE:") {
+                title = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
             
             // parse speaker and text
             if let colonIndex = trimmed.firstIndex(of: ":") {
@@ -223,7 +235,7 @@ class GeminiTranscriptionService: TranscriptionService {
             }
         }
         
-        return segments
+        return (title, segments)
     }
     
     private func detectMimeType(audioData: Data) -> String {

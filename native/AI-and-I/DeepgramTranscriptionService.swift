@@ -174,7 +174,8 @@ class DeepgramTranscriptionService: TranscriptionService {
                 mixingMethod: .mixed,
                 deviceInfo: "ai&i native"
             ),
-            duration: duration
+            duration: duration,
+            title: nil  // deepgram doesn't generate titles yet
         )
     }
     

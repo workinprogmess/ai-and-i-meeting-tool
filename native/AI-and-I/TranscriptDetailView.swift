@@ -19,8 +19,8 @@ struct TranscriptDetailView: View {
     
     var body: some View {
         ZStack {
-            // background
-            Color.kinari
+            // background - silk white kneading
+            Color.shironeri
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
@@ -36,7 +36,7 @@ struct TranscriptDetailView: View {
                 
                 // transcript content
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 0) {
                             // meeting metadata
                             metadataView
@@ -91,20 +91,26 @@ struct TranscriptDetailView: View {
     private var serviceControlsView: some View {
         VStack(spacing: Spacing.gapMedium) {
             // service selector tabs - gemini, deepgram, assembly
-            Picker("", selection: $selectedServiceIndex) {
+            HStack(spacing: 0) {
                 ForEach(Array(viewModel.allResults.enumerated()), id: \.offset) { index, result in
-                    Text(result.service.lowercased())
-                        .tag(index)
+                    Button(action: {
+                        selectedServiceIndex = index
+                    }) {
+                        Text(result.service.lowercased())
+                            .font(.system(size: 14, weight: selectedServiceIndex == index ? .semibold : .regular))
+                            .foregroundColor(selectedServiceIndex == index ? .sumi : .hai)
+                            .frame(height: 36)
+                            .frame(maxWidth: .infinity)
+                            .background(selectedServiceIndex == index ? Color.shironeri : Color.clear)
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
-            .pickerStyle(.segmented)
             .frame(maxWidth: 400)
-            .background(Color.gofun)
+            .padding(3)
+            .background(Color.nyuhakushoku)
             .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.hai.opacity(0.4), lineWidth: 1)
-            )
             .onChange(of: selectedServiceIndex) { _, newIndex in
                 viewModel.selectService(at: newIndex)
             }
@@ -161,33 +167,38 @@ struct TranscriptDetailView: View {
     }
     
     private var headerView: some View {
-        HStack {
-            // breadcrumb
-            HStack(spacing: 4) {
-                Button(action: { dismiss() }) {
-                    Text("meetings")
-                        .font(.system(size: 12))
-                        .foregroundColor(.hai)
+        VStack(spacing: 0) {
+            // thin strip with traffic lights
+            Rectangle()
+                .fill(Color.nyuhakushoku)
+                .frame(height: 28)
+                .ignoresSafeArea(edges: .top)
+            
+            // meeting title as main heading
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Button(action: { dismiss() }) {
+                        Text("← back to meetings")
+                            .font(.system(size: 12))
+                            .foregroundColor(.hai)
+                            .lowercased()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Text(meeting.title)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.sumi)
                         .lowercased()
                 }
-                .buttonStyle(PlainButtonStyle())
                 
-                Text("/")
-                    .font(.system(size: 12))
-                    .foregroundColor(.usugrey)
-                
-                Text(meeting.title)
-                    .font(.system(size: 12))
-                    .foregroundColor(.sumi)
-                    .lowercased()
+                Spacer()
             }
-            
-            Spacer()
+            .frame(maxWidth: 800)
+            .padding(.horizontal, Spacing.margins)
+            .padding(.top, Spacing.gapSmall)
+            .padding(.bottom, Spacing.gapMedium)
         }
-        .frame(maxWidth: 800)
-        .padding(.horizontal, Spacing.margins)
-        .padding(.vertical, Spacing.gapSmall)
-        .background(Color.kinari)
+        .background(Color.shironeri)
     }
     
     private var metadataView: some View {
@@ -225,47 +236,50 @@ struct TranscriptDetailView: View {
                 Text(viewModel.serviceName)
                     .font(Typography.metadata)
                     .foregroundColor(.hai)
-                
-                if let cost = viewModel.cost {
-                    Text("•")
-                        .foregroundColor(.usugrey)
-                    
-                    Text(String(format: "$%.3f", cost))
-                        .font(Typography.metadata)
-                        .foregroundColor(.hai)
-                }
             }
             .lowercased()
         }
     }
     
     private var floatingActionTray: some View {
-        VStack(spacing: Spacing.gapSmall) {
+        HStack(spacing: Spacing.gapLarge) {
             // link/share
-            FloatingActionButton(icon: "link") {
-                viewModel.shareTranscript()
+            Button(action: { viewModel.shareTranscript() }) {
+                Image(systemName: "link")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.hai)
             }
+            .buttonStyle(PlainButtonStyle())
             
             // copy
-            FloatingActionButton(icon: "doc.on.doc") {
-                viewModel.copyTranscript()
+            Button(action: { viewModel.copyTranscript() }) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.hai)
             }
+            .buttonStyle(PlainButtonStyle())
             
             // export
-            FloatingActionButton(icon: "square.and.arrow.up") {
-                viewModel.exportTranscript()
+            Button(action: { viewModel.exportTranscript() }) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.hai)
             }
+            .buttonStyle(PlainButtonStyle())
             
             // corrections
-            FloatingActionButton(icon: "pencil") {
-                showingCorrection = true
+            Button(action: { showingCorrection = true }) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.hai)
             }
+            .buttonStyle(PlainButtonStyle())
         }
-        .padding(Spacing.gapSmall)
+        .padding(.horizontal, Spacing.gapLarge)
+        .padding(.vertical, Spacing.gapMedium)
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.kinari.opacity(0.9))
-                .shadow(color: .sumi.opacity(0.1), radius: 6, y: 2)
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color.soshoku)
         )
     }
 }
@@ -297,9 +311,13 @@ struct TranscriptSegmentView: View {
                 .onHover { hovering in
                     isHovering = hovering
                 }
+                .padding(.horizontal, isHovering ? 4 : 0)
+                .padding(.vertical, isHovering ? 2 : 0)
                 .background(
-                    isHovering ? Color.hover : Color.clear
+                    RoundedRectangle(cornerRadius: isHovering ? 4 : 0)
+                        .fill(isHovering ? Color.soshoku.opacity(0.3) : Color.clear)
                 )
+                .animation(.easeInOut(duration: 0.15), value: isHovering)
                 .onTapGesture {
                     onTextSelected(segment.text)
                 }

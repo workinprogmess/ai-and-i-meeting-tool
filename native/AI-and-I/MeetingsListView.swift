@@ -100,17 +100,23 @@ class MeetingsListViewModel: ObservableObject {
            let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
            let bestResult = results.first {
             
-            // extract meaningful title from transcript (lowercase)
-            let title = bestResult.transcript.segments
-                .prefix(3)  // look at first 3 segments
-                .map { $0.text }
-                .joined(separator: " ")
-                .split(separator: " ")
-                .prefix(6)  // take first 6 words
-                .joined(separator: " ")
-                .lowercased()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalTitle = title.isEmpty ? "untitled meeting" : title
+            // use ai-generated title if available, otherwise extract from transcript
+            let finalTitle: String
+            if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
+                finalTitle = aiTitle.lowercased()
+            } else {
+                // fallback to extracting from first few words
+                let title = bestResult.transcript.segments
+                    .prefix(3)  // look at first 3 segments
+                    .map { $0.text }
+                    .joined(separator: " ")
+                    .split(separator: " ")
+                    .prefix(6)  // take first 6 words
+                    .joined(separator: " ")
+                    .lowercased()
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                finalTitle = title.isEmpty ? "untitled meeting" : title
+            }
             
             // count unique speakers across all transcripts
             var allSpeakers = Set<Speaker>()
@@ -440,7 +446,7 @@ struct MeetingsListView: View {
         NavigationStack {
             ZStack {
                 // background
-                Color.kinari
+                Color.nyuhakushoku
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
@@ -475,37 +481,20 @@ struct MeetingsListView: View {
     // MARK: - subviews
     
     private var headerView: some View {
-        HStack {
-            // search on left
-            Button(action: {}) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.hai)
-                    .font(.system(size: 14))
-            }
-            .buttonStyle(PlainButtonStyle())
-            
-            Spacer()
-            
-            // logo centered
-            Text("ai&i")
-                .font(Typography.title)
-                .foregroundColor(.sumi)
-                .lowercased()
-            
-            Spacer()
-            
-            // settings on right
-            Button(action: {}) {
-                Image(systemName: "gearshape")
-                    .foregroundColor(.hai)
-                    .font(.system(size: 14))
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-        .frame(maxWidth: 800)
-        .padding(.horizontal, Spacing.margins)
-        .padding(.vertical, Spacing.gapMedium)
-        .background(Color.kinari)
+        // thin strip with traffic lights
+        Rectangle()
+            .fill(Color.nyuhakushoku)
+            .frame(height: 28)
+            .overlay(
+                HStack {
+                    Text("⌘+s to save locally")
+                        .font(.system(size: 11))
+                        .foregroundColor(.usugrey)
+                        .lowercased()
+                    Spacer()
+                }
+                .padding(.horizontal, Spacing.margins)
+            )
     }
     
     private var startMeetingButton: some View {
