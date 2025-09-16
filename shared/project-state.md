@@ -3,8 +3,8 @@
 ## current focus: native macos app
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
-## current milestone: transcription integration (0.2.0) 🚧 IN PROGRESS
-**status**: critical issues fixed - ready for full workflow testing
+## current milestone: transcription integration (0.2.0) ✅ READY FOR TESTING
+**status**: ui polish complete - all systems operational (subject to testing)
 - ✅ milestone 1 complete: seamless device switching with perfect audio mixing
 - ✅ phase 1-2: all three transcription services integrated (gemini, deepgram, assembly ai)
 - ✅ parallel processing with quality metrics and comparison
@@ -22,9 +22,19 @@ ai meeting intelligence - native swiftui application for world-class user experi
   - ✅ fixed recording duration extension (5:52 → 14:04 issue)
   - ✅ fixed timer freezing at 00:00 (moved to sync execution)
   - ✅ fixed transcription hanging (restored mp3 conversion step)
+  - ✅ fixed device switching debounce timer constantly resetting
+  - ✅ fixed app entry point (was showing old contentview instead of meetingslistview)
   - ✅ added proper error handling and logging
-- ⏳ phase 4: ui polish + corrections integration (1 day)
-- ⏳ phase 5: testing & optimization + files api (1 day)
+- ✅ phase 4: ui polish complete (2025-09-16):
+  - ✅ japanese-inspired design system with nuevo.tokyo 2023 colors
+  - ✅ ai-generated meeting titles (4-7 words capturing essence)
+  - ✅ service comparison tabs with silk white kneading background
+  - ✅ beautiful capsule hover effects on transcript text
+  - ✅ hidden scrollbars for clean aesthetic
+  - ✅ floating action tray with soshoku color and open icon layout
+  - ✅ thin milky white header strips
+  - ✅ enlarged meeting titles for better hierarchy
+- 🎯 next: transcription quality improvements (prompts, mixed language, speaker attribution)
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -235,6 +245,49 @@ private func shouldSwitchToNewDevice() -> Bool {
   - symptom: 2.5s timer never completed, switching happened too quickly
   - fix: ignore new events if already debouncing, let timer complete fully
   - result: airpods get full 2.5s to stabilize, eliminating audio artifacts
+
+### testing insights (2025-09-15)
+- gemini most accurate (but sometimes over-processes)
+- deepgram fastest but misses context
+- assembly ai good balance but expensive
+- all services struggle with hindi/hinglish mixing
+- speaker attribution needs improvement across all
+
+## current app status (2025-09-16) - subject to testing
+
+### what's working
+- complete recording → mixing → transcription → ui workflow
+- airpods switching during recording (with 2.5s stabilization)
+- parallel transcription with all three services
+- japanese-inspired minimal ui with neue.tokyo colors
+- ai-generated meeting titles (gemini only for now)
+- user corrections system with persistent dictionary
+- perfect audio mixing with ffmpeg (sequential segments)
+- mp3 compression (10x smaller than wav)
+
+### ui refinements completed
+- japanese color palette (shironeri, soshoku, nyuhakushoku)
+- service comparison tabs with proper visibility
+- beautiful capsule hover effects on transcript text
+- hidden scrollbars for clean aesthetic
+- floating action tray with soshoku color, open icon layout
+- thin milky white header strips
+- enlarged meeting titles for better hierarchy
+- removed redundant pricing from metadata
+
+### known limitations
+- copy button works, other action buttons placeholder
+- meeting duration calculation needs verification  
+- transcription quality varies with mixed languages
+- speaker attribution could be more accurate
+- -10877 core audio errors persist but don't break functionality
+
+### next priorities
+1. improve transcription prompts for better accuracy
+2. enhance mixed language support (hindi/hinglish)
+3. better speaker attribution and diarization
+4. implement summary generation (milestone 3)
+5. add export/share functionality
 
 ### testing insights (2025-09-15)
 - **transcription quality ranking**: gemini > deepgram > assembly ai
