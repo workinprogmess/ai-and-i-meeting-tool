@@ -332,7 +332,7 @@ struct TranscriptionTestView: View {
                             }
                         }
                         .padding()
-                        .background(Color.gray.opacity(0.05))
+                        .background(Color.usugrey.opacity(0.05))
                         .cornerRadius(8)
                     }
                     .frame(maxHeight: 300)

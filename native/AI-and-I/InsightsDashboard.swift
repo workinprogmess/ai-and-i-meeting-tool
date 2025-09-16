@@ -23,7 +23,7 @@ struct InsightsDashboard: View {
                             .font(.caption)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.orange.opacity(0.2))
+                            .background(Color.warningBackground)
                             .cornerRadius(4)
                     }
                     

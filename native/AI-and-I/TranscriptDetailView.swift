@@ -283,7 +283,8 @@ struct TranscriptSegmentView: View {
             Text(segment.speakerLabel)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(segment.speaker == .me ? .speakerMe : .speakerOther)
-                .frame(width: 60, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)  // increased width to prevent wrapping
+                .lineLimit(1)  // prevent wrapping to next line
                 .lowercased()
             
             // transcript text (lowercase)
