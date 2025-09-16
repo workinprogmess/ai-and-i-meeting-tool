@@ -114,7 +114,7 @@ class MeetingsListViewModel: ObservableObject {
             
             // count unique speakers across all transcripts
             var allSpeakers = Set<Speaker>()
-            for result in allResults.compactMap({ $0 }) {
+            for result in results {
                 let speakers = Set(result.transcript.segments.map { $0.speaker })
                 allSpeakers.formUnion(speakers)
             }
