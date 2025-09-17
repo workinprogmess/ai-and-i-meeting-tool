@@ -67,23 +67,30 @@ class MeetingsListViewModel: ObservableObject {
     }
     
     private func setupDeviceMonitoring() {
+        print("🔧 setupDeviceMonitoring called")
+        
         // start monitoring for device changes
         deviceMonitor.startMonitoring()
+        print("📱 device monitor started: \(deviceMonitor.isMonitoring)")
         
         // connect device change callbacks
         deviceMonitor.onMicDeviceChange = { [weak self] reason in
-            // handle mic device changes (airpods connect/disconnect)
-            self?.micRecorder.handleDeviceChange(reason: reason)
+            Task { @MainActor in
+                print("🎤 mic device change detected: \(reason)")
+                // handle mic device changes (airpods connect/disconnect)
+                self?.micRecorder.handleDeviceChange(reason: reason)
+            }
         }
         
         deviceMonitor.onSystemDeviceChange = { [weak self] reason in
-            Task {
+            Task { @MainActor in
+                print("🔊 system device change detected: \(reason)")
                 // handle system audio device changes
                 await self?.systemRecorder.handleDeviceChange(reason: reason)
             }
         }
         
-        print("📱 device monitoring started - will handle airpods switching")
+        print("📱 device monitoring callbacks connected - will handle airpods switching")
     }
     
     func loadMeetings() {
@@ -91,49 +98,141 @@ class MeetingsListViewModel: ObservableObject {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let sessionsPath = documentsPath.appendingPathComponent("ai&i-recordings")
         
-        // for now, look for transcription-results.json in the root recordings folder
-        // (later we'll organize into session subdirectories)
-        let resultsPath = sessionsPath.appendingPathComponent("transcription-results.json")
+        print("📂 loading meetings from: \(sessionsPath.path)")
         
         var loadedMeetings: [Meeting] = []
+        
+        // load all session metadata files (each recording creates one)
+        if let files = try? FileManager.default.contentsOfDirectory(at: sessionsPath, 
+                                                                   includingPropertiesForKeys: nil) {
+            
+            print("📁 found \(files.count) total files")
+            
+            // find all session metadata files (not system metadata)
+            let metadataFiles = files.filter { 
+                $0.lastPathComponent.contains("session_") && 
+                $0.lastPathComponent.contains("_metadata.json") &&
+                !$0.lastPathComponent.contains("_system_")
+            }
+            
+            print("📋 found \(metadataFiles.count) session metadata files")
+            
+            for metadataFile in metadataFiles {
+                // extract session timestamp from filename
+                let filename = metadataFile.lastPathComponent
+                let sessionTimestamp = filename
+                    .replacingOccurrences(of: "session_", with: "")
+                    .replacingOccurrences(of: "_metadata.json", with: "")
+                    .replacingOccurrences(of: "_mic", with: "")
+                
+                // load metadata to get duration and other info
+                do {
+                    let data = try Data(contentsOf: metadataFile)
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .iso8601
+                    let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
+                    print("✅ loaded metadata for session \(sessionTimestamp)")
+                    
+                    // calculate duration from metadata
+                    let duration: TimeInterval
+                    if let endTime = metadata.sessionEndTime {
+                        duration = endTime.timeIntervalSince(metadata.sessionStartTime)
+                    } else {
+                        // if no end time, use segment durations
+                        let micDuration = metadata.micSegments.last?.endSessionTime ?? 0
+                        let systemDuration = metadata.systemSegments.last?.endSessionTime ?? 0
+                        duration = max(micDuration, systemDuration)
+                    }
+                    
+                    // check if transcription exists for this session
+                    let transcriptPath = sessionsPath.appendingPathComponent("session_\(sessionTimestamp)_transcripts.json")
+                    let hasTranscript = FileManager.default.fileExists(atPath: transcriptPath.path)
+                    
+                    // check for audio files
+                    let mp3Path = sessionsPath.appendingPathComponent("mixed_\(sessionTimestamp).mp3")
+                    let wavPath = sessionsPath.appendingPathComponent("mixed_\(sessionTimestamp).wav")
+                    let audioURL = FileManager.default.fileExists(atPath: mp3Path.path) ? mp3Path :
+                                  FileManager.default.fileExists(atPath: wavPath.path) ? wavPath : nil
+                    
+                    // create meeting entry with better title formatting
+                    let sessionDate = metadata.sessionStartTime
+                    let dateFormatter = DateFormatter()
+                    dateFormatter.dateFormat = "MMM d, h:mm a"
+                    let formattedDate = dateFormatter.string(from: sessionDate).lowercased()
+                    
+                    // if transcript exists, try to load it for better title
+                    var title = hasTranscript ? "meeting \(formattedDate)" : "recording \(formattedDate)"
+                    if hasTranscript {
+                        if let transcriptData = try? Data(contentsOf: transcriptPath),
+                           let transcripts = try? JSONDecoder().decode([TranscriptionResult].self, from: transcriptData),
+                           let bestResult = transcripts.first {
+                            // use AI-generated title if available
+                            if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
+                                title = aiTitle.lowercased()
+                            }
+                        }
+                    }
+                    
+                    let meeting = Meeting(
+                        timestamp: metadata.sessionStartTime,
+                        duration: duration,
+                        title: title,
+                        speakerCount: metadata.micSegments.isEmpty ? 0 : 1,
+                        audioFileURL: audioURL,
+                        transcriptAvailable: hasTranscript
+                    )
+                    loadedMeetings.append(meeting)
+                } catch {
+                    print("❌ failed to load \(metadataFile.lastPathComponent): \(error)")
+                }
+            }
+        }
+        
+        // also check for the legacy transcription-results.json file
+        let resultsPath = sessionsPath.appendingPathComponent("transcription-results.json")
         if let data = try? Data(contentsOf: resultsPath),
            let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
            let bestResult = results.first {
             
-            // use ai-generated title if available, otherwise extract from transcript
-            let finalTitle: String
-            if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
-                finalTitle = aiTitle.lowercased()
-            } else {
-                // fallback to extracting from first few words
-                let title = bestResult.transcript.segments
-                    .prefix(3)  // look at first 3 segments
-                    .map { $0.text }
-                    .joined(separator: " ")
-                    .split(separator: " ")
-                    .prefix(6)  // take first 6 words
-                    .joined(separator: " ")
-                    .lowercased()
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                finalTitle = title.isEmpty ? "untitled meeting" : title
+            // only add if we don't already have this meeting (check by timestamp proximity)
+            let resultTime = bestResult.createdAt
+            let isDuplicate = loadedMeetings.contains { meeting in
+                abs(meeting.timestamp.timeIntervalSince(resultTime)) < 60  // within 1 minute
             }
             
-            // count unique speakers across all transcripts
-            var allSpeakers = Set<Speaker>()
-            for result in results {
-                let speakers = Set(result.transcript.segments.map { $0.speaker })
-                allSpeakers.formUnion(speakers)
+            if !isDuplicate {
+                let finalTitle: String
+                if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
+                    finalTitle = aiTitle.lowercased()
+                } else {
+                    let title = bestResult.transcript.segments
+                        .prefix(3)
+                        .map { $0.text }
+                        .joined(separator: " ")
+                        .split(separator: " ")
+                        .prefix(6)
+                        .joined(separator: " ")
+                        .lowercased()
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    finalTitle = title.isEmpty ? "untitled meeting" : title
+                }
+                
+                var allSpeakers = Set<Speaker>()
+                for result in results {
+                    let speakers = Set(result.transcript.segments.map { $0.speaker })
+                    allSpeakers.formUnion(speakers)
+                }
+                
+                let meeting = Meeting(
+                    timestamp: bestResult.createdAt,
+                    duration: bestResult.transcript.duration,
+                    title: finalTitle,
+                    speakerCount: allSpeakers.count,
+                    audioFileURL: sessionsPath.appendingPathComponent("mixed.mp3"),
+                    transcriptAvailable: true
+                )
+                loadedMeetings.append(meeting)
             }
-            
-            let meeting = Meeting(
-                timestamp: bestResult.createdAt,
-                duration: bestResult.transcript.duration,
-                title: finalTitle,
-                speakerCount: allSpeakers.count,
-                audioFileURL: sessionsPath.appendingPathComponent("mixed.mp3"),
-                transcriptAvailable: true
-            )
-            loadedMeetings.append(meeting)
         }
         
         // sort by most recent first
@@ -141,24 +240,39 @@ class MeetingsListViewModel: ObservableObject {
     }
     
     func startNewMeeting() {
+        print("🚀 startNewMeeting called")
         isRecording = true
         recordingStartTime = Date()
         recordingDuration = 0
         
         // start timer immediately (before async recording setup)
-        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if let start = self.recordingStartTime {
-                self.recordingDuration = Date().timeIntervalSince(start)
+        print("⏰ creating timer on thread: \(Thread.current)")
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if let start = self.recordingStartTime {
+                    let duration = Date().timeIntervalSince(start)
+                    print("⏱️ timer update: \(duration)s on thread: \(Thread.current)")
+                    self.recordingDuration = duration
+                }
             }
         }
+        print("⏰ timer created: \(recordingTimer != nil)")
         
-        // start recording (matching the working version's simple approach)
-        Task {
-            // device monitoring is already running from onAppear, no need to restart
+        // start recording
+        Task { @MainActor in
+            print("🎙️ starting recorders...")
+            print("📱 device monitor active: \(deviceMonitor.isMonitoring)")
             
-            // start both recorders independently (simple and clean like working version)
+            // device monitoring is already running from init, no need to restart
+            
+            // start both recorders independently
             micRecorder.startSession()
+            print("🎙️ mic recorder started: \(micRecorder.isRecording)")
+            
             await systemRecorder.startSession()
+            print("🔊 system recorder started: \(systemRecorder.isRecording)")
+            
             print("🎬 segmented recording started")
         }
     }
@@ -177,6 +291,9 @@ class MeetingsListViewModel: ObservableObject {
             // stop device monitoring after recording
             deviceMonitor.stopMonitoring()
             print("📱 device monitoring stopped")
+            
+            // reload meetings to show the new recording
+            loadMeetings()
             
             // get the session timestamp for mixing
             let sessionTimestamp = micRecorder.currentSessionTimestamp
@@ -397,12 +514,21 @@ class MeetingsListViewModel: ObservableObject {
             }
         }
         
-        // save results
+        // save results with session-specific filename to prevent data loss
         if !results.isEmpty {
-            let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
+            // save with session timestamp to prevent overwriting
+            let sessionSpecificPath = sessionDir.appendingPathComponent("session_\(sessionTimestamp)_transcripts.json")
             if let data = try? JSONEncoder().encode(results) {
-                try? data.write(to: resultsPath)
-                print("💾 saved \(results.count) transcription results to \(resultsPath.lastPathComponent)")
+                try? data.write(to: sessionSpecificPath)
+                print("💾 saved \(results.count) transcription results to \(sessionSpecificPath.lastPathComponent)")
+            }
+            
+            // also keep a copy as transcription-results.json for backwards compatibility
+            // but this will be overwritten (legacy behavior)
+            let legacyPath = sessionDir.appendingPathComponent("transcription-results.json")
+            if let data = try? JSONEncoder().encode(results) {
+                try? data.write(to: legacyPath)
+                print("📝 also saved to legacy transcription-results.json (will be overwritten)")
             }
             
             // reload to show completed transcript
