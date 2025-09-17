@@ -424,66 +424,69 @@ class MeetingsListViewModel: ObservableObject {
     
     private func transcribeWithProgress(meeting: Meeting, audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
         // create services
-        let gemini = GeminiTranscriptionService(apiKey: "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA")
-        let deepgram = DeepgramTranscriptionService(apiKey: "ea1942496aa5a53bed2c7f5641fecf0ba1646963")
-        let assembly = AssemblyAITranscriptionService(apiKey: "789a50c24ad24f29beb085339c29bce2")
+        let serviceFactories: [(name: String, loader: () -> TranscriptionService?)] = [
+            ("gemini", { GeminiTranscriptionService.createFromEnvironment() }),
+            ("deepgram", { DeepgramTranscriptionService.createFromEnvironment() }),
+            ("assembly", { AssemblyAITranscriptionService.createFromEnvironment() })
+        ]
+        
+        var configuredServices: [(name: String, service: TranscriptionService)] = []
+        var unavailableServices: [String] = []
+        
+        for entry in serviceFactories {
+            if let service = entry.loader() {
+                configuredServices.append((entry.name, service))
+            } else {
+                unavailableServices.append(entry.name)
+            }
+        }
+        
+        if !unavailableServices.isEmpty {
+            let missingList = unavailableServices.joined(separator: ", ")
+            await updateMeetingStatus(meeting, status: "missing keys for \(missingList)")
+        }
+        
+        guard !configuredServices.isEmpty else {
+            await updateMeetingStatus(meeting, status: "no transcription services configured")
+            return
+        }
+        
+        await updateMeetingStatus(
+            meeting,
+            status: "transcribing with \(configuredServices.map { $0.name }.joined(separator: ", "))"
+        )
         
         var results: [TranscriptionResult] = []
         var completedServices: [String] = []
         
-        // run all three in parallel with status updates
         await withTaskGroup(of: (String, TranscriptionResult?).self) { group in
-            // start gemini
-            group.addTask {
-                await self.updateMeetingStatus(meeting, status: "transcribing with gemini...")
-                do {
-                    let result = try await gemini.transcribe(audioURL: audioURL)
-                    print("✅ gemini transcription complete")
-                    return ("gemini", result)
-                } catch {
-                    print("❌ gemini transcription failed: \(error)")
-                    return ("gemini", nil)
+            for entry in configuredServices {
+                group.addTask {
+                    do {
+                        let result = try await entry.service.transcribe(audioURL: audioURL)
+                        print("✅ \(entry.name) transcription complete")
+                        return (entry.name, result)
+                    } catch {
+                        print("❌ \(entry.name) transcription failed: \(error)")
+                        return (entry.name, nil)
+                    }
                 }
             }
             
-            // start deepgram
-            group.addTask {
-                do {
-                    let result = try await deepgram.transcribe(audioURL: audioURL)
-                    print("✅ deepgram transcription complete")
-                    return ("deepgram", result)
-                } catch {
-                    print("❌ deepgram transcription failed: \(error)")
-                    return ("deepgram", nil)
-                }
-            }
-            
-            // start assembly ai
-            group.addTask {
-                do {
-                    let result = try await assembly.transcribe(audioURL: audioURL)
-                    print("✅ assembly ai transcription complete")
-                    return ("assembly", result)
-                } catch {
-                    print("❌ assembly ai transcription failed: \(error)")
-                    return ("assembly", nil)
-                }
-            }
-            
-            // collect results as they complete
             for await (service, result) in group {
                 if let result = result {
                     results.append(result)
                     completedServices.append(service)
                     
-                    // update status with completed services
                     let statusText = completedServices.joined(separator: ", ") + " done"
-                    let remainingCount = 3 - completedServices.count
-                    let finalStatus = remainingCount > 0 
-                        ? "\(statusText), waiting for \(remainingCount) more..." 
+                    let remainingCount = configuredServices.count - completedServices.count
+                    let finalStatus = remainingCount > 0
+                        ? "\(statusText), waiting for \(remainingCount) more..."
                         : "all services complete!"
                     
                     await updateMeetingStatus(meeting, status: finalStatus)
+                } else {
+                    await updateMeetingStatus(meeting, status: "\(service) failed, continuing...")
                 }
             }
         }
