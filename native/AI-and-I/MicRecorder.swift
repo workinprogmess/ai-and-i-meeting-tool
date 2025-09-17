@@ -219,6 +219,9 @@ class MicRecorder: ObservableObject {
         // get format first (safe to query from engine)
         let inputFormat = inputNode.inputFormat(forBus: 0)
         
+        // create target recording format (48khz mono standard)
+        let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        
         // defer device name/ID queries until after engine starts
         // for now, use placeholder values
         currentDeviceID = "pending"
@@ -247,10 +250,7 @@ class MicRecorder: ObservableObject {
         let sessionTimestamp = Int(sessionReferenceTime)
         segmentFilePath = createSegmentFilePath(sessionTimestamp: sessionTimestamp, segmentNumber: segmentNumber)
         
-        // create audio file (48khz mono standard, 16-bit PCM)
-        let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        
-        // use 16-bit PCM format instead of 32-bit float
+        // use 16-bit PCM format instead of 32-bit float for the file
         var settings = recordingFormat.settings
         settings[AVFormatIDKey] = kAudioFormatLinearPCM
         settings[AVLinearPCMBitDepthKey] = 16
