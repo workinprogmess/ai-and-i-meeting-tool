@@ -1297,6 +1297,9 @@ const stream = await getLoopbackAudioMediaStream({
 
 **original milestone sequence revised to prioritize differentiation:**
 
+## archived electron milestone notes (reference only)
+the milestones below capture our previous electron-app roadmap. they remain here for historical context and should not guide the native swiftui implementation.
+
 ### milestone 3.3: transcript reliability - zero content loss (CRITICAL PRIORITY)
 **foundation trust before differentiation:**
 - fix audio quality threshold issues preventing transcript segments
@@ -1318,7 +1321,7 @@ const stream = await getLoopbackAudioMediaStream({
 - **timeline**: extensive work, quality over speed approach
 - **prerequisite**: complete confidence in transcript reliability from 3.3
 
-### milestone 3.4.1: testflight preparation 
+### milestone 3.4.1: testflight preparation *(archived electron plan)*
 **professional beta distribution:**
 - apple developer account setup ($99/year)
 - code signing and testflight configuration
@@ -1677,8 +1680,8 @@ result: overlapping audio becomes unintelligible to ai
 
 Last Updated: 2025-09-03 (CRITICAL BREAKTHROUGH - mixed audio pivot, milestone 3.3.5 added)
 Session Duration: Comprehensive codebase analysis + strategic planning
-Major Achievements:
+Major Achievements (electron build, archived):
 - milestone 3.2: zero data loss + device resilience complete
 - strategic roadmap: human intelligence prioritized over commodity features  
 - foundation assessment: ready for differentiation work
-- testflight path: planned for post-3.3 professional beta distribution
+- testflight path (archived) was planned for post-3.3 professional beta distribution
