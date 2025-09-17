@@ -48,7 +48,11 @@ guard let files = try? fileManager.contentsOfDirectory(at: recordingsFolder,
     exit(1)
 }
 
-let metadataFiles = files.filter { $0.pathExtension == "json" }
+let metadataFiles = files.filter { 
+                             $0.pathExtension == "json" && 
+                             $0.lastPathComponent.contains("session_") &&
+                             $0.lastPathComponent.contains("metadata.json")
+                         }
                          .sorted { $0.lastPathComponent > $1.lastPathComponent }
 
 if metadataFiles.isEmpty {
