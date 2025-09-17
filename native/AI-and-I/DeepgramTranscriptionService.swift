@@ -182,8 +182,11 @@ class DeepgramTranscriptionService: TranscriptionService {
     // MARK: - configuration
     
     static func createFromEnvironment(userDictionary: UserDictionary = UserDictionary()) -> DeepgramTranscriptionService? {
-        // hardcoded for now, will move to secure storage
-        let apiKey = "ea1942496aa5a53bed2c7f5641fecf0ba1646963"
+        let environment = ProcessInfo.processInfo.environment
+        let rawKey = environment["DEEPGRAM_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let apiKey = rawKey, !apiKey.isEmpty else {
+            return nil
+        }
         
         return DeepgramTranscriptionService(apiKey: apiKey, userDictionary: userDictionary)
     }
