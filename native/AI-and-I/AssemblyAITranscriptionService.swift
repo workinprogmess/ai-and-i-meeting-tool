@@ -263,8 +263,11 @@ class AssemblyAITranscriptionService: TranscriptionService {
     // MARK: - configuration
     
     static func createFromEnvironment(userDictionary: UserDictionary = UserDictionary()) -> AssemblyAITranscriptionService? {
-        // hardcoded for now, will move to secure storage
-        let apiKey = "789a50c24ad24f29beb085339c29bce2"
+        let environment = ProcessInfo.processInfo.environment
+        let rawKey = environment["ASSEMBLYAI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let apiKey = rawKey, !apiKey.isEmpty else {
+            return nil
+        }
         
         return AssemblyAITranscriptionService(apiKey: apiKey, userDictionary: userDictionary)
     }
