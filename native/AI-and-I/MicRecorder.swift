@@ -276,7 +276,9 @@ class MicRecorder: ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
             // enqueue to writer queue - don't process in callback
             self?.writerQueue.async {
-                self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
+                Task { @MainActor in
+                    self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
+                }
             }
         }
         
@@ -401,6 +403,7 @@ class MicRecorder: ObservableObject {
     }
     
     /// processes audio buffer with warmup and conversion
+    @MainActor
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer,
                                    inputFormat: AVAudioFormat,
                                    targetFormat: AVAudioFormat) {
