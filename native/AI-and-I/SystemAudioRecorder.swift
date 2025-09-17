@@ -8,7 +8,7 @@
 
 import Foundation
 import ScreenCaptureKit
-import AVFoundation
+@preconcurrency import AVFoundation
 
 /// manages system audio recording with segment-based approach
 @MainActor

@@ -269,7 +269,7 @@ struct ContentView: View {
                 screenCaptureManager.audioManager = audioManager
                 Task {
                     await screenCaptureManager.startCaptureForDisplay(sharedTimestamp: sharedTimestamp)
-                    print("📍 screen capture started, isCapturing = \(await screenCaptureManager.isCapturing)")
+                    print("📍 screen capture started, isCapturing = \(screenCaptureManager.isCapturing)")
                 }
             }
         }

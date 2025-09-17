@@ -29,7 +29,7 @@ protocol TranscriptionService {
 
 /// result from a transcription service
 struct TranscriptionResult: Codable {
-    let id = UUID()
+    var id = UUID()
     let service: String
     let transcript: Transcript
     let cost: Double
@@ -40,7 +40,7 @@ struct TranscriptionResult: Codable {
 
 /// main transcript structure
 struct Transcript: Codable, Identifiable {
-    let id = UUID()
+    var id = UUID()
     let sessionID: String
     let segments: [TranscriptSegment]
     let metadata: TranscriptMetadata
@@ -60,7 +60,7 @@ struct Transcript: Codable, Identifiable {
 
 /// individual segment of transcript
 struct TranscriptSegment: Codable, Identifiable {
-    let id = UUID()
+    var id = UUID()
     let speaker: Speaker
     let text: String
     let timestamp: TimeInterval?

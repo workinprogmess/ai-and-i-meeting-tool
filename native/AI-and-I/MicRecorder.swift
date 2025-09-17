@@ -193,7 +193,9 @@ class MicRecorder: ObservableObject {
     private func startNewSegment() {
         // dispatch to controller queue for safety
         controllerQueue.async { [weak self] in
-            self?.startNewSegmentInternal()
+            Task { @MainActor in
+                self?.startNewSegmentInternal()
+            }
         }
     }
     
@@ -320,10 +322,12 @@ class MicRecorder: ObservableObject {
                 
                 // retry after delay
                 controllerQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self = self else { return }
-                    if self.state == .switching || self.state == .recording {
-                        print("🔄 retrying segment start after -10851 error...")
-                        self.startNewSegmentInternal()
+                    Task { @MainActor in
+                        guard let self = self else { return }
+                        if self.state == .switching || self.state == .recording {
+                            print("🔄 retrying segment start after -10851 error...")
+                            self.startNewSegmentInternal()
+                        }
                     }
                 }
             } else {

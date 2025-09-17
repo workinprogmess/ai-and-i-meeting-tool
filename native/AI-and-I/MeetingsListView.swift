@@ -10,7 +10,7 @@ import SwiftUI
 // MARK: - data models
 
 struct Meeting: Identifiable, Codable, Hashable {
-    let id = UUID()
+    var id = UUID()
     let timestamp: Date
     let duration: TimeInterval
     var title: String  // changed to var for updating
@@ -252,7 +252,7 @@ class MeetingsListViewModel: ObservableObject {
                 guard let self = self else { return }
                 if let start = self.recordingStartTime {
                     let duration = Date().timeIntervalSince(start)
-                    print("⏱️ timer update: \(duration)s on thread: \(Thread.current)")
+                    print("⏱️ timer update: \(duration)s")
                     self.recordingDuration = duration
                 }
             }
@@ -308,7 +308,7 @@ class MeetingsListViewModel: ObservableObject {
             
             // create new meeting entry
             if let start = recordingStartTime {
-                var meeting = Meeting(
+                let meeting = Meeting(
                     timestamp: start,
                     duration: recordingDuration,
                     title: "mixing audio...",

@@ -145,7 +145,7 @@ class DeviceChangeMonitor: ObservableObject {
         guard propertyListenerAdded else { return }
         
         // remove all listeners
-        var addresses = [
+        let addresses = [
             AudioObjectPropertyAddress(
                 mSelector: kAudioHardwarePropertyDefaultInputDevice,
                 mScope: kAudioObjectPropertyScopeGlobal,
@@ -397,7 +397,7 @@ class DeviceChangeMonitor: ObservableObject {
         // cleanup will happen when listeners are removed
         if propertyListenerAdded {
             // remove listeners synchronously
-            var addresses = [
+            let addresses = [
                 AudioObjectPropertyAddress(
                     mSelector: kAudioHardwarePropertyDefaultInputDevice,
                     mScope: kAudioObjectPropertyScopeGlobal,

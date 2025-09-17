@@ -1449,12 +1449,12 @@ extension AudioManager {
                                   0, nil, &propertySize, &deviceIDs)
         
         // find airpods or other preferred device
-        var selectedDeviceID: AudioDeviceID? = nil
+        let _ : AudioDeviceID? = nil
         var airpodsDeviceID: AudioDeviceID? = nil
         
         for deviceID in deviceIDs {
             // check if this is an input device
-            var inputChannels: UInt32 = 0
+            let _ : UInt32 = 0
             propertySize = UInt32(MemoryLayout<UInt32>.size)
             propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration
             propertyAddress.mScope = kAudioDevicePropertyScopeInput
