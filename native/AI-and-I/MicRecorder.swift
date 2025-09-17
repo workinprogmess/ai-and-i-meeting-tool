@@ -72,12 +72,12 @@ class MicRecorder: ObservableObject {
     
     // MARK: - public interface
     
-    /// starts a new recording session
-    func startSession() async {
-        print("🎙️ starting mic recording session")
+    /// starts a new recording session with shared session id
+    func startSession(sharedSessionID: String) async {
+        print("🎙️ starting mic recording session with id: \(sharedSessionID)")
         
-        // initialize session
-        sessionID = UUID().uuidString
+        // use the shared session id
+        sessionID = sharedSessionID
         sessionStartTime = Date()
         sessionReferenceTime = Date().timeIntervalSince1970
         segmentNumber = 0
@@ -224,10 +224,13 @@ class MicRecorder: ObservableObject {
         currentDeviceID = "pending"
         currentDeviceName = "initializing..."
         
-        print("📊 format: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
+        print("📊 input format: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
+        print("📊 target format: \(recordingFormat.sampleRate)hz, \(recordingFormat.channelCount)ch")
+        print("📊 formats equal: \(inputFormat == recordingFormat)")
         
         // assess quality
         currentQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
+        print("📊 assessed quality: \(currentQuality.rawValue) for \(inputFormat.sampleRate)hz")
         
         // configure agc - will be adjusted after we get device name
         agcEnabled = true  // default to enabled
@@ -298,6 +301,8 @@ class MicRecorder: ObservableObject {
                 agcEnabled = false  // airpods have their own processing
                 currentGain = 1.0
                 print("🎧 airpods detected - agc disabled")
+                print("🎧 airpods format: \(inputFormat.sampleRate)hz reported")
+                print("🎧 airpods quality: \(currentQuality.rawValue)")
             } else if currentDeviceName.lowercased().contains("mac") || currentDeviceName.lowercased().contains("built") {
                 agcEnabled = true  // built-in mics need boost
                 currentGain = 2.5
@@ -432,10 +437,20 @@ class MicRecorder: ObservableObject {
         // convert format if needed
         let bufferToWrite: AVAudioPCMBuffer
         if inputFormat != targetFormat {
+            print("🔄 format conversion needed:")
+            print("   input: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
+            print("   target: \(targetFormat.sampleRate)hz, \(targetFormat.channelCount)ch")
+            print("   input frames: \(processedBuffer.frameLength)")
+            
+            // calculate proper output frame capacity for sample rate conversion
+            let sampleRateRatio = targetFormat.sampleRate / inputFormat.sampleRate
+            let outputFrameCapacity = AVAudioFrameCount(Double(processedBuffer.frameLength) * sampleRateRatio)
+            print("   rate ratio: \(sampleRateRatio), output capacity: \(outputFrameCapacity)")
+            
             // need conversion
             guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat),
                   let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat,
-                                                         frameCapacity: processedBuffer.frameLength) else {
+                                                         frameCapacity: outputFrameCapacity) else {
                 print("⚠️ format conversion failed")
                 return
             }
@@ -454,14 +469,21 @@ class MicRecorder: ObservableObject {
             }
             
             bufferToWrite = convertedBuffer
+            print("   converted frames: \(convertedBuffer.frameLength)")
         } else {
             bufferToWrite = processedBuffer
+            print("📊 no conversion needed - formats match")
         }
         
         // write to file
         do {
             try audioFile?.write(from: bufferToWrite)
             framesCaptured += Int(bufferToWrite.frameLength)
+            
+            // log every 10th write to avoid spam
+            if framesCaptured % (48000 * 10) < Int(bufferToWrite.frameLength) {
+                print("📝 written \(framesCaptured) frames (~\(framesCaptured/48000)s at 48khz)")
+            }
         } catch {
             print("❌ write error: \(error)")
             errorMessage = "failed to write audio: \(error.localizedDescription)"

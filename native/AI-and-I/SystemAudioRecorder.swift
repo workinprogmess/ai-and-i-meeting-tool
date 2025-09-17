@@ -57,12 +57,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     
     // MARK: - public interface
     
-    /// starts a new recording session
-    func startSession() async {
-        print("🔊 starting system audio recording session")
+    /// starts a new recording session with shared session id
+    func startSession(sharedSessionID: String) async {
+        print("🔊 starting system audio recording session with id: \(sharedSessionID)")
         
-        // initialize session
-        sessionID = UUID().uuidString
+        // use the shared session id
+        sessionID = sharedSessionID
         sessionStartTime = Date()
         sessionReferenceTime = Date().timeIntervalSince1970
         segmentNumber = 0

@@ -234,13 +234,17 @@ class MeetingsListViewModel: ObservableObject {
             
             // device monitoring is already running from init, no need to restart
             
-            // start both recorders independently
+            // generate shared session id for both recorders
+            let sharedSessionID = UUID().uuidString
+            print("🎬 starting recording with shared session id: \(sharedSessionID)")
+            
+            // start both recorders with same session id
             // CRITICAL: both MUST be awaited to maintain proper async context
             // missing await causes timing issues and robotic audio with AirPods
-            await micRecorder.startSession()
+            await micRecorder.startSession(sharedSessionID: sharedSessionID)
             print("🎙️ mic recorder started: \(micRecorder.isRecording)")
             
-            await systemRecorder.startSession()
+            await systemRecorder.startSession(sharedSessionID: sharedSessionID)
             print("🔊 system recorder started: \(systemRecorder.isRecording)")
             
             print("🎬 segmented recording started")
