@@ -427,7 +427,7 @@ class MeetingsListViewModel: ObservableObject {
                 if process.terminationStatus == 0 {
                     print("✅ converted to mp3: \(mp3URL.lastPathComponent)")
                     // use transcription with individual service updates
-                    await transcribeWithProgress(meeting: meeting, audioURL: mp3URL, sessionDir: sessionDir)
+                    await transcribeWithProgress(meeting: meeting, audioURL: mp3URL, sessionDir: sessionDir, sessionTimestamp: sessionTimestamp)
                 } else {
                     print("❌ mp3 conversion failed")
                     await updateMeetingStatus(meeting, status: "error: mp3 conversion failed")
@@ -448,7 +448,7 @@ class MeetingsListViewModel: ObservableObject {
         }
     }
     
-    private func transcribeWithProgress(meeting: Meeting, audioURL: URL, sessionDir: URL) async {
+    private func transcribeWithProgress(meeting: Meeting, audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
         // create services
         let gemini = GeminiTranscriptionService(apiKey: "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA")
         let deepgram = DeepgramTranscriptionService(apiKey: "ea1942496aa5a53bed2c7f5641fecf0ba1646963")
