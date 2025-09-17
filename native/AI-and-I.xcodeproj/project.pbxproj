@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A1234567890ABCDEF001 /* AI_and_IApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF002 /* AI_and_IApp.swift */; };
-		A1234567890ABCDEF003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF004 /* ContentView.swift */; };
 		A1234567890ABCDEF005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF006 /* Assets.xcassets */; };
 		A1234567890ABCDEF007 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF008 /* Preview Assets.xcassets */; };
 		A1234567890ABCDEF009 /* AI_and_ITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890ABCDEF010 /* AI_and_ITests.swift */; };
@@ -52,7 +51,6 @@
 
 /* Begin PBXFileReference section */
 		A1234567890ABCDEF002 /* AI_and_IApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_IApp.swift; sourceTree = "<group>"; };
-		A1234567890ABCDEF004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1234567890ABCDEF006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1234567890ABCDEF008 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A1234567890ABCDEF010 /* AI_and_ITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_and_ITests.swift; sourceTree = "<group>"; };
@@ -137,7 +135,6 @@
 				BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */,
 				BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */,
 				A1234567890ABCDEF002 /* AI_and_IApp.swift */,
-				A1234567890ABCDEF004 /* ContentView.swift */,
 				A1234567890ABCDEF006 /* Assets.xcassets */,
 				A1234567890ABCDEF020 /* AI-and-I.entitlements */,
 				A1234567890ABCDEF031 /* Preview Content */,
@@ -320,7 +317,6 @@
 				BE95EACE2E736DB8001435A4 /* GeminiTranscriptionService.swift in Sources */,
 				BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */,
 				BEEFFE402E6DD97300A0CF8F /* ScreenCaptureManager.swift in Sources */,
-				A1234567890ABCDEF003 /* ContentView.swift in Sources */,
 				BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */,
 				BE95EAE02E78817E001435A4 /* DesignSystem.swift in Sources */,
 				BE95EAC12E71EB38001435A4 /* DeviceChangeMonitor.swift in Sources */,
