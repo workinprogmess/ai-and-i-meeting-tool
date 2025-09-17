@@ -183,6 +183,12 @@ class MeetingsListViewModel: ObservableObject {
                     )
                     loadedMeetings.append(meeting)
                 } catch {
+                    // skip files with sandbox/authenticator issues silently
+                    let nsError = error as NSError
+                    if nsError.code == 81 || nsError.domain == "NSPOSIXErrorDomain" {
+                        // code 81 = "Need authenticator" - sandbox issue, skip silently
+                        continue
+                    }
                     print("❌ failed to load \(metadataFile.lastPathComponent): \(error)")
                 }
             }
@@ -229,7 +235,9 @@ class MeetingsListViewModel: ObservableObject {
             // device monitoring is already running from init, no need to restart
             
             // start both recorders independently
-            micRecorder.startSession()
+            // CRITICAL: both MUST be awaited to maintain proper async context
+            // missing await causes timing issues and robotic audio with AirPods
+            await micRecorder.startSession()
             print("🎙️ mic recorder started: \(micRecorder.isRecording)")
             
             await systemRecorder.startSession()

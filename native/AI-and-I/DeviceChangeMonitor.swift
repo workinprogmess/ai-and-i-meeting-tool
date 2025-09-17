@@ -182,13 +182,9 @@ class DeviceChangeMonitor: ObservableObject {
         // CRITICAL: Never call Core Audio functions inside a Core Audio callback!
         // Just schedule the work for later to avoid deadlock
         
-        // debounce rapid changes
-        let now = Date()
-        if now.timeIntervalSince(lastChangeTime) < debounceInterval {
-            print("⏱️ debouncing rapid device change")
-            return
-        }
-        lastChangeTime = now
+        // NO DEBOUNCING HERE - let MicRecorder handle it with proper intervals
+        // MicRecorder uses 2.5s for AirPods, which is necessary for them to stabilize
+        // Having debouncing here interferes with that logic
         
         // check what changed and schedule deferred handling
         for i in 0..<Int(count) {

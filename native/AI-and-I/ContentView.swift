@@ -158,7 +158,7 @@ struct ContentView: View {
     private func runMixingScript(timestamp: Int) async {
         // path to the mixing script
         let scriptPath = Bundle.main.path(forResource: "mix-audio", ofType: "swift") 
-            ?? "/Users/workinprogmess/ai-and-i/native/AI-and-I/mix-audio.swift"
+            ?? "/Users/workinprogmess/ai-and-i/native/Scripts/mix-audio.swift"
         
         // run the swift script with the timestamp
         let process = Process()
@@ -219,7 +219,7 @@ struct ContentView: View {
                 
                 Task {
                     // start both recorders independently
-                    micRecorder.startSession()
+                    await micRecorder.startSession()
                     await systemRecorder.startSession()
                     
                     print("🎬 segmented recording started")

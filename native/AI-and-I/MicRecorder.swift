@@ -73,7 +73,7 @@ class MicRecorder: ObservableObject {
     // MARK: - public interface
     
     /// starts a new recording session
-    func startSession() {
+    func startSession() async {
         print("🎙️ starting mic recording session")
         
         // initialize session
