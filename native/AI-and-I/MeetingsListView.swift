@@ -188,55 +188,17 @@ class MeetingsListViewModel: ObservableObject {
             }
         }
         
-        // also check for the legacy transcription-results.json file
-        let resultsPath = sessionsPath.appendingPathComponent("transcription-results.json")
-        if let data = try? Data(contentsOf: resultsPath),
-           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
-           let bestResult = results.first {
-            
-            // only add if we don't already have this meeting (check by timestamp proximity)
-            let resultTime = bestResult.createdAt
-            let isDuplicate = loadedMeetings.contains { meeting in
-                abs(meeting.timestamp.timeIntervalSince(resultTime)) < 60  // within 1 minute
-            }
-            
-            if !isDuplicate {
-                let finalTitle: String
-                if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
-                    finalTitle = aiTitle.lowercased()
-                } else {
-                    let title = bestResult.transcript.segments
-                        .prefix(3)
-                        .map { $0.text }
-                        .joined(separator: " ")
-                        .split(separator: " ")
-                        .prefix(6)
-                        .joined(separator: " ")
-                        .lowercased()
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    finalTitle = title.isEmpty ? "untitled meeting" : title
-                }
-                
-                var allSpeakers = Set<Speaker>()
-                for result in results {
-                    let speakers = Set(result.transcript.segments.map { $0.speaker })
-                    allSpeakers.formUnion(speakers)
-                }
-                
-                let meeting = Meeting(
-                    timestamp: bestResult.createdAt,
-                    duration: bestResult.transcript.duration,
-                    title: finalTitle,
-                    speakerCount: allSpeakers.count,
-                    audioFileURL: sessionsPath.appendingPathComponent("mixed.mp3"),
-                    transcriptAvailable: true
-                )
-                loadedMeetings.append(meeting)
-            }
+        // no longer load from legacy transcription-results.json since it gets overwritten
+        // all meetings are now loaded from session-specific metadata files above
+        
+        // remove duplicates (in case a meeting was added during recording)
+        var uniqueMeetings: [Date: Meeting] = [:]
+        for meeting in loadedMeetings {
+            uniqueMeetings[meeting.timestamp] = meeting
         }
         
         // sort by most recent first
-        meetings = loadedMeetings.sorted { $0.timestamp > $1.timestamp }
+        meetings = uniqueMeetings.values.sorted { $0.timestamp > $1.timestamp }
     }
     
     func startNewMeeting() {
@@ -523,13 +485,7 @@ class MeetingsListViewModel: ObservableObject {
                 print("💾 saved \(results.count) transcription results to \(sessionSpecificPath.lastPathComponent)")
             }
             
-            // also keep a copy as transcription-results.json for backwards compatibility
-            // but this will be overwritten (legacy behavior)
-            let legacyPath = sessionDir.appendingPathComponent("transcription-results.json")
-            if let data = try? JSONEncoder().encode(results) {
-                try? data.write(to: legacyPath)
-                print("📝 also saved to legacy transcription-results.json (will be overwritten)")
-            }
+            // no longer saving to legacy transcription-results.json to prevent overwrites
             
             // reload to show completed transcript
             await MainActor.run {
