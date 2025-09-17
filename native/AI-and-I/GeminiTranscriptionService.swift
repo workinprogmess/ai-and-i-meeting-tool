@@ -283,8 +283,11 @@ class GeminiTranscriptionService: TranscriptionService {
 extension GeminiTranscriptionService {
     /// create service from environment or stored api key
     static func createFromEnvironment(userDictionary: UserDictionary = UserDictionary()) -> GeminiTranscriptionService? {
-        // hardcoded for now, will move to secure storage
-        let apiKey = "AIzaSyD2nK_WzdVoXvxVbnu9lMhm2dO6MZ5P-FA"
+        let environment = ProcessInfo.processInfo.environment
+        let rawKey = environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let apiKey = rawKey, !apiKey.isEmpty else {
+            return nil
+        }
         
         return GeminiTranscriptionService(apiKey: apiKey, userDictionary: userDictionary)
     }
