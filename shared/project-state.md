@@ -208,9 +208,50 @@ private func shouldSwitchToNewDevice() -> Bool {
 - perfect timestamp alignment achieved
 - acoustic bleed identified (speakers → mic) - normal for speaker playback
 
-## critical lessons learned (2025-09-15)
+## critical fixes and improvements (2025-09-17)
 
-### audio mixing issues
+### airpods audio quality fixes
+- **problem**: glitchy "chee chee choo choo" sounds in mic recordings
+  - symptom: choppy, robotic-sounding mic audio with airpods
+  - cause: conflicting debounce timers between devicechangemonitor and micrecorder
+  - fix: removed debounce timer from devicechangemonitor, let micrecorder handle all timing
+  - result: airpods get full 2.5s to stabilize, eliminating audio artifacts
+
+- **problem**: robotic system audio during recording with airpods
+  - symptom: distorted, ghostly voice in system audio when airpods connected
+  - cause: missing await on micrecorder.startsession() breaking async context
+  - fix: added await to maintain proper async flow
+  - result: clean system audio capture with airpods
+
+### data protection and recovery systems
+- **problem**: meeting data loss from legacy file overwriting
+  - symptom: 18.4s meeting lost when overwritten by new recording
+  - cause: legacy transcription-results.json being reused for each session
+  - fix: removed all legacy file operations, use only session-specific files
+  - implemented: comprehensive backup/recovery system (backup-meetings.swift, restore-meetings.swift)
+  - result: guaranteed data preservation with timestamped backups
+
+- **problem**: meeting duplication in ui
+  - symptom: same meeting appearing twice in list
+  - cause: loading both legacy and session-specific files
+  - fix: deduplication using timestamp-based dictionary
+  - result: each meeting appears exactly once
+
+### macos sandbox restrictions
+- **problem**: "need authenticator" errors in console
+  - symptom: error code 81 when loading files modified outside app sandbox
+  - cause: cli scripts creating files without proper extended attributes
+  - fix: added error handling to skip problematic files, archived files causing issues
+  - learning: files created by cli tools get different sandbox treatment than app-created files
+
+### build and project organization
+- **problem**: cli scripts causing xcode build errors
+  - symptom: "expressions not allowed at top level" errors
+  - cause: swift scripts being compiled as part of app target
+  - fix: moved scripts to scripts/ folder outside app target
+  - result: clean builds with scripts available for manual execution
+
+## critical lessons learned (2025-09-15)
 - **problem**: segments treated as overlapping instead of sequential
   - symptom: 5:52 recording became 14:04 mixed file
   - cause: using adelay filters with amix assuming all segments start from time 0
@@ -253,17 +294,20 @@ private func shouldSwitchToNewDevice() -> Bool {
 - all services struggle with hindi/hinglish mixing
 - speaker attribution needs improvement across all
 
-## current app status (2025-09-16) - subject to testing
+## current app status (2025-09-17) - ready for testing
 
 ### what's working
 - complete recording → mixing → transcription → ui workflow
-- airpods switching during recording (with 2.5s stabilization)
+- airpods switching during recording (fixed debouncing conflicts)
+- airpods audio quality (no more glitchy sounds or robotic voices)
 - parallel transcription with all three services
 - japanese-inspired minimal ui with neue.tokyo colors
 - ai-generated meeting titles (gemini only for now)
 - user corrections system with persistent dictionary
 - perfect audio mixing with ffmpeg (sequential segments)
 - mp3 compression (10x smaller than wav)
+- data protection with backup/recovery system
+- deduplication preventing duplicate meetings in ui
 
 ### ui refinements completed
 - japanese color palette (shironeri, soshoku, nyuhakushoku)
@@ -275,12 +319,18 @@ private func shouldSwitchToNewDevice() -> Bool {
 - enlarged meeting titles for better hierarchy
 - removed redundant pricing from metadata
 
+### fixes completed (september 17)
+- airpods audio quality issues resolved
+- async/await timing fixed for proper recording
+- meeting duplication eliminated
+- sandbox errors handled gracefully
+- build errors from cli scripts fixed
+
 ### known limitations
 - copy button works, other action buttons placeholder
 - meeting duration calculation needs verification  
 - transcription quality varies with mixed languages
 - speaker attribution could be more accurate
-- -10877 core audio errors persist but don't break functionality
 
 ### next priorities
 1. improve transcription prompts for better accuracy
