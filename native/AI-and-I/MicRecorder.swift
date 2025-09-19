@@ -54,6 +54,10 @@ class MicRecorder: ObservableObject {
     private var currentDeviceID: String = ""
     private var framesCaptured: Int = 0
     private var hasLoggedFormatMatch = false
+    private var lastConversionLogTime = Date.distantPast
+    private var telephonyRetryCount = 0
+    private let maxTelephonyRetries = 3
+    private var currentSampleRate: Double = 48000
     
     // MARK: - warmup management
     private var isWarmedUp = false
@@ -204,6 +208,7 @@ class MicRecorder: ObservableObject {
     private func startNewSegmentInternal() {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         hasLoggedFormatMatch = false
+        lastConversionLogTime = Date.distantPast
         
         // skip device ID check - it can block during transitions
         // we'll get the device info after engine is created
@@ -229,7 +234,8 @@ class MicRecorder: ObservableObject {
         currentDeviceID = "pending"
         currentDeviceName = "initializing..."
         
-        print("📊 input format: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
+        let negotiatedSampleRate = inputFormat.sampleRate
+        print("📊 input format: \(negotiatedSampleRate)hz, \(inputFormat.channelCount)ch")
         print("📊 target format: \(recordingFormat.sampleRate)hz, \(recordingFormat.channelCount)ch")
         print("📊 formats equal: \(inputFormat == recordingFormat)")
         
@@ -237,6 +243,29 @@ class MicRecorder: ObservableObject {
         currentQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
         print("📊 assessed quality: \(currentQuality.rawValue) for \(inputFormat.sampleRate)hz")
         
+        // detect telephony mode (sub-44k sample rates) and retry to obtain full bandwidth
+        if negotiatedSampleRate < 44100 {
+            telephonyRetryCount += 1
+            print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (attempt \(telephonyRetryCount)/\(maxTelephonyRetries))")
+            audioEngine = nil
+
+            if telephonyRetryCount <= maxTelephonyRetries {
+                controllerQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                    Task { @MainActor in
+                        self?.startNewSegmentInternal()
+                    }
+                }
+                return
+            } else {
+                print("⚠️ continuing with telephony sample rate after max retries")
+                telephonyRetryCount = 0
+            }
+        } else {
+            telephonyRetryCount = 0
+        }
+
+        currentSampleRate = negotiatedSampleRate
+
         // configure agc - will be adjusted after we get device name
         agcEnabled = true  // default to enabled
         currentGain = 2.5
@@ -315,6 +344,8 @@ class MicRecorder: ObservableObject {
             }
             
             print("✅ mic segment #\(segmentNumber) started - recording with \(currentDeviceName)")
+            let runningFormat = inputNode.outputFormat(forBus: 0)
+            print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
         } catch {
             let nsError = error as NSError
             if nsError.code == -10851 {
@@ -471,7 +502,11 @@ class MicRecorder: ObservableObject {
             }
             
             bufferToWrite = convertedBuffer
-            print("   converted frames: \(convertedBuffer.frameLength)")
+            let now = Date()
+            if now.timeIntervalSince(lastConversionLogTime) > 2 {
+                print("   converted frames: \(convertedBuffer.frameLength) (telephony input \(inputFormat.sampleRate)hz → 48khz)")
+                lastConversionLogTime = now
+            }
         } else {
             bufferToWrite = processedBuffer
             if !hasLoggedFormatMatch {
