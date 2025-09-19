@@ -34,6 +34,9 @@ struct RecordingSessionMetadata: Codable {
 
 // MARK: - Main Script
 
+let arguments = CommandLine.arguments.dropFirst()
+let targetTimestampArgument = arguments.first
+
 let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
 
@@ -61,16 +64,39 @@ if metadataFiles.isEmpty {
     exit(1)
 }
 
-print("📁 found \(metadataFiles.count) metadata file(s)\n")
+func metadataFile(for timestamp: String, from files: [URL]) -> URL? {
+    let preferredSuffixes = ["_metadata.json", "_mic_metadata.json", "_system_metadata.json"]
+    for suffix in preferredSuffixes {
+        let expectedName = "session_\(timestamp)\(suffix)"
+        if let match = files.first(where: { $0.lastPathComponent == expectedName }) {
+            return match
+        }
+    }
+    return files.first(where: { $0.lastPathComponent.contains("session_\(timestamp)") })
+}
 
-// process most recent session
-if let latestMetadata = metadataFiles.first {
-    print("📄 processing: \(latestMetadata.lastPathComponent)")
-    print("-" * 40)
-    
-    // load and parse metadata
-    do {
-        let data = try Data(contentsOf: latestMetadata)
+let selectedMetadata: URL
+if let target = targetTimestampArgument {
+    guard let match = metadataFile(for: target, from: metadataFiles) else {
+        print("❌ no metadata found for session \(target)")
+        exit(1)
+    }
+    selectedMetadata = match
+    print("📁 found \(metadataFiles.count) metadata file(s)")
+    print("🎯 targeting session \(target)\n")
+} else {
+    selectedMetadata = metadataFiles.first!
+    print("📁 found \(metadataFiles.count) metadata file(s)\n")
+}
+
+// process selected session
+let targetDescription = targetTimestampArgument ?? "latest"
+print("📄 processing: \(selectedMetadata.lastPathComponent) (requested: \(targetDescription))")
+print("-" * 40)
+
+// load and parse metadata
+do {
+        let data = try Data(contentsOf: selectedMetadata)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         
@@ -80,12 +106,16 @@ if let latestMetadata = metadataFiles.first {
         var sessionTimestamp: String = ""
         
         // extract timestamp from filename
-        let filename = latestMetadata.lastPathComponent
+        let filename = selectedMetadata.lastPathComponent
         if filename.contains("session_") {
             let components = filename.split(separator: "_")
             if components.count >= 2 {
                 sessionTimestamp = String(components[1])
             }
+        }
+
+        if let target = targetTimestampArgument {
+            sessionTimestamp = target
         }
         
         // check if it's a mic or system metadata file
@@ -293,7 +323,7 @@ if let latestMetadata = metadataFiles.first {
             
             // actually execute the ffmpeg command
             print("\n🚀 executing ffmpeg command...")
-            let recordingsPath = NSString(string: "~/Documents/ai&i-recordings").expandingTildeInPath
+            let recordingsPath = recordingsFolder.path
             let result = executeFFmpegMixing(
                 micSegments: micSegments,
                 systemSegments: systemSegments,
@@ -317,7 +347,7 @@ if let latestMetadata = metadataFiles.first {
         print("❌ error reading metadata: \(error)")
         
         // try simple JSON parsing as fallback
-        if let data = try? Data(contentsOf: latestMetadata),
+        if let data = try? Data(contentsOf: selectedMetadata),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             print("\n📋 falling back to simple JSON parsing...")
             
