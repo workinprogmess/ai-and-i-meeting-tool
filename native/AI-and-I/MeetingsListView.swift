@@ -60,6 +60,7 @@ class MeetingsListViewModel: ObservableObject {
     let deviceMonitor = DeviceChangeMonitor()
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
+    private var processingMeetingID: UUID?
     
     init() {
         loadMeetings()
@@ -268,58 +269,55 @@ class MeetingsListViewModel: ObservableObject {
             
             // reload meetings to show the new recording
             loadMeetings()
-            
+
+            // capture the current meeting for status updates
+            if let start = recordingStartTime {
+                processingMeetingID = meetings.first { abs($0.timestamp.timeIntervalSince(start)) < 1 }?.id
+                if let processingMeetingID,
+                   let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) {
+                    meetings[index].title = "mixing audio..."
+                    meetings[index].processingStatus = "mixing audio segments"
+                } else {
+                    print("⚠️ unable to locate meeting entry for live status updates")
+                }
+            }
+
             // get the session timestamp for mixing
             let sessionTimestamp = micRecorder.currentSessionTimestamp
-            
-            // run the mixing script
-            print("🎵 starting audio mixing for session \(sessionTimestamp)")
-            if sessionTimestamp > 0 {
-                await runMixingScript(timestamp: sessionTimestamp)
-            } else {
+
+            guard sessionTimestamp > 0 else {
                 print("❌ no valid session timestamp - recording may have failed")
+                if let processingMeetingID,
+                   let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) {
+                    meetings[index].processingStatus = "error: no session timestamp"
+                }
+                processingMeetingID = nil
+                return
             }
-            
-            // create new meeting entry
-            if let start = recordingStartTime {
-                let meeting = Meeting(
-                    timestamp: start,
-                    duration: recordingDuration,
-                    title: "mixing audio...",
-                    speakerCount: 0,
-                    audioFileURL: nil,
-                    transcriptAvailable: false,
-                    processingStatus: "mixing audio segments"
-                )
-                await MainActor.run {
-                    meetings.insert(meeting, at: 0)
-                }
-                
-                // wait for mixing to complete, then transcribe
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                
-                // update status
-                await MainActor.run {
-                    if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
-                        meetings[index].title = "transcribing..."
-                        meetings[index].processingStatus = "starting transcription"
-                    }
-                }
-                
-                await processRecording(for: meeting, sessionTimestamp: sessionTimestamp)
+
+            print("🎵 starting audio mixing for session \(sessionTimestamp)")
+            let mixingSucceeded = await runMixingScript(timestamp: sessionTimestamp)
+
+            if mixingSucceeded {
+                updateProcessingTitle("transcribing...")
+                updateProcessingStatus("starting transcription")
+                await processRecording(sessionTimestamp: sessionTimestamp)
+            } else {
+                updateProcessingStatus("error: mixing failed")
             }
         }
     }
-    
-    private func runMixingScript(timestamp: Int) async {
-        // path to the mixing script
-        let scriptPath = "/Users/workinprogmess/ai-and-i/native/AI-and-I/mix-audio.swift"
-        
-        // run the swift script with the timestamp
+
+    private func runMixingScript(timestamp: Int) async -> Bool {
+        guard let scriptURL = resolveMixingScriptURL() else {
+            print("❌ mixing script not found")
+            return false
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
-        process.arguments = [scriptPath, String(timestamp)]
-        
+        process.arguments = [scriptURL.path, String(timestamp)]
+
         // capture output
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -334,23 +332,26 @@ class MeetingsListViewModel: ObservableObject {
             if let output = String(data: data, encoding: .utf8) {
                 print("mixing output:\n\(output)")
             }
-            
+
             if process.terminationStatus == 0 {
                 print("✅ audio mixing completed successfully")
+                return true
             } else {
                 print("❌ mixing failed with status: \(process.terminationStatus)")
             }
         } catch {
             print("❌ failed to run mixing script: \(error)")
         }
+
+        return false
     }
-    
+
     @MainActor
-    private func processRecording(for meeting: Meeting, sessionTimestamp: Int) async {
+    private func processRecording(sessionTimestamp: Int) async {
         // get the recordings directory (where files are actually saved)
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let recordingsPath = documentsPath.appendingPathComponent("ai&i-recordings")
-        
+
         // for now, all files are in the root recordings folder, not in session subdirectories
         let sessionDir = recordingsPath
         
@@ -370,15 +371,15 @@ class MeetingsListViewModel: ObservableObject {
         // run transcription
         if FileManager.default.fileExists(atPath: mixedPath.path) {
             // convert to mp3 first (required for transcription services!)
-            await updateMeetingStatus(meeting, status: "converting to mp3...")
-            
+            updateProcessingStatus("converting to mp3...")
+
             let mp3URL = mixedPath.deletingPathExtension().appendingPathExtension("mp3")
-            
+
             // find ffmpeg (check both Apple Silicon and Intel paths)
             let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
             guard let ffmpegPath = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
                 print("❌ ffmpeg not found")
-                await updateMeetingStatus(meeting, status: "error: ffmpeg not installed")
+                updateProcessingStatus("error: ffmpeg not installed")
                 return
             }
             
@@ -401,28 +402,23 @@ class MeetingsListViewModel: ObservableObject {
                 if process.terminationStatus == 0 {
                     print("✅ converted to mp3: \(mp3URL.lastPathComponent)")
                     // use transcription with individual service updates
-                    await transcribeWithProgress(meeting: meeting, audioURL: mp3URL, sessionDir: sessionDir, sessionTimestamp: sessionTimestamp)
+                    await transcribeWithProgress(audioURL: mp3URL, sessionDir: sessionDir, sessionTimestamp: sessionTimestamp)
                 } else {
                     print("❌ mp3 conversion failed")
-                    await updateMeetingStatus(meeting, status: "error: mp3 conversion failed")
+                    updateProcessingStatus("error: mp3 conversion failed")
                 }
             } catch {
                 print("❌ failed to convert to mp3: \(error)")
-                await updateMeetingStatus(meeting, status: "error: mp3 conversion failed")
+                updateProcessingStatus("error: mp3 conversion failed")
             }
         } else {
-            await updateMeetingStatus(meeting, status: "error: no mixed audio")
+            updateProcessingStatus("error: no mixed audio")
         }
+
+        processingMeetingID = nil
     }
-    
-    @MainActor
-    private func updateMeetingStatus(_ meeting: Meeting, status: String) async {
-        if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
-            meetings[index].processingStatus = status
-        }
-    }
-    
-    private func transcribeWithProgress(meeting: Meeting, audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
+
+    private func transcribeWithProgress(audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
         // create services
         let serviceFactories: [(name: String, loader: () -> TranscriptionService?)] = [
             ("gemini", { GeminiTranscriptionService.createFromEnvironment() }),
@@ -440,25 +436,28 @@ class MeetingsListViewModel: ObservableObject {
                 unavailableServices.append(entry.name)
             }
         }
-        
+
         if !unavailableServices.isEmpty {
             let missingList = unavailableServices.joined(separator: ", ")
-            await updateMeetingStatus(meeting, status: "missing keys for \(missingList)")
+            await MainActor.run {
+                self.updateProcessingStatus("missing keys for \(missingList)")
+            }
         }
-        
+
         guard !configuredServices.isEmpty else {
-            await updateMeetingStatus(meeting, status: "no transcription services configured")
+            await MainActor.run {
+                self.updateProcessingStatus("no transcription services configured")
+            }
             return
         }
-        
-        await updateMeetingStatus(
-            meeting,
-            status: "transcribing with \(configuredServices.map { $0.name }.joined(separator: ", "))"
-        )
-        
+
+        await MainActor.run {
+            self.updateProcessingStatus("transcribing with \(configuredServices.map { $0.name }.joined(separator: ", "))")
+        }
+
         var results: [TranscriptionResult] = []
         var completedServices: [String] = []
-        
+
         await withTaskGroup(of: (String, TranscriptionResult?).self) { group in
             for entry in configuredServices {
                 group.addTask {
@@ -477,20 +476,24 @@ class MeetingsListViewModel: ObservableObject {
                 if let result = result {
                     results.append(result)
                     completedServices.append(service)
-                    
+
                     let statusText = completedServices.joined(separator: ", ") + " done"
                     let remainingCount = configuredServices.count - completedServices.count
                     let finalStatus = remainingCount > 0
                         ? "\(statusText), waiting for \(remainingCount) more..."
                         : "all services complete!"
-                    
-                    await updateMeetingStatus(meeting, status: finalStatus)
+
+                    await MainActor.run {
+                        self.updateProcessingStatus(finalStatus)
+                    }
                 } else {
-                    await updateMeetingStatus(meeting, status: "\(service) failed, continuing...")
+                    await MainActor.run {
+                        self.updateProcessingStatus("\(service) failed, continuing...")
+                    }
                 }
             }
         }
-        
+
         // save results with session-specific filename to prevent data loss
         if !results.isEmpty {
             // save with session timestamp to prevent overwriting
@@ -508,8 +511,57 @@ class MeetingsListViewModel: ObservableObject {
             }
         } else {
             print("❌ all transcription services failed!")
-            await updateMeetingStatus(meeting, status: "transcription failed - check console")
+            await MainActor.run {
+                self.updateProcessingStatus("transcription failed - check console")
+            }
         }
+
+        await MainActor.run {
+            self.processingMeetingID = nil
+        }
+    }
+
+    private func resolveMixingScriptURL() -> URL? {
+        let fileManager = FileManager.default
+        let env = ProcessInfo.processInfo.environment
+
+        if let envPath = env["AI_AND_I_MIX_SCRIPT"], !envPath.isEmpty {
+            let candidate = URL(fileURLWithPath: envPath)
+            if fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        let homeScript = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("ai-and-i/native/Scripts/mix-audio.swift")
+        if fileManager.fileExists(atPath: homeScript.path) {
+            return homeScript
+        }
+
+        let currentDirectoryScript = URL(fileURLWithPath: fileManager.currentDirectoryPath)
+            .appendingPathComponent("native/Scripts/mix-audio.swift")
+        if fileManager.fileExists(atPath: currentDirectoryScript.path) {
+            return currentDirectoryScript
+        }
+
+        if let bundleScript = Bundle.main.url(forResource: "mix-audio", withExtension: "swift"),
+           fileManager.fileExists(atPath: bundleScript.path) {
+            return bundleScript
+        }
+
+        return nil
+    }
+
+    private func updateProcessingStatus(_ status: String) {
+        guard let processingMeetingID,
+              let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) else { return }
+        meetings[index].processingStatus = status
+    }
+
+    private func updateProcessingTitle(_ title: String) {
+        guard let processingMeetingID,
+              let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) else { return }
+        meetings[index].title = title
     }
     
     var filteredMeetings: [Meeting] {
