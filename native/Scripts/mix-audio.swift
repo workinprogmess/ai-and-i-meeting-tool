@@ -96,7 +96,6 @@ print("-" * 40)
 
 // load and parse metadata
 do {
-        let data = try Data(contentsOf: selectedMetadata)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         
@@ -119,42 +118,21 @@ do {
         }
         
         // check if it's a mic or system metadata file
-        if filename.contains("_metadata.json") {
-            // combined metadata file
-            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
-            micSegments = metadata.micSegments
-            systemSegments = metadata.systemSegments
-        } else if filename.contains("_mic_metadata.json") {
-            // mic-only metadata
-            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
-            micSegments = metadata.micSegments
-        } else if filename.contains("_system_metadata.json") {
-            // system-only metadata
-            let metadata = try decoder.decode(RecordingSessionMetadata.self, from: data)
-            systemSegments = metadata.systemSegments
+        // load microphone metadata from the core session file
+        let micMetadataURL = recordingsFolder.appendingPathComponent("session_\(sessionTimestamp)_metadata.json")
+        if let micData = try? Data(contentsOf: micMetadataURL) {
+            let micMetadata = try decoder.decode(RecordingSessionMetadata.self, from: micData)
+            micSegments = micMetadata.micSegments
         }
-        
-        // also look for the companion metadata file
-        let companionName: String
-        if filename.contains("_mic_metadata.json") {
-            companionName = filename.replacingOccurrences(of: "_mic_metadata", with: "_system_metadata")
-        } else if filename.contains("_system_metadata.json") {
-            companionName = filename.replacingOccurrences(of: "_system_metadata", with: "_metadata")
+
+        // load system metadata from the dedicated file
+        let systemMetadataURL = recordingsFolder.appendingPathComponent("session_\(sessionTimestamp)_system_metadata.json")
+        if let systemData = try? Data(contentsOf: systemMetadataURL) {
+            let systemMetadata = try decoder.decode(RecordingSessionMetadata.self, from: systemData)
+            systemSegments = systemMetadata.systemSegments
+            print("📄 also loaded: session_\(sessionTimestamp)_system_metadata.json")
         } else {
-            companionName = ""
-        }
-        
-        if !companionName.isEmpty {
-            let companionURL = recordingsFolder.appendingPathComponent(companionName)
-            if let companionData = try? Data(contentsOf: companionURL) {
-                let companionMetadata = try decoder.decode(RecordingSessionMetadata.self, from: companionData)
-                if filename.contains("_mic_metadata.json") {
-                    systemSegments = companionMetadata.systemSegments
-                } else {
-                    micSegments = companionMetadata.micSegments
-                }
-                print("📄 also loaded: \(companionName)")
-            }
+            print("⚠️ system metadata not found for session \(sessionTimestamp)")
         }
         
         // analyze segments
