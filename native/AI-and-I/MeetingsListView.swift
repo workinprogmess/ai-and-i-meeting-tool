@@ -221,7 +221,7 @@ class MeetingsListViewModel: ObservableObject {
                 guard let self = self else { return }
                 if let start = self.recordingStartTime {
                     let duration = Date().timeIntervalSince(start)
-                    print("⏱️ timer update: \(duration)s")
+                    self.logTimerUpdateIfNeeded(duration)
                     self.recordingDuration = duration
                 }
             }
@@ -250,6 +250,15 @@ class MeetingsListViewModel: ObservableObject {
             
             print("🎬 segmented recording started")
         }
+    }
+
+    private var lastLoggedSeconds: Int = -1
+
+    private func logTimerUpdateIfNeeded(_ duration: TimeInterval) {
+        let seconds = Int(duration)
+        guard seconds != lastLoggedSeconds, seconds % 15 == 0 else { return }
+        lastLoggedSeconds = seconds
+        print("⏱️ timer update: \(duration)s")
     }
     
     func endMeeting() {
