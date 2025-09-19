@@ -267,6 +267,9 @@ class DeviceChangeMonitor: ObservableObject {
         if newDevice != currentInputDevice {
             print("🎤 switched from '\(currentInputDevice)' to '\(newDevice)'")
             currentInputDevice = newDevice
+            if let rate = getCurrentInputSampleRate() {
+                print("🎚️ current input sample rate: \(Int(rate))hz")
+            }
             
             // notify mic recorder
             onMicDeviceChange?(reason)
@@ -301,8 +304,12 @@ class DeviceChangeMonitor: ObservableObject {
     private func updateCurrentDevices() {
         currentInputDevice = getCurrentInputDeviceName()
         currentOutputDevice = getCurrentOutputDeviceName()
-        
-        print("📱 current devices - input: \(currentInputDevice), output: \(currentOutputDevice)")
+
+        if let rate = getCurrentInputSampleRate() {
+            print("📱 current devices - input: \(currentInputDevice) (\(Int(rate))hz), output: \(currentOutputDevice)")
+        } else {
+            print("📱 current devices - input: \(currentInputDevice), output: \(currentOutputDevice)")
+        }
     }
     
     private func getCurrentInputDeviceName() -> String {
@@ -384,8 +391,48 @@ class DeviceChangeMonitor: ObservableObject {
         if result == noErr {
             return name as String
         }
-        
+
         return nil
+    }
+
+    private func getCurrentInputSampleRate() -> Double? {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let result = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+
+        guard result == noErr, deviceID != 0 else { return nil }
+
+        var sampleRate = Double(0)
+        size = UInt32(MemoryLayout<Double>.size)
+        address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: 0
+        )
+
+        let rateResult = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &size,
+            &sampleRate
+        )
+
+        return rateResult == noErr ? sampleRate : nil
     }
     
     deinit {
