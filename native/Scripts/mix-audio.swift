@@ -364,7 +364,6 @@ do {
             }
         }
     }
-}
 
 print("\n" + "=" * 60)
 print("💡 tip: run this script after recording with device switches")
