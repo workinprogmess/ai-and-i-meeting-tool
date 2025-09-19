@@ -53,6 +53,7 @@ class MicRecorder: ObservableObject {
     private var segmentFilePath: String = ""
     private var currentDeviceID: String = ""
     private var framesCaptured: Int = 0
+    private var hasLoggedFormatMatch = false
     
     // MARK: - warmup management
     private var isWarmedUp = false
@@ -202,6 +203,7 @@ class MicRecorder: ObservableObject {
     /// internal segment start (must be on controller queue)
     private func startNewSegmentInternal() {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
+        hasLoggedFormatMatch = false
         
         // skip device ID check - it can block during transitions
         // we'll get the device info after engine is created
@@ -472,7 +474,10 @@ class MicRecorder: ObservableObject {
             print("   converted frames: \(convertedBuffer.frameLength)")
         } else {
             bufferToWrite = processedBuffer
-            print("📊 no conversion needed - formats match")
+            if !hasLoggedFormatMatch {
+                print("📊 no conversion needed - formats match")
+                hasLoggedFormatMatch = true
+            }
         }
         
         // write to file
