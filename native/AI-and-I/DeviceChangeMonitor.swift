@@ -419,7 +419,7 @@ class DeviceChangeMonitor: ObservableObject {
         size = UInt32(MemoryLayout<Double>.size)
         address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioDevicePropertyScopeInput,
+            mScope: kAudioObjectPropertyScopeInput,
             mElement: 0
         )
 
