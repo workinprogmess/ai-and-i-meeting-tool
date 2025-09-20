@@ -79,6 +79,7 @@ struct TranscriptDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         #endif
         .onAppear {
+            selectedServiceIndex = 0
             viewModel.loadTranscript(for: meeting)
         }
         .sheet(isPresented: $showingCorrection) {
@@ -350,33 +351,31 @@ class TranscriptDetailViewModel: ObservableObject {
     @Published var cost: Double?
     
     func loadTranscript(for meeting: Meeting) {
-        // load from saved transcript files
-        guard let audioURL = meeting.audioFileURL else { return }
-        
-        // get session directory from audio path
-        let sessionDir = audioURL.deletingLastPathComponent()
-        let resultsPath = sessionDir.appendingPathComponent("transcription-results.json")
-        
-        // load ALL transcription results for comparison
-        if let data = try? Data(contentsOf: resultsPath),
-           let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data) {
-            
-            // store all results
-            allResults = results
-            
-            // start with first service's segments
-            if let firstResult = results.first {
-                segments = firstResult.transcript.segments
-                cost = firstResult.cost
-                serviceName = firstResult.service
-            }
+        let sessionDirectory: URL
+        if let audioURL = meeting.audioFileURL {
+            sessionDirectory = audioURL.deletingLastPathComponent()
         } else {
-            // fallback to empty
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            sessionDirectory = documentsPath.appendingPathComponent("ai&i-recordings")
+        }
+
+        let resultsPath = sessionDirectory.appendingPathComponent("session_\(meeting.sessionID)_transcripts.json")
+
+        guard let data = try? Data(contentsOf: resultsPath),
+              let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
+              !results.isEmpty else {
             allResults = []
             segments = []
             cost = nil
             serviceName = "unknown"
+            return
         }
+
+        allResults = results
+        let firstResult = results[0]
+        segments = firstResult.transcript.segments
+        cost = firstResult.cost
+        serviceName = firstResult.service
     }
     
     func selectService(at index: Int) {
@@ -431,6 +430,8 @@ extension TranscriptSegment {
         title: "team standup",
         speakerCount: 3,
         audioFileURL: nil,
-        transcriptAvailable: true
+        transcriptAvailable: true,
+        processingStatus: nil,
+        sessionID: "preview"
     ))
 }
