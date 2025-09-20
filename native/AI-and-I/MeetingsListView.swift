@@ -15,9 +15,10 @@ struct Meeting: Identifiable, Codable, Hashable {
     let duration: TimeInterval
     var title: String  // changed to var for updating
     let speakerCount: Int
-    let audioFileURL: URL?
+    var audioFileURL: URL?
     var transcriptAvailable: Bool  // changed to var
     var processingStatus: String?  // "gemini done, waiting for deepgram..."
+    let sessionID: String
     
     // computed properties
     var formattedDuration: String {
@@ -61,6 +62,7 @@ class MeetingsListViewModel: ObservableObject {
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
     private var processingMeetingID: UUID?
+    private var processingSessionID: String?
     
     init() {
         loadMeetings()
@@ -180,7 +182,9 @@ class MeetingsListViewModel: ObservableObject {
                         title: title,
                         speakerCount: metadata.micSegments.isEmpty ? 0 : 1,
                         audioFileURL: audioURL,
-                        transcriptAvailable: hasTranscript
+                        transcriptAvailable: hasTranscript,
+                        processingStatus: nil,
+                        sessionID: sessionTimestamp
                     )
                     loadedMeetings.append(meeting)
                 } catch {
@@ -301,8 +305,11 @@ class MeetingsListViewModel: ObservableObject {
                     meetings[index].processingStatus = "error: no session timestamp"
                 }
                 processingMeetingID = nil
+                processingSessionID = nil
                 return
             }
+
+            processingSessionID = String(sessionTimestamp)
 
             print("🎵 starting audio mixing for session \(sessionTimestamp)")
             let mixingSucceeded = await runMixingScript(timestamp: sessionTimestamp)
@@ -313,6 +320,7 @@ class MeetingsListViewModel: ObservableObject {
                 await processRecording(sessionTimestamp: sessionTimestamp)
             } else {
                 updateProcessingStatus("error: mixing failed")
+                processingSessionID = nil
             }
         }
     }
@@ -379,6 +387,7 @@ class MeetingsListViewModel: ObservableObject {
         
         // run transcription
         if FileManager.default.fileExists(atPath: mixedPath.path) {
+            updateProcessingAudioURL(mixedPath)
             // convert to mp3 first (required for transcription services!)
             updateProcessingStatus("converting to mp3...")
 
@@ -410,6 +419,7 @@ class MeetingsListViewModel: ObservableObject {
                 
                 if process.terminationStatus == 0 {
                     print("✅ converted to mp3: \(mp3URL.lastPathComponent)")
+                    updateProcessingAudioURL(mp3URL)
                     // use transcription with individual service updates
                     await transcribeWithProgress(audioURL: mp3URL, sessionDir: sessionDir, sessionTimestamp: sessionTimestamp)
                 } else {
@@ -516,6 +526,7 @@ class MeetingsListViewModel: ObservableObject {
             
             // reload to show completed transcript
             await MainActor.run {
+                self.markProcessingTranscriptAvailable()
                 loadMeetings()
             }
         } else {
@@ -527,6 +538,7 @@ class MeetingsListViewModel: ObservableObject {
 
         await MainActor.run {
             self.processingMeetingID = nil
+            self.processingSessionID = nil
         }
     }
 
@@ -562,15 +574,35 @@ class MeetingsListViewModel: ObservableObject {
     }
 
     private func updateProcessingStatus(_ status: String) {
-        guard let processingMeetingID,
-              let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) else { return }
+        guard let index = processingMeetingIndex() else { return }
         meetings[index].processingStatus = status
     }
 
     private func updateProcessingTitle(_ title: String) {
-        guard let processingMeetingID,
-              let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) else { return }
+        guard let index = processingMeetingIndex() else { return }
         meetings[index].title = title
+    }
+
+    private func updateProcessingAudioURL(_ url: URL?) {
+        guard let index = processingMeetingIndex() else { return }
+        meetings[index].audioFileURL = url
+    }
+
+    private func markProcessingTranscriptAvailable() {
+        guard let index = processingMeetingIndex() else { return }
+        meetings[index].transcriptAvailable = true
+    }
+
+    private func processingMeetingIndex() -> Int? {
+        if let processingMeetingID,
+           let index = meetings.firstIndex(where: { $0.id == processingMeetingID }) {
+            return index
+        }
+        if let processingSessionID,
+           let index = meetings.firstIndex(where: { $0.sessionID == processingSessionID }) {
+            return index
+        }
+        return nil
     }
     
     var filteredMeetings: [Meeting] {
