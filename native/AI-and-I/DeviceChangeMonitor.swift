@@ -518,27 +518,6 @@ class DeviceChangeMonitor: ObservableObject {
         return status == noErr && dataSize > 0
     }
 
-    static func deviceName(for deviceID: AudioDeviceID) -> String? {
-        var name: CFString = "" as CFString
-        var size = UInt32(MemoryLayout<CFString>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioObjectPropertyName,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        let result = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &size,
-            &name
-        )
-
-        return result == noErr ? name as String : nil
-    }
-
     private func getCurrentInputSampleRate() -> Double? {
         var deviceID: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
