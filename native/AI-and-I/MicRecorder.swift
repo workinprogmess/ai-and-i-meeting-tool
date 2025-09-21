@@ -52,6 +52,7 @@ class MicRecorder: ObservableObject {
     private var segmentNumber: Int = 0
     private var segmentFilePath: String = ""
     private var currentDeviceID: String = ""
+    private var currentDeviceAudioID: AudioDeviceID = 0
     private var framesCaptured: Int = 0
     private var hasLoggedFormatMatch = false
     private var lastConversionLogTime = Date.distantPast
@@ -324,8 +325,16 @@ class MicRecorder: ObservableObject {
             try engine.start()
             
             // NOW it's safe to query device info after engine is running
-            currentDeviceID = getDeviceID()
-            currentDeviceName = getDeviceName()
+            if let deviceInfo = fetchDefaultInputDeviceInfo() {
+                currentDeviceAudioID = deviceInfo.id
+                currentDeviceID = String(deviceInfo.id)
+                currentDeviceName = deviceInfo.name
+                enforceSampleRateIfNeeded(for: deviceInfo.id)
+            } else {
+                currentDeviceAudioID = 0
+                currentDeviceID = "unknown"
+                currentDeviceName = "unknown"
+            }
             
             // adjust AGC based on actual device
             if currentDeviceName.lowercased().contains("airpod") {
@@ -547,9 +556,7 @@ class MicRecorder: ObservableObject {
         return true
     }
     
-    /// gets current input device name
-    private func getDeviceName() -> String {
-        // on macos, get from audio hardware
+    private func fetchDefaultInputDeviceInfo() -> (id: AudioDeviceID, name: String)? {
         var deviceID: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = AudioObjectPropertyAddress(
@@ -557,7 +564,7 @@ class MicRecorder: ObservableObject {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        
+
         let result = AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject),
             &address,
@@ -566,55 +573,59 @@ class MicRecorder: ObservableObject {
             &size,
             &deviceID
         )
-        
-        if result == noErr && deviceID != 0 {
-            // get device name
-            var name: CFString = "" as CFString
-            var nameSize = UInt32(MemoryLayout<CFString>.size)
-            var nameAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioObjectPropertyName,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            
-            let nameResult = AudioObjectGetPropertyData(
-                deviceID,
-                &nameAddress,
-                0,
-                nil,
-                &nameSize,
-                &name
-            )
-            
-            if nameResult == noErr {
-                return name as String
-            }
-        }
-        
-        return "built-in microphone"
+
+        guard result == noErr, deviceID != 0 else { return nil }
+
+        let name = DeviceChangeMonitor.deviceName(for: deviceID) ?? "unknown"
+        return (deviceID, name)
     }
-    
-    /// gets current input device id
-    private func getDeviceID() -> String {
-        // on macos, use the device ID as string
-        var deviceID: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+    private func enforceSampleRateIfNeeded(for deviceID: AudioDeviceID) {
+        var desiredRate = 48_000.0
+        var size = UInt32(MemoryLayout<Double>.size)
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: 0
         )
-        
-        AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
+
+        let setResult = AudioObjectSetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            size,
+            &desiredRate
+        )
+
+        if setResult != noErr {
+            print("⚠️ unable to force sample rate on device \(deviceID): \(setResult)")
+        }
+
+        if let actual = querySampleRate(for: deviceID) {
+            print("🎚️ input device sample rate now \(Int(actual))hz")
+        }
+    }
+
+    private func querySampleRate(for deviceID: AudioDeviceID) -> Double? {
+        var currentRate = Double(0)
+        var size = UInt32(MemoryLayout<Double>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: 0
+        )
+
+        let status = AudioObjectGetPropertyData(
+            deviceID,
             &address,
             0,
             nil,
             &size,
-            &deviceID
+            &currentRate
         )
-        
-        return deviceID != 0 ? String(deviceID) : "built-in"
+
+        return status == noErr ? currentRate : nil
     }
     
     /// creates segment file path
