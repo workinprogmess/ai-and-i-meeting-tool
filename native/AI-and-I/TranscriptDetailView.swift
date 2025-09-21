@@ -371,8 +371,14 @@ class TranscriptDetailViewModel: ObservableObject {
             return
         }
 
-        allResults = results
-        let firstResult = results[0]
+        let preferredOrder = ["gemini", "deepgram", "assembly"]
+        allResults = results.sorted { lhs, rhs in
+            let lhsIndex = preferredOrder.firstIndex(of: lhs.service) ?? preferredOrder.count
+            let rhsIndex = preferredOrder.firstIndex(of: rhs.service) ?? preferredOrder.count
+            return lhsIndex < rhsIndex
+        }
+
+        let firstResult = allResults[0]
         segments = firstResult.transcript.segments
         cost = firstResult.cost
         serviceName = firstResult.service
