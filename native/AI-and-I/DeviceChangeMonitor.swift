@@ -419,6 +419,126 @@ class DeviceChangeMonitor: ObservableObject {
         return result == noErr ? name as String : nil
     }
 
+    static func isAirPods(deviceID: AudioDeviceID) -> Bool {
+        deviceName(for: deviceID)?.lowercased().contains("airpods") ?? false
+    }
+
+    static func currentOutputDeviceID() -> AudioDeviceID? {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let result = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+
+        return result == noErr ? deviceID : nil
+    }
+
+    static func setDefaultOutputDevice(_ deviceID: AudioDeviceID) -> Bool {
+        var mutableDeviceID = deviceID
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            size,
+            &mutableDeviceID
+        )
+
+        if status != noErr {
+            print("⚠️ failed to set default output device: \(status)")
+        }
+
+        return status == noErr
+    }
+
+    static func builtInOutputDeviceID() -> AudioDeviceID? {
+        var dataSize: UInt32 = 0
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize) == noErr else {
+            return nil
+        }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceIDs
+        ) == noErr else {
+            return nil
+        }
+
+        for id in deviceIDs {
+            guard deviceHasOutputStreams(deviceID: id) else { continue }
+            if let name = deviceName(for: id)?.lowercased(),
+               name.contains("built-in") || name.contains("imac speakers") || name.contains("macbook speakers") {
+                return id
+            }
+        }
+
+        return nil
+    }
+
+    static func deviceHasOutputStreams(deviceID: AudioDeviceID) -> Bool {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: 0
+        )
+
+        var dataSize: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &dataSize)
+        return status == noErr && dataSize > 0
+    }
+
+    static func deviceName(for deviceID: AudioDeviceID) -> String? {
+        var name: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let result = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &size,
+            &name
+        )
+
+        return result == noErr ? name as String : nil
+    }
+
     private func getCurrentInputSampleRate() -> Double? {
         var deviceID: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)

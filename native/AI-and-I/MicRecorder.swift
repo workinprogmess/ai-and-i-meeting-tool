@@ -59,6 +59,7 @@ class MicRecorder: ObservableObject {
     private var telephonyRetryCount = 0
     private let maxTelephonyRetries = 3
     private var currentSampleRate: Double = 48000
+    private var previousOutputDeviceID: AudioDeviceID?
     
     // MARK: - warmup management
     private var isWarmedUp = false
@@ -116,6 +117,8 @@ class MicRecorder: ObservableObject {
         
         state = .idle
         isRecording = false
+
+        restorePreviousOutputDeviceIfNeeded()
     }
     
     /// handles device change during recording (production-safe)
@@ -173,6 +176,8 @@ class MicRecorder: ObservableObject {
         
         print("🔄 performing debounced device switch...")
         
+        prepareOutputRoutingForCurrentInputDevice()
+
         // safe teardown on controller queue
         stopCurrentSegmentSafely()
         
@@ -355,6 +360,10 @@ class MicRecorder: ObservableObject {
             print("✅ mic segment #\(segmentNumber) started - recording with \(currentDeviceName)")
             let runningFormat = inputNode.outputFormat(forBus: 0)
             print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
+
+            if !currentDeviceName.lowercased().contains("airpod") {
+                restorePreviousOutputDeviceIfNeeded()
+            }
         } catch {
             let nsError = error as NSError
             if nsError.code == -10851 {
@@ -627,7 +636,39 @@ class MicRecorder: ObservableObject {
 
         return status == noErr ? currentRate : nil
     }
-    
+
+    private func prepareOutputRoutingForCurrentInputDevice() {
+        guard let info = fetchDefaultInputDeviceInfo() else { return }
+        let lowercasedName = info.name.lowercased()
+
+        if lowercasedName.contains("airpod") {
+            guard previousOutputDeviceID == nil else { return }
+            guard let currentOutput = DeviceChangeMonitor.currentOutputDeviceID(),
+                  DeviceChangeMonitor.isAirPods(deviceID: currentOutput),
+                  let builtIn = DeviceChangeMonitor.builtInOutputDeviceID(),
+                  builtIn != currentOutput else { return }
+
+            if DeviceChangeMonitor.setDefaultOutputDevice(builtIn) {
+                previousOutputDeviceID = currentOutput
+                print("🔊 temporarily routing output to built-in speakers for airpods recording")
+            }
+        } else {
+            restorePreviousOutputDeviceIfNeeded()
+        }
+    }
+
+    private func restorePreviousOutputDeviceIfNeeded() {
+        guard let previous = previousOutputDeviceID else { return }
+
+        if DeviceChangeMonitor.setDefaultOutputDevice(previous) {
+            if let name = DeviceChangeMonitor.deviceName(for: previous) {
+                print("🔊 restored output device to \(name)")
+            }
+        }
+
+        previousOutputDeviceID = nil
+    }
+
     /// creates segment file path
     private func createSegmentFilePath(sessionTimestamp: Int, segmentNumber: Int) -> String {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
