@@ -307,6 +307,9 @@ class DeviceChangeMonitor: ObservableObject {
 
         if let rate = getCurrentInputSampleRate() {
             print("📱 current devices - input: \(currentInputDevice) (\(Int(rate))hz), output: \(currentOutputDevice)")
+            if rate < 44100 {
+                print("⚠️ input sample rate below 44khz - potential telephony mode")
+            }
         } else {
             print("📱 current devices - input: \(currentInputDevice), output: \(currentOutputDevice)")
         }
@@ -378,7 +381,7 @@ class DeviceChangeMonitor: ObservableObject {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        
+
         let result = AudioObjectGetPropertyData(
             deviceID,
             &address,
@@ -387,12 +390,33 @@ class DeviceChangeMonitor: ObservableObject {
             &size,
             &name
         )
-        
+
         if result == noErr {
             return name as String
         }
 
         return nil
+    }
+
+    static func deviceName(for deviceID: AudioDeviceID) -> String? {
+        var name: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let result = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &size,
+            &name
+        )
+
+        return result == noErr ? name as String : nil
     }
 
     private func getCurrentInputSampleRate() -> Double? {
