@@ -398,7 +398,7 @@ class DeviceChangeMonitor: ObservableObject {
         return nil
     }
 
-    static func deviceName(for deviceID: AudioDeviceID) -> String? {
+    nonisolated static func deviceName(for deviceID: AudioDeviceID) -> String? {
         var name: CFString = "" as CFString
         var size = UInt32(MemoryLayout<CFString>.size)
         var address = AudioObjectPropertyAddress(
@@ -419,11 +419,11 @@ class DeviceChangeMonitor: ObservableObject {
         return result == noErr ? name as String : nil
     }
 
-    static func isAirPods(deviceID: AudioDeviceID) -> Bool {
+    nonisolated static func isAirPods(deviceID: AudioDeviceID) -> Bool {
         deviceName(for: deviceID)?.lowercased().contains("airpods") ?? false
     }
 
-    static func currentOutputDeviceID() -> AudioDeviceID? {
+    nonisolated static func currentOutputDeviceID() -> AudioDeviceID? {
         var deviceID: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = AudioObjectPropertyAddress(
@@ -444,7 +444,7 @@ class DeviceChangeMonitor: ObservableObject {
         return result == noErr ? deviceID : nil
     }
 
-    static func setDefaultOutputDevice(_ deviceID: AudioDeviceID) -> Bool {
+    nonisolated static func setDefaultOutputDevice(_ deviceID: AudioDeviceID) -> Bool {
         var mutableDeviceID = deviceID
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = AudioObjectPropertyAddress(
@@ -469,7 +469,7 @@ class DeviceChangeMonitor: ObservableObject {
         return status == noErr
     }
 
-    static func builtInOutputDeviceID() -> AudioDeviceID? {
+    nonisolated static func builtInOutputDeviceID() -> AudioDeviceID? {
         var dataSize: UInt32 = 0
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
@@ -506,7 +506,7 @@ class DeviceChangeMonitor: ObservableObject {
         return nil
     }
 
-    static func deviceHasOutputStreams(deviceID: AudioDeviceID) -> Bool {
+    nonisolated static func deviceHasOutputStreams(deviceID: AudioDeviceID) -> Bool {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
             mScope: kAudioDevicePropertyScopeOutput,
