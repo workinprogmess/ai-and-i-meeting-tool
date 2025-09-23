@@ -3,38 +3,15 @@
 ## current focus: native macos app
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
-## current milestone: transcription integration (0.2.0) ✅ READY FOR TESTING
-**status**: ui polish complete - all systems operational (subject to testing)
-- ✅ milestone 1 complete: seamless device switching with perfect audio mixing
-- ✅ phase 1-2: all three transcription services integrated (gemini, deepgram, assembly ai)
-- ✅ parallel processing with quality metrics and comparison
-- ✅ mp3 conversion working (10x file size reduction)
-- ✅ automatic mixing integration fixed
-- ✅ phase 3: beautiful minimal ui with japanese color palette
-  - ✅ meetings list landing page
-  - ✅ recording flow with animations  
-  - ✅ clean transcript detail view
-  - ✅ floating action tray with share/copy/export/corrections
-  - ✅ user corrections system with dictionary persistence
-- ✅ critical fixes (2025-09-15):
-  - ✅ fixed audio mixing: concatenate sequential segments instead of overlapping
-  - ✅ fixed robotic system audio with airpods (aresample to 48khz)
-  - ✅ fixed recording duration extension (5:52 → 14:04 issue)
-  - ✅ fixed timer freezing at 00:00 (moved to sync execution)
-  - ✅ fixed transcription hanging (restored mp3 conversion step)
-  - ✅ fixed device switching debounce timer constantly resetting
-  - ✅ fixed app entry point (was showing old contentview instead of meetingslistview)
-  - ✅ added proper error handling and logging
-- ✅ phase 4: ui polish complete (2025-09-16):
-  - ✅ japanese-inspired design system with nuevo.tokyo 2023 colors
-  - ✅ ai-generated meeting titles (4-7 words capturing essence)
-  - ✅ service comparison tabs with silk white kneading background
-  - ✅ beautiful capsule hover effects on transcript text
-  - ✅ hidden scrollbars for clean aesthetic
-  - ✅ floating action tray with soshoku color and open icon layout
-  - ✅ thin milky white header strips
-  - ✅ enlarged meeting titles for better hierarchy
-- 🎯 next: transcription quality improvements (prompts, mixed language, speaker attribution)
+## current milestone: transcription integration (0.2.0) 🚧 IN HARDENING
+**status**: core flows are implemented but reliability gaps remain before we can declare readiness.
+- ✅ milestone 1 foundation still holds (hot standby architecture, baseline metrics, core views)
+- ⚠️ device switching + mixed audio: needs rework to eliminate airpods-induced silent/duplicate segments and ensure monitor restarts per session
+- ⚠️ mixing pipeline: `mix-audio.swift` drops segments when filenames contain `&`; add session-scoped mixing + retries
+- ⚠️ launch + recording start latency: mic/system buffering currently blocks the main actor and can hang the ui
+- ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
+- ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
+- 🎯 focus: deliver an airtight record → switch devices → mix → mp3 → transcribe loop with clear telemetry
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -294,53 +271,39 @@ private func shouldSwitchToNewDevice() -> Bool {
 - all services struggle with hindi/hinglish mixing
 - speaker attribution needs improvement across all
 
-## current app status (2025-09-17) - ready for testing
+## current app status (2025-09-18) - reliability hardening in progress
 
-### what's working
-- complete recording → mixing → transcription → ui workflow
-- airpods switching during recording (fixed debouncing conflicts)
-- airpods audio quality (no more glitchy sounds or robotic voices)
-- parallel transcription with all three services
-- japanese-inspired minimal ui with neue.tokyo colors
-- ai-generated meeting titles (gemini only for now)
-- user corrections system with persistent dictionary
-- perfect audio mixing with ffmpeg (sequential segments)
-- mp3 compression (10x smaller than wav)
-- data protection with backup/recovery system
-- deduplication preventing duplicate meetings in ui
+### what’s solid today
+- core recording → mixing → transcription pipeline exists end-to-end
+- multi-service transcription runs in parallel when conversion succeeds
+- japanese-inspired ui, ai-generated titles, meeting list, transcript view
+- mp3 compression + session-specific storage prevent data loss
+- backup scripts and deduplication remain effective
 
-### ui refinements completed
-- japanese color palette (shironeri, soshoku, nyuhakushoku)
-- service comparison tabs with proper visibility
-- beautiful capsule hover effects on transcript text
-- hidden scrollbars for clean aesthetic
-- floating action tray with soshoku color, open icon layout
-- thin milky white header strips
-- enlarged meeting titles for better hierarchy
-- removed redundant pricing from metadata
+### critical gaps discovered (need fixes before public testing)
+- launch and recording start can hang because mic/system pipelines run on the main actor
+- `DeviceChangeMonitor` stops after first session; airpods/device switches no longer propagate
+- mic/system pipelines diverge on session timestamps and break mixing (dual warmed pipeline missing)
+- mixer script drops segments when directory names contain `&`; no retries surfaced to ui
+- AirPods output reroute may strand user audio after recording ends
+- transcript action tray shows share/export/correct buttons that do nothing
 
-### fixes completed (september 17)
-- airpods audio quality issues resolved
-- async/await timing fixed for proper recording
-- meeting duplication eliminated
-- sandbox errors handled gracefully
-- build errors from cli scripts fixed
+### ui polish to revisit
+- hide unfinished actions or wire them up end-to-end
+- confirm color palette + spacing across service tabs and trays
+- add inline service status (queued/running/failed) + loading indicators
 
-### known limitations
-- copy button works, other action buttons placeholder
-- meeting duration calculation needs verification  
-- transcription quality varies with mixed languages
-- speaker attribution could be more accurate
+### next priorities (sequenced)
+1. Rework audio pipelines (shared session clock, background queues, dual warm start, monitor restart)
+2. Fix mixer script path handling, add retries, surface errors
+3. Harden mp3 conversion + transcription status/feedback
+4. Close the ui loop (accurate status text, hide stub actions, highlight confidence scores)
+5. Document regression playbook and automated checks
 
-### next priorities
-1. improve transcription prompts for better accuracy
-2. enhance mixed language support (hindi/hinglish)
-3. better speaker attribution and diarization
-4. implement summary generation (milestone 3)
-5. add export/share functionality
-
-### testing insights (2025-09-15)
-- **transcription quality ranking**: gemini > deepgram > assembly ai
+### testing focus
+- Repeat long session with deliberate airpods toggles + external display swaps once fixes land
+- Measure launch/recording latency with `PerformanceMonitor`
+- Verify mixed output parity vs raw mic/system files after script fixes
   - gemini: handles mixed audio well, some speaker confusion
   - deepgram: good flow, poor speaker identification, misses hindi
   - assembly: poor - single paragraph, misses multilingual content
@@ -1678,8 +1641,8 @@ result: overlapping audio becomes unintelligible to ai
 
 ---
 
-Last Updated: 2025-09-03 (CRITICAL BREAKTHROUGH - mixed audio pivot, milestone 3.3.5 added)
-Session Duration: Comprehensive codebase analysis + strategic planning
+Last Updated: 2025-09-18 (Codex reliability review)
+Session Duration: Deep code review + milestone reassessment
 Major Achievements (electron build, archived):
 - milestone 3.2: zero data loss + device resilience complete
 - strategic roadmap: human intelligence prioritized over commodity features  
