@@ -217,7 +217,7 @@ class MeetingsListViewModel: ObservableObject {
         isRecording = true
         recordingStartTime = Date()
         recordingDuration = 0
-        
+
         // start timer immediately (before async recording setup)
         print("⏰ creating timer on thread: \(Thread.current)")
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -237,19 +237,23 @@ class MeetingsListViewModel: ObservableObject {
             print("🎙️ starting recorders...")
             print("📱 device monitor active: \(deviceMonitor.isMonitoring)")
             
-            // device monitoring is already running from init, no need to restart
+            // ensure device monitoring is active for this recording session
+            if !deviceMonitor.isMonitoring {
+                deviceMonitor.startMonitoring()
+                print("📱 device monitor restarted for new session")
+            }
             
-            // generate shared session id for both recorders
-            let sharedSessionID = UUID().uuidString
-            print("🎬 starting recording with shared session id: \(sharedSessionID)")
+            // generate shared session context for both recorders
+            let sessionContext = RecordingSessionContext.create()
+            print("🎬 starting recording with shared session context id: \(sessionContext.id)")
             
-            // start both recorders with same session id
+            // start both recorders with same context
             // CRITICAL: both MUST be awaited to maintain proper async context
             // missing await causes timing issues and robotic audio with AirPods
-            await micRecorder.startSession(sharedSessionID: sharedSessionID)
+            await micRecorder.startSession(sessionContext)
             print("🎙️ mic recorder started: \(micRecorder.isRecording)")
             
-            await systemRecorder.startSession(sharedSessionID: sharedSessionID)
+            await systemRecorder.startSession(sessionContext)
             print("🔊 system recorder started: \(systemRecorder.isRecording)")
             
             print("🎬 segmented recording started")
@@ -269,7 +273,7 @@ class MeetingsListViewModel: ObservableObject {
         isRecording = false
         recordingTimer?.invalidate()
         recordingTimer = nil
-        
+
         Task {
             // stop both recorders
             micRecorder.endSession()
