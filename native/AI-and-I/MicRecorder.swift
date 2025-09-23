@@ -7,11 +7,31 @@
 //
 
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreAudio
 
+struct RecordingSessionContext {
+    let id: String
+    let startDate: Date
+    let timestamp: TimeInterval
+
+    static func create() -> RecordingSessionContext {
+        let now = Date()
+        return RecordingSessionContext(
+            id: UUID().uuidString,
+            startDate: now,
+            timestamp: now.timeIntervalSince1970
+        )
+    }
+
+    var timestampInt: Int {
+        Int(timestamp)
+    }
+}
+
+extension AVAudioPCMBuffer: @unchecked Sendable {}
+
 /// manages microphone recording with segment-based approach
-@MainActor
 class MicRecorder: ObservableObject {
     // MARK: - published state
     @Published var isRecording = false
@@ -61,6 +81,36 @@ class MicRecorder: ObservableObject {
     private var currentSampleRate: Double = 48000
     private var previousOutputDeviceID: AudioDeviceID?
     
+    private var latestDeviceName: String = "unknown"
+    private var latestQuality: AudioSegmentMetadata.AudioQuality = .high
+
+    // MARK: - helpers
+    private func updateOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
+    }
+    
+    private func setIsRecording(_ value: Bool) {
+        updateOnMain { self.isRecording = value }
+    }
+    
+    private func setCurrentDeviceName(_ value: String) {
+        latestDeviceName = value
+        updateOnMain { self.currentDeviceName = value }
+    }
+    
+    private func setCurrentQuality(_ value: AudioSegmentMetadata.AudioQuality) {
+        latestQuality = value
+        updateOnMain { self.currentQuality = value }
+    }
+    
+    private func setErrorMessage(_ value: String?) {
+        updateOnMain { self.errorMessage = value }
+    }
+
     // MARK: - warmup management
     private var isWarmedUp = false
     private var discardedFrames: AVAudioFrameCount = 0
@@ -80,20 +130,20 @@ class MicRecorder: ObservableObject {
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
-    func startSession(sharedSessionID: String) async {
-        print("🎙️ starting mic recording session with id: \(sharedSessionID)")
+    func startSession(_ context: RecordingSessionContext) async {
+        print("🎙️ starting mic recording session with context id: \(context.id)")
         
-        // use the shared session id
-        sessionID = sharedSessionID
-        sessionStartTime = Date()
-        sessionReferenceTime = Date().timeIntervalSince1970
+        // use the shared session context
+        sessionID = context.id
+        sessionStartTime = context.startDate
+        sessionReferenceTime = context.timestamp
         segmentNumber = 0
         segmentMetadata.removeAll()
         deviceChangeCount = 0
         
         // set state first
         state = .recording
-        isRecording = true
+        setIsRecording(true)
         
         // start first segment on controller queue
         startNewSegment()
@@ -116,7 +166,7 @@ class MicRecorder: ObservableObject {
         saveSessionMetadata()
         
         state = .idle
-        isRecording = false
+        setIsRecording(false)
 
         restorePreviousOutputDeviceIfNeeded()
     }
@@ -161,7 +211,7 @@ class MicRecorder: ObservableObject {
             let windowStart = Date().addingTimeInterval(-deviceChangeWindow)
             if lastDeviceChangeTime > windowStart {
                 print("⚠️ device changes too frequent - holding current mic")
-                errorMessage = "devices changing rapidly - holding current mic"
+            setErrorMessage("devices changing rapidly - holding current mic")
                 needsSwitch = false
                 return
             }
@@ -204,9 +254,7 @@ class MicRecorder: ObservableObject {
     private func startNewSegment() {
         // dispatch to controller queue for safety
         controllerQueue.async { [weak self] in
-            Task { @MainActor in
-                self?.startNewSegmentInternal()
-            }
+            self?.startNewSegmentInternal()
         }
     }
     
@@ -222,7 +270,7 @@ class MicRecorder: ObservableObject {
         // create new audio engine (doesn't throw, but can fail)
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else {
-            errorMessage = "failed to create audio engine"
+            setErrorMessage("failed to create audio engine")
             return
         }
         
@@ -238,7 +286,7 @@ class MicRecorder: ObservableObject {
         // defer device name/ID queries until after engine starts
         // for now, use placeholder values
         currentDeviceID = "pending"
-        currentDeviceName = "initializing..."
+        setCurrentDeviceName("initializing...")
         
         let negotiatedSampleRate = inputFormat.sampleRate
         print("📊 input format: \(negotiatedSampleRate)hz, \(inputFormat.channelCount)ch")
@@ -246,8 +294,9 @@ class MicRecorder: ObservableObject {
         print("📊 formats equal: \(inputFormat == recordingFormat)")
         
         // assess quality
-        currentQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
-        print("📊 assessed quality: \(currentQuality.rawValue) for \(inputFormat.sampleRate)hz")
+        let assessedQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
+        setCurrentQuality(assessedQuality)
+        print("📊 assessed quality: \(assessedQuality.rawValue) for \(inputFormat.sampleRate)hz")
         
         // detect telephony mode (sub-44k sample rates) and retry to obtain full bandwidth
         if negotiatedSampleRate < 44100 {
@@ -257,9 +306,7 @@ class MicRecorder: ObservableObject {
 
             if telephonyRetryCount <= maxTelephonyRetries {
                 controllerQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                    Task { @MainActor in
-                        self?.startNewSegmentInternal()
-                    }
+                    self?.startNewSegmentInternal()
                 }
                 return
             } else {
@@ -277,9 +324,9 @@ class MicRecorder: ObservableObject {
         currentGain = 2.5
         
         // quality guard - warn on telephony mode
-        if currentQuality == .low {
+        if assessedQuality == .low {
             print("⚠️ low quality detected (\(inputFormat.sampleRate)hz)")
-            errorMessage = "mic in low quality mode - recording anyway"
+            setErrorMessage("mic in low quality mode - recording anyway")
         }
         
         // create segment file
@@ -300,7 +347,7 @@ class MicRecorder: ObservableObject {
             print("📁 created audio file: \(segmentFilePath)")
         } catch {
             print("❌ failed to create audio file: \(error)")
-            errorMessage = "failed to create audio file: \(error.localizedDescription)"
+            setErrorMessage("failed to create audio file: \(error.localizedDescription)")
             // clean up engine if file creation fails
             audioEngine = nil
             return
@@ -318,9 +365,7 @@ class MicRecorder: ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
             // enqueue to writer queue - don't process in callback
             self?.writerQueue.async {
-                Task { @MainActor in
-                    self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
-                }
+                self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
             }
         }
         
@@ -330,25 +375,28 @@ class MicRecorder: ObservableObject {
             try engine.start()
             
             // NOW it's safe to query device info after engine is running
+            let deviceName: String
             if let deviceInfo = fetchDefaultInputDeviceInfo() {
                 currentDeviceAudioID = deviceInfo.id
                 currentDeviceID = String(deviceInfo.id)
-                currentDeviceName = deviceInfo.name
+                deviceName = deviceInfo.name
+                setCurrentDeviceName(deviceName)
                 enforceSampleRateIfNeeded(for: deviceInfo.id)
             } else {
                 currentDeviceAudioID = 0
                 currentDeviceID = "unknown"
-                currentDeviceName = "unknown"
+                deviceName = "unknown"
+                setCurrentDeviceName(deviceName)
             }
             
             // adjust AGC based on actual device
-            if currentDeviceName.lowercased().contains("airpod") {
+            if deviceName.lowercased().contains("airpod") {
                 agcEnabled = false  // airpods have their own processing
                 currentGain = 1.0
                 print("🎧 airpods detected - agc disabled")
                 print("🎧 airpods format: \(inputFormat.sampleRate)hz reported")
-                print("🎧 airpods quality: \(currentQuality.rawValue)")
-            } else if currentDeviceName.lowercased().contains("mac") || currentDeviceName.lowercased().contains("built") {
+                print("🎧 airpods quality: \(assessedQuality.rawValue)")
+            } else if deviceName.lowercased().contains("mac") || deviceName.lowercased().contains("built") {
                 agcEnabled = true  // built-in mics need boost
                 currentGain = 2.5
                 print("🎚️ built-in mic - agc enabled with 2.5x gain")
@@ -357,11 +405,11 @@ class MicRecorder: ObservableObject {
                 currentGain = 1.0
             }
             
-            print("✅ mic segment #\(segmentNumber) started - recording with \(currentDeviceName)")
+            print("✅ mic segment #\(segmentNumber) started - recording with \(deviceName)")
             let runningFormat = inputNode.outputFormat(forBus: 0)
             print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
 
-            if !currentDeviceName.lowercased().contains("airpod") {
+            if !deviceName.lowercased().contains("airpod") {
                 restorePreviousOutputDeviceIfNeeded()
             }
         } catch {
@@ -369,7 +417,7 @@ class MicRecorder: ObservableObject {
             if nsError.code == -10851 {
                 // device still transitioning - need to retry
                 print("⚠️ engine start failed with -10851 (device transitioning)")
-                errorMessage = "device still transitioning - retrying..."
+                setErrorMessage("device still transitioning - retrying...")
                 
                 // clean up this attempt
                 engine.inputNode.removeTap(onBus: 0)
@@ -378,16 +426,14 @@ class MicRecorder: ObservableObject {
                 
                 // retry after delay
                 controllerQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    Task { @MainActor in
-                        guard let self = self else { return }
-                        if self.state == .switching || self.state == .recording {
-                            print("🔄 retrying segment start after -10851 error...")
-                            self.startNewSegmentInternal()
-                        }
+                    guard let self = self else { return }
+                    if self.state == .switching || self.state == .recording {
+                        print("🔄 retrying segment start after -10851 error...")
+                        self.startNewSegmentInternal()
                     }
                 }
             } else {
-                errorMessage = "failed to start audio engine: \(error)"
+                setErrorMessage("failed to start audio engine: \(error)")
                 print("❌ engine start failed: \(error)")
                 // clean up on failure
                 engine.inputNode.removeTap(onBus: 0)
@@ -444,14 +490,14 @@ class MicRecorder: ObservableObject {
         let metadata = AudioSegmentMetadata(
             segmentID: UUID().uuidString,
             filePath: segmentFilePath,
-            deviceName: currentDeviceName,
+            deviceName: latestDeviceName,
             deviceID: currentDeviceID,
             sampleRate: 48000,
             channels: 1,
             startSessionTime: segmentStartTime,
             endSessionTime: segmentEndTime,
             frameCount: framesCaptured,
-            quality: currentQuality,
+            quality: latestQuality,
             error: nil
         )
         
@@ -463,7 +509,6 @@ class MicRecorder: ObservableObject {
     }
     
     /// processes audio buffer with warmup and conversion
-    @MainActor
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer,
                                    inputFormat: AVAudioFormat,
                                    targetFormat: AVAudioFormat) {
@@ -479,7 +524,7 @@ class MicRecorder: ObservableObject {
         
         // apply agc if enabled (for built-in mic)
         let processedBuffer: AVAudioPCMBuffer
-        if agcEnabled && currentDeviceName.lowercased().contains("mac") {
+        if agcEnabled && latestDeviceName.lowercased().contains("mac") {
             processedBuffer = applyAGC(to: buffer) ?? buffer
         } else {
             processedBuffer = buffer
@@ -544,7 +589,7 @@ class MicRecorder: ObservableObject {
             }
         } catch {
             print("❌ write error: \(error)")
-            errorMessage = "failed to write audio: \(error.localizedDescription)"
+            setErrorMessage("failed to write audio: \(error.localizedDescription)")
         }
     }
     
@@ -556,9 +601,9 @@ class MicRecorder: ObservableObject {
         let newQuality = AudioSegmentMetadata.assessQuality(sampleRate: newFormat.sampleRate)
         
         // block auto-switch to telephony mode
-        if newQuality == .low && currentQuality != .low {
+        if newQuality == .low && latestQuality != .low {
             print("🚫 blocking switch to low quality device")
-            errorMessage = "new device is low quality - staying with current"
+            setErrorMessage("new device is low quality - staying with current")
             return false
         }
         

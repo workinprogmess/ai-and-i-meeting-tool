@@ -11,7 +11,6 @@ import ScreenCaptureKit
 @preconcurrency import AVFoundation
 
 /// manages system audio recording with segment-based approach
-@MainActor
 class SystemAudioRecorder: NSObject, ObservableObject {
     // MARK: - published state
     @Published var isRecording = false
@@ -51,6 +50,39 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private var segmentFilePath: String = ""
     private var framesCaptured: Int = 0
     
+    // MARK: - helpers
+    private func performOnControllerQueue(_ block: @escaping () async -> Void) async {
+        let queue = controllerQueue
+        await withCheckedContinuation { continuation in
+            queue.async {
+                Task {
+                    await block()
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func updateOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
+    }
+
+    private func setIsRecording(_ value: Bool) {
+        updateOnMain { self.isRecording = value }
+    }
+
+    private func setErrorMessage(_ value: String?) {
+        updateOnMain { self.errorMessage = value }
+    }
+
+    private func setCurrentQuality(_ value: AudioSegmentMetadata.AudioQuality) {
+        updateOnMain { self.currentQuality = value }
+    }
+
     // MARK: - device info (system audio is display-based)
     private let deviceName = "system audio"
     private let deviceID = "system"
@@ -58,22 +90,23 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
-    func startSession(sharedSessionID: String) async {
-        print("🔊 starting system audio recording session with id: \(sharedSessionID)")
+    func startSession(_ context: RecordingSessionContext) async {
+        print("🔊 starting system audio recording session with context id: \(context.id)")
         
-        // use the shared session id
-        sessionID = sharedSessionID
-        sessionStartTime = Date()
-        sessionReferenceTime = Date().timeIntervalSince1970
+        // use the shared session context
+        sessionID = context.id
+        sessionStartTime = context.startDate
+        sessionReferenceTime = context.timestamp
         segmentNumber = 0
         segmentMetadata.removeAll()
         
         // set state first
         state = .recording
-        isRecording = true
+        setIsRecording(true)
         
-        // start first segment
-        await startNewSegment()
+        await performOnControllerQueue { [weak self] in
+            await self?.startNewSegment()
+        }
     }
     
     /// ends the recording session and saves metadata
@@ -88,14 +121,16 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
         needsSwitch = false
         
-        // stop current segment
-        await stopCurrentSegment()
+        // stop current segment on controller queue
+        await performOnControllerQueue { [weak self] in
+            await self?.stopCurrentSegment()
+        }
         
         // save session metadata
         saveSessionMetadata()
         
         state = .idle
-        isRecording = false
+        setIsRecording(false)
     }
     
     /// handles display/system audio device changes (production-safe)
@@ -147,13 +182,17 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         print("🔄 performing debounced system audio switch...")
         
         // safe teardown
-        await stopCurrentSegment()
+        await performOnControllerQueue { [weak self] in
+            await self?.stopCurrentSegment()
+        }
         
         // let hardware settle
         try? await Task.sleep(nanoseconds: 200_000_000)  // 0.2s
         
         // safe restart
-        await startNewSegment()
+        await performOnControllerQueue { [weak self] in
+            await self?.startNewSegment()
+        }
         
         state = .recording
         print("✅ system audio switch complete")
@@ -174,13 +213,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
                 print("✅ got shareable content")
             } catch {
                 // display might be transitioning (external monitor plug/unplug)
-                errorMessage = "display transitioning: \(error.localizedDescription)"
+                setErrorMessage("display transitioning: \(error.localizedDescription)")
                 print("⚠️ can't get shareable content (display transitioning): \(error)")
                 return
             }
             
             guard let display = content.displays.first else {
-                errorMessage = "no display found"
+                setErrorMessage("no display found")
                 print("❌ no display found for system audio")
                 return
             }
@@ -249,7 +288,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             print("✅ system segment #\(segmentNumber) started")
             
         } catch {
-            errorMessage = "system capture failed: \(error.localizedDescription)"
+            setErrorMessage("system capture failed: \(error.localizedDescription)")
             print("❌ system capture start failed: \(error)")
         }
     }
@@ -312,15 +351,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         // write on dedicated queue
         fileWriteQueue.async { [weak self] in
-            Task { @MainActor in
-                guard let audioFile = self?.audioFile else { return }
-                
-                do {
-                    try audioFile.write(from: pcmBuffer)
-                    self?.framesCaptured += Int(pcmBuffer.frameLength)
-                } catch {
-                    print("❌ system audio write error: \(error)")
-                }
+            guard let self = self, let audioFile = self.audioFile else { return }
+            do {
+                try audioFile.write(from: pcmBuffer)
+                self.framesCaptured += Int(pcmBuffer.frameLength)
+            } catch {
+                print("❌ system audio write error: \(error)")
             }
         }
     }
