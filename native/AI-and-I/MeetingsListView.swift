@@ -59,6 +59,11 @@ class MeetingsListViewModel: ObservableObject {
     let micRecorder = MicRecorder()
     let systemRecorder = SystemAudioRecorder()
     let deviceMonitor = DeviceChangeMonitor()
+    private lazy var sessionCoordinator = RecordingSessionCoordinator(
+        micRecorder: micRecorder,
+        systemRecorder: systemRecorder,
+        deviceMonitor: deviceMonitor
+    )
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?
     private var processingMeetingID: UUID?
@@ -67,29 +72,26 @@ class MeetingsListViewModel: ObservableObject {
     init() {
         loadMeetings()
         setupDeviceMonitoring()
+        Task {
+            await sessionCoordinator.preparePipelinesIfNeeded()
+        }
     }
     
     private func setupDeviceMonitoring() {
         print("🔧 setupDeviceMonitoring called")
         
-        // start monitoring for device changes
-        deviceMonitor.startMonitoring()
-        print("📱 device monitor started: \(deviceMonitor.isMonitoring)")
-        
         // connect device change callbacks
         deviceMonitor.onMicDeviceChange = { [weak self] reason in
-            Task { @MainActor in
+            Task {
                 print("🎤 mic device change detected: \(reason)")
-                // handle mic device changes (airpods connect/disconnect)
-                self?.micRecorder.handleDeviceChange(reason: reason)
+                await self?.sessionCoordinator.handleDeviceChange(reason: reason)
             }
         }
-        
+
         deviceMonitor.onSystemDeviceChange = { [weak self] reason in
-            Task { @MainActor in
+            Task {
                 print("🔊 system device change detected: \(reason)")
-                // handle system audio device changes
-                await self?.systemRecorder.handleDeviceChange(reason: reason)
+                await self?.sessionCoordinator.handleDeviceChange(reason: reason)
             }
         }
         
@@ -234,29 +236,27 @@ class MeetingsListViewModel: ObservableObject {
         
         // start recording
         Task { @MainActor in
-            print("🎙️ starting recorders...")
-            print("📱 device monitor active: \(deviceMonitor.isMonitoring)")
-            
-            // ensure device monitoring is active for this recording session
-            if !deviceMonitor.isMonitoring {
-                deviceMonitor.startMonitoring()
-                print("📱 device monitor restarted for new session")
+            print("🎙️ starting recorders via session coordinator...")
+
+            do {
+                let context = try await sessionCoordinator.startSession()
+                print("🎬 recording with shared session context id: \(context.id)")
+
+                print("🎙️ mic recorder started: \(micRecorder.isRecording)")
+                print("🔊 system recorder started: \(systemRecorder.isRecording)")
+                print("🎬 segmented recording started")
+            } catch {
+                print("❌ failed to start recording pipelines: \(error)")
+                micRecorder.errorMessage = "failed to prepare audio pipelines"
+                systemRecorder.errorMessage = "failed to prepare audio pipelines"
+                recordingTimer?.invalidate()
+                recordingTimer = nil
+                isRecording = false
+                if deviceMonitor.isMonitoring {
+                    deviceMonitor.stopMonitoring()
+                    print("📱 device monitoring stopped after warm failure")
+                }
             }
-            
-            // generate shared session context for both recorders
-            let sessionContext = RecordingSessionContext.create()
-            print("🎬 starting recording with shared session context id: \(sessionContext.id)")
-            
-            // start both recorders with same context
-            // CRITICAL: both MUST be awaited to maintain proper async context
-            // missing await causes timing issues and robotic audio with AirPods
-            await micRecorder.startSession(sessionContext)
-            print("🎙️ mic recorder started: \(micRecorder.isRecording)")
-            
-            await systemRecorder.startSession(sessionContext)
-            print("🔊 system recorder started: \(systemRecorder.isRecording)")
-            
-            print("🎬 segmented recording started")
         }
     }
 
@@ -273,17 +273,11 @@ class MeetingsListViewModel: ObservableObject {
         isRecording = false
         recordingTimer?.invalidate()
         recordingTimer = nil
-
+        
         Task {
-            // stop both recorders
-            micRecorder.endSession()
-            await systemRecorder.endSession()
+            await sessionCoordinator.stopSession()
             print("🎬 recording ended - segments saved")
-            
-            // stop device monitoring after recording
-            deviceMonitor.stopMonitoring()
-            print("📱 device monitoring stopped")
-            
+
             // reload meetings to show the new recording
             loadMeetings()
 
