@@ -6,6 +6,13 @@ import Combine
 /// Tracks microsecond-precision metrics for performance-first development
 @MainActor
 class PerformanceMonitor: ObservableObject {
+    struct RecordingTelemetryEntry: Identifiable {
+        let id = UUID()
+        let event: String
+        let timestamp: Date
+        let metadata: [String: String]
+    }
+
     // MARK: - Published Metrics
     @Published var appLaunchTime: TimeInterval = 0
     @Published var recordingStartLatency: TimeInterval = 0
@@ -14,6 +21,7 @@ class PerformanceMonitor: ObservableObject {
     @Published var audioDropouts: Int = 0
     @Published var deviceSwitchTime: TimeInterval = 0
     @Published var audioQuality: AudioQualityMetrics = AudioQualityMetrics()
+    @Published var recordingTelemetry: [RecordingTelemetryEntry] = []
     
     // MARK: - Performance History
     @Published var recentLaunchTimes: [TimeInterval] = []
@@ -155,6 +163,25 @@ extension PerformanceMonitor {
     /// Resets dropout counter (e.g., when starting new recording)
     func resetAudioDropouts() {
         audioDropouts = 0
+    }
+}
+
+// MARK: - Recording Telemetry
+extension PerformanceMonitor {
+
+    func recordRecordingEvent(_ event: String, metadata: [String: String] = [:]) {
+        let entry = RecordingTelemetryEntry(event: event, timestamp: Date(), metadata: metadata)
+        recordingTelemetry.append(entry)
+
+        if recordingTelemetry.count > maxHistoryCount {
+            recordingTelemetry.removeFirst()
+        }
+
+        if metadata.isEmpty {
+            print("📡 RecordingEvent: \(event)")
+        } else {
+            print("📡 RecordingEvent: \(event) :: \(metadata)")
+        }
     }
 }
 
