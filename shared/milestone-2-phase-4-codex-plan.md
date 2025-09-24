@@ -14,6 +14,12 @@ focused on eliminating launch hangs, fully hardening the dual-pipeline audio wor
   - make mix volume decisions deterministic (airpods vs built-in) and log actual files mixed
 - rewarm the two pipelines on app launch (mic + system) and verify airpods on/off transitions no longer create silent segments or duplicates (cover -10877 scenario)
 - run long-session tests with deliberate device switches + external monitor changes and capture results in project journal
+- build dual warm pipelines with coordinated lifecycle:
+  - add warm-prep with retries inside each recorder; if all retries fail, surface a blocking error instead of falling back silently
+  - introduce a `RecordingSessionCoordinator` that manages shared context creation, warm prep, start/stop, and device-change sequencing
+  - replace the temporary airpods reroute with a dedicated output pipeline that preserves the user’s chosen device while we capture and restores on stop
+  - pause/release warmed resources when the app backgrounds and rewarm on return to foreground
+  - expose debug hooks to simulate device changes/telephony mode so we can regression-test race conditions
 
 ## transcription pipeline
 - gate mp3 conversion behind explicit ffmpeg checks, add one retry with backoff, and surface conversion failures prominently in the ui
