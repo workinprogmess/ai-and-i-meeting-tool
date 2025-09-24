@@ -12,6 +12,7 @@ ai meeting intelligence - native swiftui application for world-class user experi
 - ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
 - ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
 - 🎯 focus: deliver an airtight record → switch devices → mix → mp3 → transcribe loop with clear telemetry
+- 🛠 dev helper script `native/Scripts/load_transcription_env.sh` now loads transcription keys from `~/.config/ai-and-i/env` so run-scheme env vars stay clean while cli tools keep working
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md
@@ -287,6 +288,7 @@ private func shouldSwitchToNewDevice() -> Bool {
 - mixer script drops segments when directory names contain `&`; no retries surfaced to ui
 - AirPods output reroute may strand user audio after recording ends
 - transcript action tray shows share/export/correct buttons that do nothing
+- plan: build coordinated warm pipelines with a recording session coordinator, retries, and proper output routing so long sessions with airpods remain reliable
 
 ### ui polish to revisit
 - hide unfinished actions or wire them up end-to-end
