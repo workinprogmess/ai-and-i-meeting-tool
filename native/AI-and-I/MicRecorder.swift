@@ -63,7 +63,11 @@ class MicRecorder: ObservableObject {
     private var sessionID: String = ""
     private var sessionStartTime: Date = Date()
     private var sessionReferenceTime: TimeInterval = 0  // mach time for precision
-    
+
+    // MARK: - output preservation
+    private var preferredOutputDeviceID: AudioDeviceID?
+    private var preferredOutputDeviceName: String = "unknown"
+
     /// public accessor for the session timestamp (used for mixing)
     var currentSessionTimestamp: Int {
         Int(sessionReferenceTime)
@@ -76,13 +80,24 @@ class MicRecorder: ObservableObject {
     private var framesCaptured: Int = 0
     private var hasLoggedFormatMatch = false
     private var lastConversionLogTime = Date.distantPast
-    private var telephonyRetryCount = 0
-    private let maxTelephonyRetries = 3
     private var currentSampleRate: Double = 48000
-    private var previousOutputDeviceID: AudioDeviceID?
-    
     private var latestDeviceName: String = "unknown"
     private var latestQuality: AudioSegmentMetadata.AudioQuality = .high
+    private var warmEngine: AVAudioEngine?
+    private var tapInstalled = false
+    private let warmRetryLimit = 3
+    private let warmRetryDelayNanoseconds: UInt64 = 300_000_000 // 300ms
+
+    enum RecorderError: Error, LocalizedError {
+        case warmPreparationFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .warmPreparationFailed(let message):
+                return message
+            }
+        }
+    }
 
     // MARK: - helpers
     private func updateOnMain(_ block: @escaping () -> Void) {
@@ -130,9 +145,11 @@ class MicRecorder: ObservableObject {
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
-    func startSession(_ context: RecordingSessionContext) async {
+    func startSession(_ context: RecordingSessionContext) async throws {
         print("🎙️ starting mic recording session with context id: \(context.id)")
-        
+        capturePreferredOutputDeviceSnapshot()
+        try await prepareWarmPipelineIfNeeded()
+
         // use the shared session context
         sessionID = context.id
         sessionStartTime = context.startDate
@@ -152,23 +169,25 @@ class MicRecorder: ObservableObject {
     /// ends the recording session and saves metadata
     func endSession() {
         print("🛑 ending mic recording session")
-        
+
         guard isRecording else { return }
-        
+
         // cancel any pending switches
         debounceTimer?.cancel()
         needsSwitch = false
-        
+
+        restorePreferredOutputDeviceIfNeeded()
+
         // stop current segment
         stopCurrentSegment()
-        
+
         // save session metadata
         saveSessionMetadata()
-        
+
         state = .idle
         setIsRecording(false)
-
-        restorePreviousOutputDeviceIfNeeded()
+        preferredOutputDeviceID = nil
+        preferredOutputDeviceName = "unknown"
     }
     
     /// handles device change during recording (production-safe)
@@ -263,183 +282,111 @@ class MicRecorder: ObservableObject {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         hasLoggedFormatMatch = false
         lastConversionLogTime = Date.distantPast
-        
-        // skip device ID check - it can block during transitions
-        // we'll get the device info after engine is created
-        
-        // create new audio engine (doesn't throw, but can fail)
-        audioEngine = AVAudioEngine()
-        guard let engine = audioEngine else {
-            setErrorMessage("failed to create audio engine")
+
+        do {
+            try setupWarmEngineIfNeeded()
+        } catch {
+            setErrorMessage("failed to warm audio engine: \(error.localizedDescription)")
             return
         }
-        
-        // don't try to set device - avaudioengine uses system default automatically
-        let inputNode = engine.inputNode  // inputNode is not optional
-        
-        // get format first (safe to query from engine)
+
+        guard let engine = warmEngine else {
+            setErrorMessage("warm audio engine unavailable")
+            return
+        }
+
+        audioEngine = engine
+        let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
-        
-        // create target recording format (48khz mono standard)
         let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        
-        // defer device name/ID queries until after engine starts
-        // for now, use placeholder values
+
         currentDeviceID = "pending"
         setCurrentDeviceName("initializing...")
-        
+
         let negotiatedSampleRate = inputFormat.sampleRate
         print("📊 input format: \(negotiatedSampleRate)hz, \(inputFormat.channelCount)ch")
         print("📊 target format: \(recordingFormat.sampleRate)hz, \(recordingFormat.channelCount)ch")
         print("📊 formats equal: \(inputFormat == recordingFormat)")
-        
-        // assess quality
+
         let assessedQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
         setCurrentQuality(assessedQuality)
-        print("📊 assessed quality: \(assessedQuality.rawValue) for \(inputFormat.sampleRate)hz")
-        
-        // detect telephony mode (sub-44k sample rates) and retry to obtain full bandwidth
         if negotiatedSampleRate < 44100 {
-            telephonyRetryCount += 1
-            print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (attempt \(telephonyRetryCount)/\(maxTelephonyRetries))")
-            audioEngine = nil
-
-            if telephonyRetryCount <= maxTelephonyRetries {
-                controllerQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                    self?.startNewSegmentInternal()
-                }
-                return
-            } else {
-                print("⚠️ continuing with telephony sample rate after max retries")
-                telephonyRetryCount = 0
-            }
-        } else {
-            telephonyRetryCount = 0
+            print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
         }
 
         currentSampleRate = negotiatedSampleRate
-
-        // configure agc - will be adjusted after we get device name
-        agcEnabled = true  // default to enabled
+        agcEnabled = true
         currentGain = 2.5
-        
-        // quality guard - warn on telephony mode
         if assessedQuality == .low {
-            print("⚠️ low quality detected (\(inputFormat.sampleRate)hz)")
             setErrorMessage("mic in low quality mode - recording anyway")
         }
-        
-        // create segment file
+
         segmentNumber += 1
         let sessionTimestamp = Int(sessionReferenceTime)
         segmentFilePath = createSegmentFilePath(sessionTimestamp: sessionTimestamp, segmentNumber: segmentNumber)
-        
-        // use 16-bit PCM format instead of 32-bit float for the file
+
         var settings = recordingFormat.settings
         settings[AVFormatIDKey] = kAudioFormatLinearPCM
         settings[AVLinearPCMBitDepthKey] = 16
         settings[AVLinearPCMIsFloatKey] = false
         settings[AVLinearPCMIsBigEndianKey] = false
-        
+
         do {
-            audioFile = try AVAudioFile(forWriting: URL(fileURLWithPath: segmentFilePath),
-                                       settings: settings)
+            audioFile = try AVAudioFile(forWriting: URL(fileURLWithPath: segmentFilePath), settings: settings)
             print("📁 created audio file: \(segmentFilePath)")
         } catch {
-            print("❌ failed to create audio file: \(error)")
             setErrorMessage("failed to create audio file: \(error.localizedDescription)")
-            // clean up engine if file creation fails
-            audioEngine = nil
             return
         }
-        
-        // reset warmup
+
         isWarmedUp = false
         discardedFrames = 0
         framesCaptured = 0
-        
-        // record segment start time
         segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime
-        
-        // install tap with warmup logic (NEVER do heavy work in tap callback)
+
+        inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
-            // enqueue to writer queue - don't process in callback
             self?.writerQueue.async {
                 self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
             }
         }
-        
-        // prepare and start engine (with retry for -10851)
-        engine.prepare()
-        do {
-            try engine.start()
-            
-            // NOW it's safe to query device info after engine is running
-            let deviceName: String
-            if let deviceInfo = fetchDefaultInputDeviceInfo() {
-                currentDeviceAudioID = deviceInfo.id
-                currentDeviceID = String(deviceInfo.id)
-                deviceName = deviceInfo.name
-                setCurrentDeviceName(deviceName)
-                enforceSampleRateIfNeeded(for: deviceInfo.id)
-            } else {
-                currentDeviceAudioID = 0
-                currentDeviceID = "unknown"
-                deviceName = "unknown"
-                setCurrentDeviceName(deviceName)
-            }
-            
-            // adjust AGC based on actual device
-            if deviceName.lowercased().contains("airpod") {
-                agcEnabled = false  // airpods have their own processing
-                currentGain = 1.0
-                print("🎧 airpods detected - agc disabled")
-                print("🎧 airpods format: \(inputFormat.sampleRate)hz reported")
-                print("🎧 airpods quality: \(assessedQuality.rawValue)")
-            } else if deviceName.lowercased().contains("mac") || deviceName.lowercased().contains("built") {
-                agcEnabled = true  // built-in mics need boost
-                currentGain = 2.5
-                print("🎚️ built-in mic - agc enabled with 2.5x gain")
-            } else {
-                agcEnabled = false  // other external devices
-                currentGain = 1.0
-            }
-            
-            print("✅ mic segment #\(segmentNumber) started - recording with \(deviceName)")
-            let runningFormat = inputNode.outputFormat(forBus: 0)
-            print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
+        tapInstalled = true
 
-            if !deviceName.lowercased().contains("airpod") {
-                restorePreviousOutputDeviceIfNeeded()
-            }
-        } catch {
-            let nsError = error as NSError
-            if nsError.code == -10851 {
-                // device still transitioning - need to retry
-                print("⚠️ engine start failed with -10851 (device transitioning)")
-                setErrorMessage("device still transitioning - retrying...")
-                
-                // clean up this attempt
-                engine.inputNode.removeTap(onBus: 0)
-                audioEngine = nil
-                audioFile = nil
-                
-                // retry after delay
-                controllerQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self = self else { return }
-                    if self.state == .switching || self.state == .recording {
-                        print("🔄 retrying segment start after -10851 error...")
-                        self.startNewSegmentInternal()
-                    }
-                }
-            } else {
-                setErrorMessage("failed to start audio engine: \(error)")
-                print("❌ engine start failed: \(error)")
-                // clean up on failure
-                engine.inputNode.removeTap(onBus: 0)
-                audioEngine = nil
-                audioFile = nil
-            }
+        let deviceName: String
+        if let deviceInfo = fetchDefaultInputDeviceInfo() {
+            currentDeviceAudioID = deviceInfo.id
+            currentDeviceID = String(deviceInfo.id)
+            deviceName = deviceInfo.name
+            setCurrentDeviceName(deviceName)
+            enforceSampleRateIfNeeded(for: deviceInfo.id)
+        } else {
+            currentDeviceAudioID = 0
+            currentDeviceID = "unknown"
+            deviceName = "unknown"
+            setCurrentDeviceName(deviceName)
+        }
+
+        if deviceName.lowercased().contains("airpod") {
+            agcEnabled = false
+            currentGain = 1.0
+            print("🎧 airpods detected - agc disabled")
+            print("🎧 airpods format: \(inputFormat.sampleRate)hz reported")
+            print("🎧 airpods quality: \(assessedQuality.rawValue)")
+        } else if deviceName.lowercased().contains("mac") || deviceName.lowercased().contains("built") {
+            agcEnabled = true
+            currentGain = 2.5
+            print("🎚️ built-in mic - agc enabled with 2.5x gain")
+        } else {
+            agcEnabled = false
+            currentGain = 1.0
+        }
+
+        print("✅ mic segment #\(segmentNumber) started - recording with \(deviceName)")
+        let runningFormat = inputNode.outputFormat(forBus: 0)
+        print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
+
+        if !deviceName.lowercased().contains("airpod") {
+            print("🔊 monitoring continues on \(deviceName)")
         }
     }
     
@@ -464,23 +411,12 @@ class MicRecorder: ObservableObject {
         // record end time
         let segmentEndTime = Date().timeIntervalSince1970 - sessionReferenceTime
         
-        // stop engine (non-blocking approach to prevent hangs)
-        if let engine = audioEngine {
-            print("🔧 removing tap...")
-            // remove tap first to stop audio flow
-            engine.inputNode.removeTap(onBus: 0)
+        if tapInstalled {
+            audioEngine?.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
             print("✅ tap removed")
-            
-            // DON'T call engine.stop() - it can block during device transitions
-            // instead, just abandon the engine and let ARC clean it up
-            // this prevents the app from hanging when airpods connect
-            print("🔧 abandoning engine (non-blocking)...")
         }
-        
-        // clear engine reference immediately - let ARC handle cleanup
-        audioEngine = nil
-        print("✅ engine released")
-        
+
         // close file
         print("🔧 closing file...")
         audioFile = nil
@@ -506,6 +442,16 @@ class MicRecorder: ObservableObject {
         }
         
         print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
+    }
+
+    func prepareWarmPipeline() async throws {
+        try await prepareWarmPipelineIfNeeded()
+    }
+
+    func shutdownWarmPipeline() {
+        controllerQueue.async { [weak self] in
+            self?.resetWarmEngine()
+        }
     }
     
     /// processes audio buffer with warmup and conversion
@@ -600,13 +546,6 @@ class MicRecorder: ObservableObject {
         let newFormat = newDevice.inputFormat(forBus: 0)
         let newQuality = AudioSegmentMetadata.assessQuality(sampleRate: newFormat.sampleRate)
         
-        // block auto-switch to telephony mode
-        if newQuality == .low && latestQuality != .low {
-            print("🚫 blocking switch to low quality device")
-            setErrorMessage("new device is low quality - staying with current")
-            return false
-        }
-        
         return true
     }
     
@@ -683,35 +622,177 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
+        refreshPreferredOutputSnapshotIfNeeded()
+
         guard let info = fetchDefaultInputDeviceInfo() else { return }
         let lowercasedName = info.name.lowercased()
 
         if lowercasedName.contains("airpod") {
-            guard previousOutputDeviceID == nil else { return }
-            guard let currentOutput = DeviceChangeMonitor.currentOutputDeviceID(),
-                  DeviceChangeMonitor.isAirPods(deviceID: currentOutput),
-                  let builtIn = DeviceChangeMonitor.builtInOutputDeviceID(),
-                  builtIn != currentOutput else { return }
-
-            if DeviceChangeMonitor.setDefaultOutputDevice(builtIn) {
-                previousOutputDeviceID = currentOutput
-                print("🔊 temporarily routing output to built-in speakers for airpods recording")
-            }
+            restorePreferredOutputDeviceIfNeeded()
         } else {
-            restorePreviousOutputDeviceIfNeeded()
+            refreshPreferredOutputSnapshotIfNeeded(force: true)
         }
     }
 
-    private func restorePreviousOutputDeviceIfNeeded() {
-        guard let previous = previousOutputDeviceID else { return }
-
-        if DeviceChangeMonitor.setDefaultOutputDevice(previous) {
-            if let name = DeviceChangeMonitor.deviceName(for: previous) {
-                print("🔊 restored output device to \(name)")
-            }
+    private func capturePreferredOutputDeviceSnapshot() {
+        guard let outputID = DeviceChangeMonitor.currentOutputDeviceID() else {
+            print("⚠️ unable to detect current output device for preservation")
+            return
         }
 
-        previousOutputDeviceID = nil
+        preferredOutputDeviceID = outputID
+        preferredOutputDeviceName = DeviceChangeMonitor.deviceName(for: outputID) ?? "unknown"
+        print("💾 preserved output device: \(preferredOutputDeviceName)")
+    }
+
+    private func refreshPreferredOutputSnapshotIfNeeded(force: Bool = false) {
+        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
+        let currentName = DeviceChangeMonitor.deviceName(for: currentOutputID) ?? "unknown"
+
+        if force {
+            if preferredOutputDeviceID != currentOutputID {
+                preferredOutputDeviceID = currentOutputID
+                preferredOutputDeviceName = currentName
+                print("💾 updated preferred output device: \(preferredOutputDeviceName)")
+            }
+            return
+        }
+
+        guard !DeviceChangeMonitor.isAirPods(deviceID: currentOutputID) else { return }
+
+        if preferredOutputDeviceID != currentOutputID {
+            preferredOutputDeviceID = currentOutputID
+            preferredOutputDeviceName = currentName
+            print("💾 updated preferred output device: \(preferredOutputDeviceName)")
+        }
+    }
+
+    private func restorePreferredOutputDeviceIfNeeded() {
+        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
+
+        if !DeviceChangeMonitor.isAirPods(deviceID: currentOutputID) {
+            refreshPreferredOutputSnapshotIfNeeded(force: true)
+            return
+        }
+
+        let targetID = preferredOutputDeviceID ?? DeviceChangeMonitor.builtInOutputDeviceID()
+
+        guard let targetID else {
+            print("⚠️ no preserved output device available to restore")
+            return
+        }
+
+        if targetID == currentOutputID {
+            return
+        }
+
+        let targetName = DeviceChangeMonitor.deviceName(for: targetID) ?? preferredOutputDeviceName
+
+        if DeviceChangeMonitor.setDefaultOutputDevice(targetID) {
+            preferredOutputDeviceID = targetID
+            preferredOutputDeviceName = targetName
+            print("🔁 restored output device to \(targetName)")
+        } else {
+            print("⚠️ failed to restore output device to \(targetName)")
+        }
+    }
+
+    private func prepareWarmPipelineIfNeeded() async throws {
+#if canImport(AppKit)
+        let permission = AVAudioApplication.shared.recordPermission
+        guard permission == .granted else {
+            let state: String
+            switch permission {
+            case .granted: state = "granted"
+            case .denied: state = "denied"
+            case .undetermined: state = "undetermined"
+            @unknown default: state = "unknown"
+            }
+            print("🎧 skipping mic warm prep – record permission not granted yet (current: \(state))")
+            return
+        }
+#endif
+
+        guard fetchDefaultInputDeviceInfo() != nil else {
+            print("🎧 skipping mic warm prep – no default input device available")
+            return
+        }
+
+        var attempt = 0
+        var lastError: Error?
+        while attempt < warmRetryLimit {
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    controllerQueue.async { [weak self] in
+                        guard let self else {
+                            continuation.resume(throwing: RecorderError.warmPreparationFailed("mic recorder unavailable"))
+                            return
+                        }
+                        do {
+                            try self.setupWarmEngineIfNeeded()
+                            continuation.resume(returning: ())
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+                return
+            } catch {
+                lastError = error
+                attempt += 1
+                print("⚠️ mic warm pipeline attempt \(attempt) failed: \(error.localizedDescription)")
+                controllerQueue.async { [weak self] in
+                    self?.resetWarmEngine()
+                }
+                if attempt < warmRetryLimit {
+                    try? await Task.sleep(nanoseconds: warmRetryDelayNanoseconds)
+                }
+            }
+        }
+        throw RecorderError.warmPreparationFailed(lastError?.localizedDescription ?? "unknown warm pipeline error")
+    }
+
+    private func setupWarmEngineIfNeeded() throws {
+        let execute = {
+            if let engine = self.warmEngine {
+                if !engine.isRunning {
+                    engine.prepare()
+                    try engine.start()
+                }
+                return
+            }
+
+            let engine = AVAudioEngine()
+            engine.prepare()
+            try engine.start()
+            self.warmEngine = engine
+            print("🔥 mic warm pipeline ready")
+        }
+
+        if Thread.isMainThread {
+            try execute()
+        } else {
+            var capturedError: Error?
+            let semaphore = DispatchSemaphore(value: 0)
+            DispatchQueue.main.async {
+                do {
+                    try execute()
+                } catch {
+                    capturedError = error
+                }
+                semaphore.signal()
+            }
+            semaphore.wait()
+            if let error = capturedError {
+                throw error
+            }
+        }
+    }
+
+    private func resetWarmEngine() {
+        warmEngine?.stop()
+        warmEngine = nil
+        tapInstalled = false
     }
 
     /// creates segment file path

@@ -21,7 +21,11 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private var stream: SCStream?
     private var streamOutput: SystemStreamOutput?
     private var filter: SCContentFilter?
-    
+    private var preparedFilter: SCContentFilter?
+    private var preparedDisplay: SCDisplay?
+    private let warmRetryLimit = 3
+    private let warmRetryDelayNanoseconds: UInt64 = 300_000_000
+
     // MARK: - recording state
     private var audioFile: AVAudioFile?
     private var segmentMetadata: [AudioSegmentMetadata] = []
@@ -51,16 +55,79 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private var framesCaptured: Int = 0
     
     // MARK: - helpers
-    private func performOnControllerQueue(_ block: @escaping () async -> Void) async {
+    enum RecorderError: Error, LocalizedError {
+        case warmPreparationFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .warmPreparationFailed(let message):
+                return message
+            }
+        }
+    }
+
+    private func performOnControllerQueue(_ block: @escaping () async throws -> Void) async throws {
         let queue = controllerQueue
-        await withCheckedContinuation { continuation in
+        try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 Task {
-                    await block()
-                    continuation.resume()
+                    do {
+                        try await block()
+                        continuation.resume(returning: ())
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
         }
+    }
+
+    private func prepareWarmPipelineIfNeeded() async throws {
+        if preparedFilter != nil { return }
+        var attempt = 0
+        var lastError: Error?
+        while attempt < warmRetryLimit {
+            do {
+                let filter = try await buildWarmFilter()
+                preparedFilter = filter
+                return
+            } catch {
+                lastError = error
+                attempt += 1
+                print("⚠️ system warm pipeline attempt \(attempt) failed: \(error.localizedDescription)")
+                if attempt < warmRetryLimit {
+                    try? await Task.sleep(nanoseconds: warmRetryDelayNanoseconds)
+                }
+            }
+        }
+        throw RecorderError.warmPreparationFailed(lastError?.localizedDescription ?? "unable to prepare system audio pipeline")
+    }
+
+    private func buildWarmFilter() async throws -> SCContentFilter {
+        let content = try await SCShareableContent.current
+        guard let display = content.displays.first else {
+            throw RecorderError.warmPreparationFailed("no display found")
+        }
+        preparedDisplay = display
+        let excludedApps = content.applications.filter { app in
+            app.applicationName.lowercased().contains("ai&i") ||
+            app.applicationName.lowercased().contains("ai-and-i")
+        }
+        return SCContentFilter(display: display,
+                               excludingApplications: excludedApps,
+                               exceptingWindows: [])
+    }
+
+    private func resolvedContentFilter() async throws -> SCContentFilter {
+        if let activeFilter = filter {
+            return activeFilter
+        }
+        if let cached = preparedFilter {
+            return cached
+        }
+        let filter = try await buildWarmFilter()
+        preparedFilter = filter
+        return filter
     }
 
     private func updateOnMain(_ block: @escaping () -> Void) {
@@ -90,8 +157,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
-    func startSession(_ context: RecordingSessionContext) async {
+    func startSession(_ context: RecordingSessionContext) async throws {
         print("🔊 starting system audio recording session with context id: \(context.id)")
+        try await prepareWarmPipelineIfNeeded()
         
         // use the shared session context
         sessionID = context.id
@@ -104,8 +172,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         state = .recording
         setIsRecording(true)
         
-        await performOnControllerQueue { [weak self] in
-            await self?.startNewSegment()
+        try await performOnControllerQueue { [weak self] in
+            guard let self else { throw RecorderError.warmPreparationFailed("system recorder unavailable") }
+            try await self.startNewSegment()
         }
     }
     
@@ -122,7 +191,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         needsSwitch = false
         
         // stop current segment on controller queue
-        await performOnControllerQueue { [weak self] in
+        try? await performOnControllerQueue { [weak self] in
             await self?.stopCurrentSegment()
         }
         
@@ -167,6 +236,15 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             controllerQueue.asyncAfter(deadline: .now() + 1.0, execute: workItem)
         }
     }
+
+    func prepareWarmPipeline() async throws {
+        try await prepareWarmPipelineIfNeeded()
+    }
+
+    func shutdownWarmPipeline() {
+        preparedFilter = nil
+        preparedDisplay = nil
+    }
     
     /// performs the actual switch after debounce
     private func performDebouncedSwitch() async {
@@ -182,16 +260,25 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         print("🔄 performing debounced system audio switch...")
         
         // safe teardown
-        await performOnControllerQueue { [weak self] in
-            await self?.stopCurrentSegment()
+        do {
+            try await performOnControllerQueue { [weak self] in
+                await self?.stopCurrentSegment()
+            }
+        } catch {
+            setErrorMessage("system audio switch teardown failed: \(error.localizedDescription)")
         }
         
         // let hardware settle
         try? await Task.sleep(nanoseconds: 200_000_000)  // 0.2s
         
         // safe restart
-        await performOnControllerQueue { [weak self] in
-            await self?.startNewSegment()
+        do {
+            try await performOnControllerQueue { [weak self] in
+                guard let self else { throw RecorderError.warmPreparationFailed("system recorder unavailable") }
+                try await self.startNewSegment()
+            }
+        } catch {
+            setErrorMessage("system audio switch restart failed: \(error.localizedDescription)")
         }
         
         state = .recording
@@ -201,38 +288,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     // MARK: - private implementation
     
     /// starts a new segment
-    private func startNewSegment() async {
+    private func startNewSegment() async throws {
         print("📝 starting new system segment #\(segmentNumber + 1)")
         
         do {
-            // get shareable content (may fail during display changes)
-            print("🔍 requesting shareable content...")
-            let content: SCShareableContent
-            do {
-                content = try await SCShareableContent.current
-                print("✅ got shareable content")
-            } catch {
-                // display might be transitioning (external monitor plug/unplug)
-                setErrorMessage("display transitioning: \(error.localizedDescription)")
-                print("⚠️ can't get shareable content (display transitioning): \(error)")
-                return
-            }
-            
-            guard let display = content.displays.first else {
-                setErrorMessage("no display found")
-                print("❌ no display found for system audio")
-                return
-            }
-            
-            // create filter (exclude our app to prevent feedback)
-            let excludedApps = content.applications.filter { app in
-                app.applicationName.lowercased().contains("ai&i") ||
-                app.applicationName.lowercased().contains("ai-and-i")
-            }
-            filter = SCContentFilter(display: display,
-                                    excludingApplications: excludedApps,
-                                    exceptingWindows: [])
-            
+            let resolvedFilter = try await resolvedContentFilter()
+            filter = resolvedFilter
+
             // configure stream for audio only
             let config = SCStreamConfiguration()
             config.capturesAudio = true
@@ -290,6 +352,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         } catch {
             setErrorMessage("system capture failed: \(error.localizedDescription)")
             print("❌ system capture start failed: \(error)")
+            throw error
         }
     }
     
