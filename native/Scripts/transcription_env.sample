@@ -1,0 +1,4 @@
+# copy this file to ~/.config/ai-and-i/env and replace with real keys
+export GEMINI_API_KEY="your-gemini-key"
+export DEEPGRAM_API_KEY="your-deepgram-key"
+export ASSEMBLYAI_API_KEY="your-assemblyai-key"
