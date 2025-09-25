@@ -207,6 +207,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         guard isRecording else { return }
         
         print("🔄 system audio change: \(reason)")
+
+        let normalizedReason = reason.lowercased()
+        let isOutputRelated = normalizedReason.contains("output") || normalizedReason.contains("display") || normalizedReason.contains("system") || normalizedReason.contains("debug")
+        guard isOutputRelated else {
+            print("ℹ️ system audio: ignoring non-output change (reason: \(reason))")
+            return
+        }
         
         // CRITICAL: Never do any work in device change callbacks
         // Just set flag and schedule deferred work to avoid deadlock
@@ -343,9 +350,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             // add audio output handler
             let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
             try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
-            
-            // start capture (use optional chaining like working version)
-            try await stream?.startCapture()
+
+            // start capture with retries (handles transient -10877 during device switches)
+            try await startCaptureWithRetry(stream)
             
             print("✅ system segment #\(segmentNumber) started")
             
@@ -354,6 +361,27 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             print("❌ system capture start failed: \(error)")
             throw error
         }
+    }
+
+    private func startCaptureWithRetry(_ stream: SCStream?) async throws {
+        guard let stream else { throw RecorderError.warmPreparationFailed("missing system stream") }
+
+        var attempt = 0
+        var lastError: Error?
+        while attempt < warmRetryLimit {
+            do {
+                try await stream.startCapture()
+                return
+            } catch {
+                lastError = error
+                attempt += 1
+                print("⚠️ system stream start attempt \(attempt) failed: \(error.localizedDescription)")
+                if attempt < warmRetryLimit {
+                    try? await Task.sleep(nanoseconds: warmRetryDelayNanoseconds)
+                }
+            }
+        }
+        throw RecorderError.warmPreparationFailed(lastError?.localizedDescription ?? "system stream start failed")
     }
     
     /// stops current segment and saves metadata
