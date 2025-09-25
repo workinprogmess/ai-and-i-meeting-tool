@@ -284,7 +284,7 @@ class MicRecorder: ObservableObject {
         lastConversionLogTime = Date.distantPast
 
         do {
-            try setupWarmEngineIfNeeded()
+            try setupWarmEngineIfNeeded(startImmediately: false)
         } catch {
             setErrorMessage("failed to warm audio engine: \(error.localizedDescription)")
             return
@@ -384,6 +384,13 @@ class MicRecorder: ObservableObject {
         print("✅ mic segment #\(segmentNumber) started - recording with \(deviceName)")
         let runningFormat = inputNode.outputFormat(forBus: 0)
         print("🎚️ engine running sample rate: \(runningFormat.sampleRate)hz")
+
+        do {
+            try setupWarmEngineIfNeeded(startImmediately: true)
+        } catch {
+            setErrorMessage("failed to start audio engine: \(error.localizedDescription)")
+            return
+        }
 
         if !deviceName.lowercased().contains("airpod") {
             print("🔊 monitoring continues on \(deviceName)")
@@ -624,14 +631,7 @@ class MicRecorder: ObservableObject {
     private func prepareOutputRoutingForCurrentInputDevice() {
         refreshPreferredOutputSnapshotIfNeeded()
 
-        guard let info = fetchDefaultInputDeviceInfo() else { return }
-        let lowercasedName = info.name.lowercased()
-
-        if lowercasedName.contains("airpod") {
-            restorePreferredOutputDeviceIfNeeded()
-        } else {
-            refreshPreferredOutputSnapshotIfNeeded(force: true)
-        }
+        refreshPreferredOutputSnapshotIfNeeded(force: true)
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
@@ -718,44 +718,13 @@ class MicRecorder: ObservableObject {
             return
         }
 
-        var attempt = 0
-        var lastError: Error?
-        while attempt < warmRetryLimit {
-            do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    controllerQueue.async { [weak self] in
-                        guard let self else {
-                            continuation.resume(throwing: RecorderError.warmPreparationFailed("mic recorder unavailable"))
-                            return
-                        }
-                        do {
-                            try self.setupWarmEngineIfNeeded()
-                            continuation.resume(returning: ())
-                        } catch {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
-                return
-            } catch {
-                lastError = error
-                attempt += 1
-                print("⚠️ mic warm pipeline attempt \(attempt) failed: \(error.localizedDescription)")
-                controllerQueue.async { [weak self] in
-                    self?.resetWarmEngine()
-                }
-                if attempt < warmRetryLimit {
-                    try? await Task.sleep(nanoseconds: warmRetryDelayNanoseconds)
-                }
-            }
-        }
-        throw RecorderError.warmPreparationFailed(lastError?.localizedDescription ?? "unknown warm pipeline error")
+        try await setupWarmEngineAsync(startImmediately: false)
     }
 
-    private func setupWarmEngineIfNeeded() throws {
+    private func setupWarmEngineIfNeeded(startImmediately: Bool = true) throws {
         let execute = {
             if let engine = self.warmEngine {
-                if !engine.isRunning {
+                if startImmediately, !engine.isRunning {
                     engine.prepare()
                     try engine.start()
                 }
@@ -763,10 +732,12 @@ class MicRecorder: ObservableObject {
             }
 
             let engine = AVAudioEngine()
-            engine.prepare()
-            try engine.start()
+            if startImmediately {
+                engine.prepare()
+                try engine.start()
+            }
             self.warmEngine = engine
-            print("🔥 mic warm pipeline ready")
+            print(startImmediately ? "🔥 mic warm pipeline ready" : "🔥 mic warm engine primed (will start on first segment)")
         }
 
         if Thread.isMainThread {
@@ -787,6 +758,41 @@ class MicRecorder: ObservableObject {
                 throw error
             }
         }
+    }
+
+    private func setupWarmEngineAsync(startImmediately: Bool) async throws {
+        var attempt = 0
+        var lastError: Error?
+        while attempt < warmRetryLimit {
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    controllerQueue.async { [weak self] in
+                        guard let self else {
+                            continuation.resume(throwing: RecorderError.warmPreparationFailed("mic recorder unavailable"))
+                            return
+                        }
+                        do {
+                            try self.setupWarmEngineIfNeeded(startImmediately: startImmediately)
+                            continuation.resume(returning: ())
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+                return
+            } catch {
+                lastError = error
+                attempt += 1
+                print("⚠️ mic warm pipeline attempt \(attempt) failed: \(error.localizedDescription)")
+                controllerQueue.async { [weak self] in
+                    self?.resetWarmEngine()
+                }
+                if attempt < warmRetryLimit {
+                    try? await Task.sleep(nanoseconds: warmRetryDelayNanoseconds)
+                }
+            }
+        }
+        throw RecorderError.warmPreparationFailed(lastError?.localizedDescription ?? "unknown warm pipeline error")
     }
 
     private func resetWarmEngine() {
