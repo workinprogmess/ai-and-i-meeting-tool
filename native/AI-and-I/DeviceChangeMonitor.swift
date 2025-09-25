@@ -284,9 +284,9 @@ class DeviceChangeMonitor: ObservableObject {
         if newDevice != currentOutputDevice {
             print("🔊 switched from '\(currentOutputDevice)' to '\(newDevice)'")
             currentOutputDevice = newDevice
-            
+        
             // output changes might affect system audio capture
-            // but typically screencapturekit handles this internally
+            onSystemDeviceChange?(reason)
         }
     }
     
@@ -294,7 +294,7 @@ class DeviceChangeMonitor: ObservableObject {
         // device was added or removed
         // check if it affects current defaults
         updateCurrentDevices()
-        
+
         // notify recorders to check their devices
         onMicDeviceChange?("device list changed")
     }
