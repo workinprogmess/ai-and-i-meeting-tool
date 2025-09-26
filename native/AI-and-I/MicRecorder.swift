@@ -176,8 +176,6 @@ class MicRecorder: ObservableObject {
         debounceTimer?.cancel()
         needsSwitch = false
 
-        restorePreferredOutputDeviceIfNeeded()
-
         // stop current segment
         stopCurrentSegment()
 
@@ -424,6 +422,9 @@ class MicRecorder: ObservableObject {
             print("✅ tap removed")
         }
 
+        audioEngine?.stop()
+        print("🛑 audio engine stopped for mic segment")
+
         // close file
         print("🔧 closing file...")
         audioFile = nil
@@ -629,8 +630,6 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
-        refreshPreferredOutputSnapshotIfNeeded()
-
         refreshPreferredOutputSnapshotIfNeeded(force: true)
     }
 
@@ -649,51 +648,10 @@ class MicRecorder: ObservableObject {
         guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
         let currentName = DeviceChangeMonitor.deviceName(for: currentOutputID) ?? "unknown"
 
-        if force {
-            if preferredOutputDeviceID != currentOutputID {
-                preferredOutputDeviceID = currentOutputID
-                preferredOutputDeviceName = currentName
-                print("💾 updated preferred output device: \(preferredOutputDeviceName)")
-            }
-            return
-        }
-
-        guard !DeviceChangeMonitor.isAirPods(deviceID: currentOutputID) else { return }
-
-        if preferredOutputDeviceID != currentOutputID {
+        if force || preferredOutputDeviceID != currentOutputID {
             preferredOutputDeviceID = currentOutputID
             preferredOutputDeviceName = currentName
             print("💾 updated preferred output device: \(preferredOutputDeviceName)")
-        }
-    }
-
-    private func restorePreferredOutputDeviceIfNeeded() {
-        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
-
-        if !DeviceChangeMonitor.isAirPods(deviceID: currentOutputID) {
-            refreshPreferredOutputSnapshotIfNeeded(force: true)
-            return
-        }
-
-        let targetID = preferredOutputDeviceID ?? DeviceChangeMonitor.builtInOutputDeviceID()
-
-        guard let targetID else {
-            print("⚠️ no preserved output device available to restore")
-            return
-        }
-
-        if targetID == currentOutputID {
-            return
-        }
-
-        let targetName = DeviceChangeMonitor.deviceName(for: targetID) ?? preferredOutputDeviceName
-
-        if DeviceChangeMonitor.setDefaultOutputDevice(targetID) {
-            preferredOutputDeviceID = targetID
-            preferredOutputDeviceName = targetName
-            print("🔁 restored output device to \(targetName)")
-        } else {
-            print("⚠️ failed to restore output device to \(targetName)")
         }
     }
 
