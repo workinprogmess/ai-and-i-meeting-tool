@@ -30,6 +30,7 @@
 		BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */; };
 		BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */; };
 		BEEFFE402E6DD97300A0CF8F /* ScreenCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */; };
+		BEEFFE432E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -77,6 +78,7 @@
 		BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitor.swift; sourceTree = "<group>"; };
 		BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureManager.swift; sourceTree = "<group>"; };
+		BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSessionCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +132,7 @@
 				BE95EABE2E71EB38001435A4 /* DeviceChangeMonitor.swift */,
 				BE95EABF2E71EB38001435A4 /* MicRecorder.swift */,
 				BE95EAC02E71EB38001435A4 /* SystemAudioRecorder.swift */,
+				BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */,
 				BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */,
 				BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */,
 				BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */,
@@ -322,6 +325,7 @@
 				BE95EAC12E71EB38001435A4 /* DeviceChangeMonitor.swift in Sources */,
 				BE95EAD02E73EBA0001435A4 /* TranscriptionTester.swift in Sources */,
 				BE95EAC22E71EB38001435A4 /* MicRecorder.swift in Sources */,
+				BEEFFE432E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift in Sources */,
 				BE95EAC32E71EB38001435A4 /* AudioSegmentMetadata.swift in Sources */,
 				BE95EAC42E71EB38001435A4 /* SystemAudioRecorder.swift in Sources */,
 				A1234567890ABCDEF001 /* AI_and_IApp.swift in Sources */,
