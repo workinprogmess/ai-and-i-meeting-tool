@@ -190,12 +190,12 @@ do {
             
             // add all mic segment inputs
             for (index, segment) in micSegments.enumerated() {
-                let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_00\(index + 1).wav"
+                let filename = URL(fileURLWithPath: segment.filePath).lastPathComponent
                 ffmpegCmd += " -i \(filename)"
             }
-            
+
             // add system audio input
-            let systemFilename = URL(string: systemSegments.first?.filePath ?? "")?.lastPathComponent ?? "system_\(sessionTimestamp)_001.wav"
+            let systemFilename = systemSegments.first.map { URL(fileURLWithPath: $0.filePath).lastPathComponent } ?? "system_\(sessionTimestamp)_001.wav"
             ffmpegCmd += " -i \(systemFilename)"
             
             // build filter complex
@@ -234,8 +234,8 @@ do {
             ffmpegCmd += "; [\(systemIndex)]aresample=48000,volume=\(systemReduction)[sys]"
             
             // final mix of concatenated mic with system audio
-            // use 'first' duration since mic is concatenated to match recording length
-            ffmpegCmd += "; [mic][sys]amix=inputs=2:duration=first[out]\""
+            // use 'longest' duration so the mix survives mic dropouts
+            ffmpegCmd += "; [mic][sys]amix=inputs=2:duration=longest[out]\""
             
             // output settings
             let outputFile = "mixed_\(sessionTimestamp).wav"
@@ -249,7 +249,7 @@ do {
             // pretty print for readability
             print("ffmpeg \\")
             for (index, segment) in micSegments.enumerated() {
-                let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_00\(index + 1).wav"
+                let filename = URL(fileURLWithPath: segment.filePath).lastPathComponent
                 print("  -i \(filename) \\")
             }
             print("  -i \(systemFilename) \\")
@@ -274,7 +274,7 @@ do {
             // use the systemReduction already calculated above
             print("    [\(systemIndex)]aresample=48000,volume=\(systemReduction)[sys];  # system resampled and \(systemReduction) \\")
             
-            print("    [mic][sys]amix=inputs=2:duration=first[out]\"  # mix with 'first' duration \\")
+            print("    [mic][sys]amix=inputs=2:duration=longest[out]\"  # mix with 'longest' duration \\")
             print("  -map \"[out]\" \\")
             print("  -acodec pcm_s16le \\")
             print("  -ar 48000 \\")
@@ -367,15 +367,14 @@ func executeFFmpegMixing(
     
     // add input files
     for segment in micSegments {
-        let filename = URL(string: segment.filePath)?.lastPathComponent ?? "mic_\(sessionTimestamp)_001.wav"
         args.append("-i")
-        args.append("\(recordingsPath)/\(filename)")
+        args.append(segment.filePath)
     }
     
-    // add system audio
-    let systemFilename = "system_\(sessionTimestamp)_001.wav"
+    // add system audio (use first segment path; future work can concatenate if needed)
+    let systemPath = systemSegments.first?.filePath ?? "\(recordingsPath)/system_\(sessionTimestamp)_001.wav"
     args.append("-i")
-    args.append("\(recordingsPath)/\(systemFilename)")
+    args.append(systemPath)
     
     // build filter complex
     var filterParts: [String] = []
@@ -401,8 +400,8 @@ func executeFFmpegMixing(
     let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"
     filterParts.append("[\(micSegments.count)]aresample=48000,volume=\(systemReduction)[sys]")
     
-    // mix together (use 'first' duration since mic is concatenated to correct length)
-    filterParts.append("[mic][sys]amix=inputs=2:duration=first[out]")
+    // mix together (use 'longest' duration so system audio can cover mic dropouts)
+    filterParts.append("[mic][sys]amix=inputs=2:duration=longest[out]")
     
     let filterComplex = filterParts.joined(separator: ";")
     args.append("-filter_complex")
