@@ -4,11 +4,11 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: transcription integration (0.2.0) 🚧 IN HARDENING
-**status**: core flows are implemented but reliability gaps remain before we can declare readiness.
+**status**: core flows implemented, warm pipeline architecture added but needs testing and refinement before declaring reliability.
 - ✅ milestone 1 foundation still holds (hot standby architecture, baseline metrics, core views)
-- ⚠️ device switching + mixed audio: needs rework to eliminate airpods-induced silent/duplicate segments and ensure monitor restarts per session
+- 🔄 device switching + mixed audio: warm pipeline architecture implemented (2025-09-26) but requires testing with long sessions and deliberate device switches
 - ⚠️ mixing pipeline: `mix-audio.swift` drops segments when filenames contain `&`; add session-scoped mixing + retries
-- ⚠️ launch + recording start latency: mic/system buffering currently blocks the main actor and can hang the ui
+- 🔄 launch + recording start latency: warm pipelines implemented (2025-09-26) to move processing off main actor, needs performance validation
 - ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
 - ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
 - 🎯 focus: deliver an airtight record → switch devices → mix → mp3 → transcribe loop with clear telemetry
@@ -1643,8 +1643,18 @@ result: overlapping audio becomes unintelligible to ai
 
 ---
 
-Last Updated: 2025-09-18 (Codex reliability review)
-Session Duration: Deep code review + milestone reassessment
+## recent development session (2025-09-26)
+**warm pipeline architecture implementation**: 8 commits implementing coordinated session management
+- `RecordingSessionCoordinator` centralizes mic/system recorder lifecycle with debug capabilities and telemetry
+- warm pipeline preparation eliminates cold-start device switching race conditions
+- performance monitoring and fail-fast error handling with no silent fallbacks
+- comprehensive fixes for startup crashes and output device management
+- **status**: architecture complete, needs real-world testing with airpods and long sessions
+
+---
+
+Last Updated: 2025-09-26 (Warm pipeline architecture implementation)
+Session Duration: Comprehensive warm pipeline system + systematic commit refinements
 Major Achievements (electron build, archived):
 - milestone 3.2: zero data loss + device resilience complete
 - strategic roadmap: human intelligence prioritized over commodity features  
