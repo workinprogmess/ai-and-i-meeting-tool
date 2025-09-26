@@ -88,6 +88,13 @@ class MicRecorder: ObservableObject {
     private let warmRetryLimit = 3
     private let warmRetryDelayNanoseconds: UInt64 = 300_000_000 // 300ms
 
+    // MARK: - stall detection
+    private var stallMonitor: DispatchSourceTimer?
+    private var lastStallFrameCount: Int = 0
+    private var stallDetectionStart: Date?
+    private let stallCheckInterval: TimeInterval = 1.0
+    private let stallDetectionWindow: TimeInterval = 3.0
+
     enum RecorderError: Error, LocalizedError {
         case warmPreparationFailed(String)
 
@@ -181,6 +188,8 @@ class MicRecorder: ObservableObject {
 
         // save session metadata
         saveSessionMetadata()
+
+        restorePreferredOutputDeviceIfNeeded()
 
         state = .idle
         setIsRecording(false)
@@ -350,13 +359,21 @@ class MicRecorder: ObservableObject {
         }
         tapInstalled = true
 
+        startStallMonitor()
+
         let deviceName: String
         if let deviceInfo = fetchDefaultInputDeviceInfo() {
             currentDeviceAudioID = deviceInfo.id
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
             setCurrentDeviceName(deviceName)
-            enforceSampleRateIfNeeded(for: deviceInfo.id)
+            if DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id) {
+                print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
+            } else if negotiatedSampleRate < 44_100 {
+                print("⚠️ low sample rate (\(negotiatedSampleRate)hz) – leaving device as is to prevent Core Audio errors")
+            } else {
+                enforceSampleRateIfNeeded(for: deviceInfo.id)
+            }
         } else {
             currentDeviceAudioID = 0
             currentDeviceID = "unknown"
@@ -415,7 +432,7 @@ class MicRecorder: ObservableObject {
         
         // record end time
         let segmentEndTime = Date().timeIntervalSince1970 - sessionReferenceTime
-        
+
         if tapInstalled {
             audioEngine?.inputNode.removeTap(onBus: 0)
             tapInstalled = false
@@ -424,6 +441,8 @@ class MicRecorder: ObservableObject {
 
         audioEngine?.stop()
         print("🛑 audio engine stopped for mic segment")
+
+        stopStallMonitor()
 
         // close file
         print("🔧 closing file...")
@@ -450,6 +469,45 @@ class MicRecorder: ObservableObject {
         }
         
         print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
+    }
+
+    private func startStallMonitor() {
+        stallMonitor?.cancel()
+        stallMonitor = nil
+        stallDetectionStart = nil
+        lastStallFrameCount = 0
+
+        let timer = DispatchSource.makeTimerSource(queue: controllerQueue)
+        timer.schedule(deadline: .now() + stallCheckInterval, repeating: stallCheckInterval)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            guard self.state == .recording else { return }
+
+            let currentFrames = self.writerQueue.sync { self.framesCaptured }
+            if currentFrames == self.lastStallFrameCount {
+                if self.stallDetectionStart == nil {
+                    self.stallDetectionStart = Date()
+                } else if let start = self.stallDetectionStart,
+                          Date().timeIntervalSince(start) >= self.stallDetectionWindow {
+                    let idleDuration = Date().timeIntervalSince(start)
+                    print("⚠️ mic writer stalled – no frames written for \(String(format: "%.1f", idleDuration))s")
+                    self.stallDetectionStart = Date()
+                }
+            } else {
+                self.stallDetectionStart = nil
+            }
+
+            self.lastStallFrameCount = currentFrames
+        }
+        timer.resume()
+        stallMonitor = timer
+    }
+
+    private func stopStallMonitor() {
+        stallMonitor?.cancel()
+        stallMonitor = nil
+        stallDetectionStart = nil
+        lastStallFrameCount = 0
     }
 
     func prepareWarmPipeline() async throws {
@@ -583,6 +641,10 @@ class MicRecorder: ObservableObject {
 
     private func enforceSampleRateIfNeeded(for deviceID: AudioDeviceID) {
         var desiredRate = 48_000.0
+        if let current = querySampleRate(for: deviceID), abs(current - desiredRate) < 1 {
+            print("🎚️ input device already at 48000hz – no enforcement needed")
+            return
+        }
         var size = UInt32(MemoryLayout<Double>.size)
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
@@ -630,7 +692,20 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
-        refreshPreferredOutputSnapshotIfNeeded(force: true)
+        guard let preservedID = preferredOutputDeviceID else {
+            refreshPreferredOutputSnapshotIfNeeded(force: true)
+            return
+        }
+
+        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
+        guard currentOutputID != preservedID else { return }
+
+        let currentName = DeviceChangeMonitor.deviceName(for: currentOutputID) ?? "unknown"
+        print("🔁 restoring output device from \(currentName) to \(preferredOutputDeviceName)")
+
+        if !DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
+            print("⚠️ failed to restore output device to \(preferredOutputDeviceName)")
+        }
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
@@ -652,6 +727,17 @@ class MicRecorder: ObservableObject {
             preferredOutputDeviceID = currentOutputID
             preferredOutputDeviceName = currentName
             print("💾 updated preferred output device: \(preferredOutputDeviceName)")
+        }
+    }
+
+    private func restorePreferredOutputDeviceIfNeeded() {
+        guard let preservedID = preferredOutputDeviceID else { return }
+        guard let currentID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
+        guard currentID != preservedID else { return }
+
+        print("🎧 restoring user output device after recording: \(preferredOutputDeviceName)")
+        if !DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
+            print("⚠️ failed to restore output device on session end")
         }
     }
 
