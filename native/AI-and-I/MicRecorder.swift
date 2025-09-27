@@ -94,6 +94,9 @@ class MicRecorder: ObservableObject {
     private var stallDetectionStart: Date?
     private let stallCheckInterval: TimeInterval = 1.0
     private let stallDetectionWindow: TimeInterval = 3.0
+    private var stallRecoveryInProgress = false
+    private var stallRecoveryAttempts = 0
+    private let stallRecoveryAttemptLimit = 3
 
     enum RecorderError: Error, LocalizedError {
         case warmPreparationFailed(String)
@@ -154,6 +157,8 @@ class MicRecorder: ObservableObject {
     /// starts a new recording session with shared session id
     func startSession(_ context: RecordingSessionContext) async throws {
         print("🎙️ starting mic recording session with context id: \(context.id)")
+        stallRecoveryAttempts = 0
+        stallRecoveryInProgress = false
         capturePreferredOutputDeviceSnapshot()
         try await prepareWarmPipelineIfNeeded()
 
@@ -491,7 +496,7 @@ class MicRecorder: ObservableObject {
                           Date().timeIntervalSince(start) >= self.stallDetectionWindow {
                     let idleDuration = Date().timeIntervalSince(start)
                     print("⚠️ mic writer stalled – no frames written for \(String(format: "%.1f", idleDuration))s")
-                    self.stallDetectionStart = Date()
+                    self.handleStallDetected(idleDuration: idleDuration)
                 }
             } else {
                 self.stallDetectionStart = nil
@@ -506,6 +511,51 @@ class MicRecorder: ObservableObject {
     private func stopStallMonitor() {
         stallMonitor?.cancel()
         stallMonitor = nil
+        stallDetectionStart = nil
+        lastStallFrameCount = 0
+    }
+
+    private func handleStallDetected(idleDuration: TimeInterval) {
+        guard !stallRecoveryInProgress else { return }
+
+        if stallRecoveryAttempts >= stallRecoveryAttemptLimit {
+            print("❌ mic stall persists after \(stallRecoveryAttempts) recovery attempts – please stop and restart recording")
+            setErrorMessage("microphone stalled – stop and restart")
+            return
+        }
+
+        stallRecoveryInProgress = true
+        stallDetectionStart = Date()
+
+        controllerQueue.async { [weak self] in
+            self?.recoverFromStall(idleDuration: idleDuration)
+        }
+    }
+
+    private func recoverFromStall(idleDuration: TimeInterval) {
+        defer { stallRecoveryInProgress = false }
+
+        guard state == .recording else { return }
+
+        stallRecoveryAttempts += 1
+        let attempt = stallRecoveryAttempts
+        print("🛠️ mic stall recovery attempt #\(attempt) (idle \(String(format: "%.1f", idleDuration))s)")
+
+        state = .switching
+        needsSwitch = false
+
+        stopCurrentSegmentInternal()
+
+        resetWarmEngine()
+
+        do {
+            try setupWarmEngineIfNeeded(startImmediately: false)
+        } catch {
+            print("⚠️ stall recovery warm prep failed: \(error.localizedDescription)")
+        }
+
+        startNewSegmentInternal()
+        state = .recording
         stallDetectionStart = nil
         lastStallFrameCount = 0
     }
@@ -692,20 +742,7 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
-        guard let preservedID = preferredOutputDeviceID else {
-            refreshPreferredOutputSnapshotIfNeeded(force: true)
-            return
-        }
-
-        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
-        guard currentOutputID != preservedID else { return }
-
-        let currentName = DeviceChangeMonitor.deviceName(for: currentOutputID) ?? "unknown"
-        print("🔁 restoring output device from \(currentName) to \(preferredOutputDeviceName)")
-
-        if !DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
-            print("⚠️ failed to restore output device to \(preferredOutputDeviceName)")
-        }
+        // no-op: we preserve the originally captured output device and restore it when the session ends
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
@@ -717,17 +754,6 @@ class MicRecorder: ObservableObject {
         preferredOutputDeviceID = outputID
         preferredOutputDeviceName = DeviceChangeMonitor.deviceName(for: outputID) ?? "unknown"
         print("💾 preserved output device: \(preferredOutputDeviceName)")
-    }
-
-    private func refreshPreferredOutputSnapshotIfNeeded(force: Bool = false) {
-        guard let currentOutputID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
-        let currentName = DeviceChangeMonitor.deviceName(for: currentOutputID) ?? "unknown"
-
-        if force || preferredOutputDeviceID != currentOutputID {
-            preferredOutputDeviceID = currentOutputID
-            preferredOutputDeviceName = currentName
-            print("💾 updated preferred output device: \(preferredOutputDeviceName)")
-        }
     }
 
     private func restorePreferredOutputDeviceIfNeeded() {
