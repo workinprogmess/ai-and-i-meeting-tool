@@ -29,6 +29,28 @@ struct RecordingSessionContext {
     }
 }
 
+private extension AVAudioPCMBuffer {
+    func deepCopy() -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else {
+            return nil
+        }
+        copy.frameLength = frameLength
+
+        let srcBuffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.audioBufferList)
+
+        for index in 0..<srcBuffers.count {
+            guard let srcData = srcBuffers[index].mData,
+                  let dstData = dstBuffers[index].mData else { continue }
+            let byteCount = Int(srcBuffers[index].mDataByteSize)
+            memcpy(dstData, srcData, byteCount)
+            dstBuffers[index].mDataByteSize = srcBuffers[index].mDataByteSize
+        }
+
+        return copy
+    }
+}
+
 extension AVAudioPCMBuffer: @unchecked Sendable {}
 
 /// manages microphone recording with segment-based approach
@@ -48,8 +70,6 @@ class MicRecorder: ObservableObject {
     // MARK: - thread safety (production-grade)
     private let controllerQueue = DispatchQueue(label: "mic.controller.queue", qos: .userInitiated)
     private let writerQueue = DispatchQueue(label: "mic.writer.queue", qos: .userInitiated)
-    private var needsSwitch = false  // atomic flag for pending switches
-    private var debounceTimer: DispatchWorkItem?
     
     // MARK: - state machine
     private enum RecordingState {
@@ -58,6 +78,11 @@ class MicRecorder: ObservableObject {
         case switching
     }
     private var state: RecordingState = .idle
+    private var pendingSwitchReason: String?
+    private var switchWorkItem: DispatchWorkItem?
+    private let settleDelayNanoseconds: UInt64 = 400_000_000 // 400ms settle between teardown/start
+    private let readinessRetryLimit = 10
+    private let readinessRetryDelayNanoseconds: UInt64 = 100_000_000 // 100ms between readiness polls
     
     // MARK: - session timing
     private var sessionID: String = ""
@@ -87,6 +112,11 @@ class MicRecorder: ObservableObject {
     private var tapInstalled = false
     private let warmRetryLimit = 3
     private let warmRetryDelayNanoseconds: UInt64 = 300_000_000 // 300ms
+    private var recordingEnabled = false
+    private let bufferCounterQueue = DispatchQueue(label: "mic.buffer.counter")
+    private var pendingBufferCount = 0
+    private var droppedBufferCount = 0
+    private let maxPendingBuffers = 8
 
     // MARK: - stall detection
     private var stallMonitor: DispatchSourceTimer?
@@ -174,8 +204,13 @@ class MicRecorder: ObservableObject {
         state = .recording
         setIsRecording(true)
         
-        // start first segment on controller queue
-        startNewSegment()
+        controllerQueue.async { [weak self] in
+            guard let self else { return }
+            self.resetWarmEngine()
+            if !self.startNewSegmentInternal(reason: "initial-start") {
+                self.setErrorMessage("failed to prepare audio pipelines")
+            }
+        }
     }
     
     /// ends the recording session and saves metadata
@@ -185,11 +220,13 @@ class MicRecorder: ObservableObject {
         guard isRecording else { return }
 
         // cancel any pending switches
-        debounceTimer?.cancel()
-        needsSwitch = false
+        switchWorkItem?.cancel()
+        pendingSwitchReason = nil
 
         // stop current segment
-        stopCurrentSegment()
+        controllerQueue.sync { [self] in
+            stopCurrentSegmentInternal(reason: "session-end")
+        }
 
         // save session metadata
         saveSessionMetadata()
@@ -205,92 +242,103 @@ class MicRecorder: ObservableObject {
     /// handles device change during recording (production-safe)
     func handleDeviceChange(reason: String) {
         guard isRecording else { return }
-        
+
         print("🔄 mic device change: \(reason)")
-        
-        // NEVER do audio work in the callback - just set flag and schedule
-        needsSwitch = true
-        
-        // if we're already debouncing, don't restart the timer - let it complete
-        // this prevents rapid events from constantly resetting the 2.5s delay
-        if debounceTimer != nil {
-            print("⏱️ already debouncing - ignoring new event to let timer complete")
+
+        controllerQueue.async { [weak self] in
+            self?.enqueueDeviceSwitchLocked(reason: reason)
+        }
+    }
+
+    private func enqueueDeviceSwitchLocked(reason: String) {
+        // rate limiting: allow at most 3 changes per window
+        let now = Date()
+        let windowStart = now.addingTimeInterval(-deviceChangeWindow)
+        if lastDeviceChangeTime < windowStart {
+            deviceChangeCount = 0
+        }
+        deviceChangeCount += 1
+        lastDeviceChangeTime = now
+
+        if deviceChangeCount > 3 {
+            print("⚠️ device changes too frequent - holding current mic")
+            setErrorMessage("devices changing rapidly - holding current mic")
             return
         }
-        
-        // schedule new debounce (2.5s for airpods stability - they need time to fully connect)
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.performDebouncedSwitch()
-            self?.debounceTimer = nil  // clear timer after execution
+
+        pendingSwitchReason = reason
+        schedulePendingSwitchLocked()
+    }
+
+    private func schedulePendingSwitchLocked() {
+        guard state != .switching else {
+            // switch in progress; latest reason already stored
+            return
         }
-        debounceTimer = workItem
+
+        switchWorkItem?.cancel()
+        let reason = pendingSwitchReason ?? "device-change"
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performSwitchLocked(reason: reason)
+        }
+        switchWorkItem = workItem
         controllerQueue.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
-    
-    /// performs the actual switch after debounce (on controller queue)
-    private func performDebouncedSwitch() {
-        // check conditions
-        guard needsSwitch else { return }
-        guard state != .switching else {
-            print("⏳ already switching - ignoring")
+
+    private func performSwitchLocked(reason: String) {
+        guard isRecording else { return }
+
+        if state == .switching {
+            pendingSwitchReason = reason
             return
         }
-        
-        // rate limiting check
-        deviceChangeCount += 1
-        if deviceChangeCount > 3 {
-            let windowStart = Date().addingTimeInterval(-deviceChangeWindow)
-            if lastDeviceChangeTime > windowStart {
-                print("⚠️ device changes too frequent - holding current mic")
-            setErrorMessage("devices changing rapidly - holding current mic")
-                needsSwitch = false
-                return
-            }
-            deviceChangeCount = 1
-        }
-        
-        lastDeviceChangeTime = Date()
-        
-        // begin switch
+
         state = .switching
-        needsSwitch = false
-        
-        print("🔄 performing debounced device switch...")
-        
+        pendingSwitchReason = nil
+        switchWorkItem = nil
+
+        print("🔄 performing device switch (reason: \(reason))")
+
         prepareOutputRoutingForCurrentInputDevice()
 
-        // safe teardown on controller queue
-        stopCurrentSegmentSafely()
-        
-        // let hardware settle
-        Thread.sleep(forTimeInterval: 0.2)
-        
-        // don't check quality - just switch (checking creates AVAudioEngine which can hang)
-        // safe startup on controller queue
-        startNewSegmentSafely()
-        
-        state = .recording
-        print("✅ device switch complete")
-    }
-    
-    // MARK: - private implementation
-    
-    /// starts a new segment (safe version for controller queue)
-    private func startNewSegmentSafely() {
-        // this runs on controller queue - safe to touch audio
-        startNewSegmentInternal()
-    }
-    
-    /// starts a new segment (public interface)
-    private func startNewSegment() {
-        // dispatch to controller queue for safety
-        controllerQueue.async { [weak self] in
-            self?.startNewSegmentInternal()
+        stopCurrentSegmentInternal(reason: reason)
+
+        if settleDelayNanoseconds > 0 {
+            Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
         }
+
+        resetWarmEngine()
+
+        guard startNewSegmentInternal(reason: reason) else {
+            state = .recording
+            return
+        }
+
+        state = .recording
+        print("✅ device switch complete (reason: \(reason))")
     }
-    
+
+    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> AVAudioFormat? {
+        for attempt in 0..<readinessRetryLimit {
+            let format = engine.inputNode.inputFormat(forBus: 0)
+            if format.sampleRate > 0 && format.channelCount > 0 {
+                if attempt > 0 {
+                    print("ℹ️ input format stabilized after \(attempt + 1) checks")
+                }
+                return format
+            }
+            Thread.sleep(forTimeInterval: Double(readinessRetryDelayNanoseconds) / 1_000_000_000)
+        }
+        print("⚠️ input format did not stabilize after \(readinessRetryLimit) attempts")
+        return nil
+    }
+
+    // MARK: - private implementation
+
     /// internal segment start (must be on controller queue)
-    private func startNewSegmentInternal() {
+    @discardableResult
+    private func startNewSegmentInternal(reason: String, allowFallback: Bool = true) -> Bool {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         hasLoggedFormatMatch = false
         lastConversionLogTime = Date.distantPast
@@ -299,17 +347,26 @@ class MicRecorder: ObservableObject {
             try setupWarmEngineIfNeeded(startImmediately: false)
         } catch {
             setErrorMessage("failed to warm audio engine: \(error.localizedDescription)")
-            return
+            return false
         }
 
         guard let engine = warmEngine else {
             setErrorMessage("warm audio engine unavailable")
-            return
+            return false
         }
 
         audioEngine = engine
+
+        if settleDelayNanoseconds > 0 {
+            Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+        }
+
+        guard let inputFormat = waitForStableInputFormat(engine) else {
+            setErrorMessage("audio device not ready - holding current mic")
+            return false
+        }
+
         let inputNode = engine.inputNode
-        let inputFormat = inputNode.inputFormat(forBus: 0)
         let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
 
         currentDeviceID = "pending"
@@ -348,7 +405,7 @@ class MicRecorder: ObservableObject {
             print("📁 created audio file: \(segmentFilePath)")
         } catch {
             setErrorMessage("failed to create audio file: \(error.localizedDescription)")
-            return
+            return false
         }
 
         isWarmedUp = false
@@ -356,11 +413,16 @@ class MicRecorder: ObservableObject {
         framesCaptured = 0
         segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime
 
+        bufferCounterQueue.sync {
+            pendingBufferCount = 0
+            droppedBufferCount = 0
+        }
+
+        recordingEnabled = false
+
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
-            self?.writerQueue.async {
-                self?.processAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
-            }
+            self?.enqueueAudioBuffer(buffer, inputFormat: inputFormat, targetFormat: recordingFormat)
         }
         tapInstalled = true
 
@@ -372,6 +434,19 @@ class MicRecorder: ObservableObject {
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
             setCurrentDeviceName(deviceName)
+            if allowFallback,
+               DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id),
+               negotiatedSampleRate < 44_100 {
+                print("⚠️ airpods reported telephony sample rate (\(negotiatedSampleRate)hz) – falling back to built-in microphone")
+                setErrorMessage("airpods mic in call mode – using mac microphone")
+                if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
+                   DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
+                    Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+                    return startNewSegmentInternal(reason: reason + "-fallback", allowFallback: false)
+                } else {
+                    print("⚠️ failed to switch input back to built-in microphone; continuing with current device")
+                }
+            }
             if DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id) {
                 print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
             } else if negotiatedSampleRate < 44_100 {
@@ -409,34 +484,28 @@ class MicRecorder: ObservableObject {
             try setupWarmEngineIfNeeded(startImmediately: true)
         } catch {
             setErrorMessage("failed to start audio engine: \(error.localizedDescription)")
-            return
+            return false
         }
+
+        recordingEnabled = true
 
         if !deviceName.lowercased().contains("airpod") {
             print("🔊 monitoring continues on \(deviceName)")
         }
-    }
-    
-    /// stops current segment safely (for controller queue)
-    private func stopCurrentSegmentSafely() {
-        // this runs on controller queue - safe to touch audio
-        stopCurrentSegmentInternal()
-    }
-    
-    /// stops current segment (public interface)
-    private func stopCurrentSegment() {
-        // dispatch to controller queue for safety
-        controllerQueue.sync {
-            stopCurrentSegmentInternal()
-        }
+
+        stallRecoveryAttempts = 0
+
+        return true
     }
     
     /// internal segment stop (must be on controller queue)
-    private func stopCurrentSegmentInternal() {
-        print("⏹️ stopping mic segment #\(segmentNumber)")
-        
+    private func stopCurrentSegmentInternal(reason: String = "manual") {
+        print("⏹️ stopping mic segment #\(segmentNumber) (reason: \(reason))")
+
         // record end time
         let segmentEndTime = Date().timeIntervalSince1970 - sessionReferenceTime
+
+        recordingEnabled = false
 
         if tapInstalled {
             audioEngine?.inputNode.removeTap(onBus: 0)
@@ -444,8 +513,18 @@ class MicRecorder: ObservableObject {
             print("✅ tap removed")
         }
 
+        writerQueue.sync { }
+
+        let dropped = bufferCounterQueue.sync { () -> Int in
+            let dropped = droppedBufferCount
+            droppedBufferCount = 0
+            pendingBufferCount = 0
+            return dropped
+        }
+
         audioEngine?.stop()
         print("🛑 audio engine stopped for mic segment")
+        audioEngine = nil
 
         stopStallMonitor()
 
@@ -454,26 +533,38 @@ class MicRecorder: ObservableObject {
         audioFile = nil
         print("✅ file closed")
         
-        // save segment metadata
-        let metadata = AudioSegmentMetadata(
-            segmentID: UUID().uuidString,
-            filePath: segmentFilePath,
-            deviceName: latestDeviceName,
-            deviceID: currentDeviceID,
-            sampleRate: 48000,
-            channels: 1,
-            startSessionTime: segmentStartTime,
-            endSessionTime: segmentEndTime,
-            frameCount: framesCaptured,
-            quality: latestQuality,
-            error: nil
-        )
-        
-        segmentQueue.sync {
-            segmentMetadata.append(metadata)
+        if framesCaptured == 0 {
+            try? FileManager.default.removeItem(atPath: segmentFilePath)
+            print("⚠️ discarding zero-length mic segment #\(segmentNumber)")
+        } else {
+            let metadata = AudioSegmentMetadata(
+                segmentID: UUID().uuidString,
+                filePath: segmentFilePath,
+                deviceName: latestDeviceName,
+                deviceID: currentDeviceID,
+                sampleRate: 48000,
+                channels: 1,
+                startSessionTime: segmentStartTime,
+                endSessionTime: segmentEndTime,
+                frameCount: framesCaptured,
+                quality: latestQuality,
+                error: nil
+            )
+
+            segmentQueue.sync {
+                segmentMetadata.append(metadata)
+            }
+
+            print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
         }
-        
-        print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
+
+        if dropped > 0 {
+            print("⚠️ dropped \(dropped) audio buffer(s) due to backpressure")
+        }
+
+        if settleDelayNanoseconds > 0 {
+            Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+        }
     }
 
     private func startStallMonitor() {
@@ -542,19 +633,23 @@ class MicRecorder: ObservableObject {
         print("🛠️ mic stall recovery attempt #\(attempt) (idle \(String(format: "%.1f", idleDuration))s)")
 
         state = .switching
-        needsSwitch = false
+        pendingSwitchReason = nil
 
-        stopCurrentSegmentInternal()
+        let reason = "stall-recovery"
+
+        stopCurrentSegmentInternal(reason: reason)
+
+        if settleDelayNanoseconds > 0 {
+            Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+        }
 
         resetWarmEngine()
 
-        do {
-            try setupWarmEngineIfNeeded(startImmediately: false)
-        } catch {
-            print("⚠️ stall recovery warm prep failed: \(error.localizedDescription)")
+        guard startNewSegmentInternal(reason: reason) else {
+            state = .recording
+            return
         }
 
-        startNewSegmentInternal()
         state = .recording
         stallDetectionStart = nil
         lastStallFrameCount = 0
@@ -570,6 +665,36 @@ class MicRecorder: ObservableObject {
         }
     }
     
+    private func enqueueAudioBuffer(_ buffer: AVAudioPCMBuffer,
+                                     inputFormat: AVAudioFormat,
+                                     targetFormat: AVAudioFormat) {
+        var shouldDrop = false
+        bufferCounterQueue.sync {
+            if pendingBufferCount >= maxPendingBuffers {
+                droppedBufferCount += 1
+                shouldDrop = true
+            } else {
+                pendingBufferCount += 1
+            }
+        }
+
+        guard !shouldDrop else { return }
+        guard let copy = buffer.deepCopy() else {
+            bufferCounterQueue.sync {
+                pendingBufferCount = max(pendingBufferCount - 1, 0)
+            }
+            return
+        }
+
+        writerQueue.async { [weak self] in
+            guard let self else { return }
+            self.processAudioBuffer(copy, inputFormat: inputFormat, targetFormat: targetFormat)
+            self.bufferCounterQueue.sync {
+                pendingBufferCount = max(pendingBufferCount - 1, 0)
+            }
+        }
+    }
+
     /// processes audio buffer with warmup and conversion
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer,
                                    inputFormat: AVAudioFormat,
@@ -580,9 +705,12 @@ class MicRecorder: ObservableObject {
             if discardedFrames >= warmupFrames {
                 isWarmedUp = true
                 print("🔥 warmup complete - starting actual capture")
+                recordingEnabled = true
             }
             return  // discard this buffer
         }
+
+        guard recordingEnabled else { return }
         
         // apply agc if enabled (for built-in mic)
         let processedBuffer: AVAudioPCMBuffer
@@ -653,16 +781,6 @@ class MicRecorder: ObservableObject {
             print("❌ write error: \(error)")
             setErrorMessage("failed to write audio: \(error.localizedDescription)")
         }
-    }
-    
-    /// checks if we should switch to new device
-    private func shouldSwitchToNewDevice() -> Bool {
-        // get new device info
-        let newDevice = AVAudioEngine().inputNode  // inputNode is not optional
-        let newFormat = newDevice.inputFormat(forBus: 0)
-        let newQuality = AudioSegmentMetadata.assessQuality(sampleRate: newFormat.sampleRate)
-        
-        return true
     }
     
     private func fetchDefaultInputDeviceInfo() -> (id: AudioDeviceID, name: String)? {
