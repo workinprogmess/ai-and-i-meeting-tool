@@ -186,13 +186,15 @@ class MicRecorder: ObservableObject {
     
     // MARK: - quality control
     private var routeChangeTimestamps: [Date] = []
+    private var significantRouteChangeTimes: [Date] = []
     private var routeUnstableUntil: Date?
     private var pinnedUntil: Date?
     private var pinnedActivations: Int = 0
+    private var lastRouteChangeDeviceID: AudioDeviceID = 0
     private let routeCoalesceInterval: TimeInterval = 2.0
     private let routeChangeWindow: TimeInterval = 10.0
     private let pinnedSwitchThreshold = 3
-    private let pinnedHoldDuration: TimeInterval = 60.0
+    private let pinnedHoldDuration: TimeInterval = 15.0
     private let minimumSegmentDuration: TimeInterval = 20.0
     private var readinessFailureCount = 0
     private let readinessFailureLimit = 5
@@ -225,9 +227,11 @@ class MicRecorder: ObservableObject {
         segmentNumber = 0
         segmentMetadata.removeAll()
         routeChangeTimestamps.removeAll()
+        significantRouteChangeTimes.removeAll()
         pinnedUntil = nil
         routeUnstableUntil = nil
         pinnedActivations = 0
+        lastRouteChangeDeviceID = 0
         lastTelephonyGuardPrompt = nil
         readinessFailureCount = 0
         routeChangeRequestCount = 0
@@ -319,6 +323,25 @@ class MicRecorder: ObservableObject {
         routeChangeTimestamps = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeChangeWindow }
         routeChangeTimestamps.append(now)
 
+        let currentDefaultDeviceID = fetchDefaultInputDeviceInfo()?.id ?? 0
+        significantRouteChangeTimes = significantRouteChangeTimes.filter { now.timeIntervalSince($0) <= routeChangeWindow }
+
+        let isSignificantChange: Bool
+        if currentDefaultDeviceID == 0 {
+            isSignificantChange = lastRouteChangeDeviceID != 0
+        } else if lastRouteChangeDeviceID == 0 {
+            isSignificantChange = true
+        } else {
+            isSignificantChange = currentDefaultDeviceID != lastRouteChangeDeviceID
+        }
+
+        if isSignificantChange {
+            significantRouteChangeTimes.append(now)
+            lastRouteChangeDeviceID = currentDefaultDeviceID
+        } else if currentDefaultDeviceID != 0 {
+            lastRouteChangeDeviceID = currentDefaultDeviceID
+        }
+
         // coalesce rapid changes within 2s window
         let recentRapidChanges = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeCoalesceInterval }
         if recentRapidChanges.count >= 2 {
@@ -329,10 +352,11 @@ class MicRecorder: ObservableObject {
         }
 
         // pin when we cross threshold within 10 seconds
-        if routeChangeTimestamps.count >= pinnedSwitchThreshold {
+        if significantRouteChangeTimes.count >= pinnedSwitchThreshold {
             pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
             pinnedActivations += 1
             routeChangeTimestamps.removeAll()
+            significantRouteChangeTimes.removeAll()
             print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
             setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
             extendStallSuppression(until: pinnedUntil ?? now, reason: "pinned")
@@ -596,6 +620,20 @@ class MicRecorder: ObservableObject {
         setCurrentQuality(assessedQuality)
         if negotiatedSampleRate < 44100 {
             print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
+        } else {
+            if pinnedUntil != nil {
+                pinnedUntil = nil
+                print("🔓 cleared pinned mic – stable input at \(Int(negotiatedSampleRate))hz")
+            }
+            if routeUnstableUntil != nil {
+                routeUnstableUntil = nil
+            }
+            if stallSuppressionUntil.timeIntervalSinceNow > 0 {
+                stallSuppressionUntil = Date()
+                print("⏳ stall suppression cleared after stable input")
+            }
+            routeChangeTimestamps.removeAll()
+            significantRouteChangeTimes.removeAll()
         }
 
         currentSampleRate = negotiatedSampleRate
@@ -648,6 +686,7 @@ class MicRecorder: ObservableObject {
             currentDeviceAudioID = deviceInfo.id
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
+            lastRouteChangeDeviceID = deviceInfo.id
             setCurrentDeviceName(deviceName)
             if DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id) {
                 if negotiatedSampleRate <= 16_000 {
