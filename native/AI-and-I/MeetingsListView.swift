@@ -59,6 +59,7 @@ class MeetingsListViewModel: ObservableObject {
     let micRecorder = MicRecorder()
     let systemRecorder = SystemAudioRecorder()
     let deviceMonitor = DeviceChangeMonitor()
+    let performanceMonitor = PerformanceMonitor()
     private lazy var sessionCoordinator = RecordingSessionCoordinator(
         micRecorder: micRecorder,
         systemRecorder: systemRecorder,
@@ -72,6 +73,7 @@ class MeetingsListViewModel: ObservableObject {
     init() {
         loadMeetings()
         setupDeviceMonitoring()
+        sessionCoordinator.attachPerformanceMonitor(performanceMonitor)
         Task {
             await sessionCoordinator.preparePipelinesIfNeeded()
         }
@@ -664,6 +666,7 @@ struct MeetingsListView: View {
                 RecordingView(viewModel: viewModel)
             }
         }
+        .environmentObject(viewModel.performanceMonitor)
     }
     
     // MARK: - subviews

@@ -53,6 +53,7 @@ class PerformanceMonitor: ObservableObject {
     @Published var audioQuality: AudioQualityMetrics = AudioQualityMetrics()
     @Published var recordingTelemetry: [RecordingTelemetryEntry] = []
     @Published var lastMicDiagnostics: MicSessionDiagnostics?
+    @Published var micDiagnosticsHistory: [MicSessionDiagnostics] = []
     
     // MARK: - Performance History
     @Published var recentLaunchTimes: [TimeInterval] = []
@@ -217,6 +218,10 @@ extension PerformanceMonitor {
 
     func recordMicDiagnostics(_ diagnostics: MicSessionDiagnostics) {
         lastMicDiagnostics = diagnostics
+        micDiagnosticsHistory.append(diagnostics)
+        if micDiagnosticsHistory.count > maxHistoryCount {
+            micDiagnosticsHistory.removeFirst()
+        }
         recordRecordingEvent("mic_diagnostics", metadata: diagnostics.metadata)
     }
 }
