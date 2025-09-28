@@ -155,17 +155,17 @@ class MicRecorder: ObservableObject {
     private func setIsRecording(_ value: Bool) {
         updateOnMain { self.isRecording = value }
     }
-    
+
     private func setCurrentDeviceName(_ value: String) {
         latestDeviceName = value
         updateOnMain { self.currentDeviceName = value }
     }
-    
+
     private func setCurrentQuality(_ value: AudioSegmentMetadata.AudioQuality) {
         latestQuality = value
         updateOnMain { self.currentQuality = value }
     }
-    
+
     private func setErrorMessage(_ value: String?) {
         updateOnMain { self.errorMessage = value }
     }
@@ -196,10 +196,11 @@ class MicRecorder: ObservableObject {
     private let pinnedSwitchThreshold = 3
     private let pinnedHoldDuration: TimeInterval = 15.0
     private var lowQualityAirPodsAttempts: Int = 0
-    private let airPodsRecoveryRetryLimit: Int = 2
-    private let airPodsRecoveryDelay: TimeInterval = 2.5
+    private let airPodsRecoveryRetryLimit: Int = 1
+    private let airPodsRecoveryDelay: TimeInterval = 1.5
     private let airPodsRMSValidationThreshold: Float = 0.002
-    private let airPodsRMSValidationWindows: Int = 5
+    private let airPodsRMSValidationWindowFrames: AVAudioFrameCount = 4_800  // 0.1s at 48khz
+    private let airPodsRMSValidationWindowCount: Int = 10
     private let minimumSegmentDuration: TimeInterval = 20.0
     private var readinessFailureCount = 0
     private let readinessFailureLimit = 5
@@ -215,6 +216,11 @@ class MicRecorder: ObservableObject {
     private var lastKnownDeviceAudioID: AudioDeviceID = 0
     private var lastKnownSampleRate: Double = 0
     
+    private var pendingAirPodsVerification = false
+    private var pendingAirPodsBufferSum: Float = 0
+    private var pendingAirPodsSampleCount: Int = 0
+    private var pendingAirPodsWindowCount: Int = 0
+    private var pendingAirPodsBuffers: [AVAudioPCMBuffer] = []
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -585,6 +591,7 @@ class MicRecorder: ObservableObject {
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         hasLoggedFormatMatch = false
         lastConversionLogTime = Date.distantPast
+        clearAirPodsVerification()
 
         do {
             try setupWarmEngineIfNeeded(startImmediately: false)
@@ -658,20 +665,9 @@ class MicRecorder: ObservableObject {
         } else {
             lowQualityAirPodsAttempts = 0
             if isAirPodsDevice {
-                if !validateAirPodsSignal(warmEngine: engine, format: inputFormat) {
-                    if allowFallback {
-                        lowQualityAirPodsAttempts += 1
-                        let holdUntil = Date().addingTimeInterval(airPodsRecoveryDelay)
-                        pinnedUntil = holdUntil
-                        extendStallSuppression(until: holdUntil, reason: "airpods-silence")
-                        setErrorMessage("airpods audio silent – retrying")
-                        print("⚠️ airpods audio silent – retrying (\(Int(airPodsRecoveryDelay))s)")
-                        Thread.sleep(forTimeInterval: airPodsRecoveryDelay)
-                        return false
-                    } else {
-                        print("⚠️ airpods audio still silent – recording with current device")
-                    }
-                }
+                prepareAirPodsVerification()
+            } else {
+                clearAirPodsVerification()
             }
             if pinnedUntil != nil {
                 pinnedUntil = nil
@@ -1110,19 +1106,23 @@ class MicRecorder: ObservableObject {
             }
         }
         
-        // write to file
-        do {
-            try audioFile?.write(from: bufferToWrite)
-            framesCaptured += Int(bufferToWrite.frameLength)
-            
-            // log every 10th write to avoid spam
-            if framesCaptured % (48000 * 10) < Int(bufferToWrite.frameLength) {
-                print("📝 written \(framesCaptured) frames (~\(framesCaptured/48000)s at 48khz)")
+        if pendingAirPodsVerification {
+            switch evaluateAirPodsBuffer(bufferToWrite) {
+            case .pending:
+                return
+            case .confirmed:
+                let buffersToWrite = pendingAirPodsBuffers
+                clearAirPodsVerification()
+                buffersToWrite.forEach { writeBuffer($0) }
+                return
+            case .failed:
+                clearAirPodsVerification()
+                handleAirPodsVerificationFailure()
+                return
             }
-        } catch {
-            print("❌ write error: \(error)")
-            setErrorMessage("failed to write audio: \(error.localizedDescription)")
         }
+
+        writeBuffer(bufferToWrite)
     }
     
     private func fetchDefaultInputDeviceInfo() -> (id: AudioDeviceID, name: String)? {
@@ -1205,78 +1205,99 @@ class MicRecorder: ObservableObject {
         // current behavior: respect the user’s chosen output; we only snapshot for restore-on-stop
     }
 
-    private func validateAirPodsSignal(warmEngine: AVAudioEngine, format: AVAudioFormat) -> Bool {
-        let inputNode = warmEngine.inputNode
-        let requiredWindows = airPodsRMSValidationWindows
-        guard requiredWindows > 0 else { return true }
-
-        if !warmEngine.isRunning {
-            do {
-                warmEngine.prepare()
-                try warmEngine.start()
-            } catch {
-                print("⚠️ unable to start warm engine for RMS validation: \(error)")
-                return true
-            }
-        }
-
-        var silentWindows = 0
-        let semaphore = DispatchSemaphore(value: 0)
-        var tapInstalled = false
-        let bufferSize: AVAudioFrameCount = 2048
-
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
-            guard let self else {
-                semaphore.signal()
-                return
-            }
-
-            if let rms = self.calculateRMS(for: buffer), rms < self.airPodsRMSValidationThreshold {
-                silentWindows += 1
-            }
-
-            semaphore.signal()
-        }
-        tapInstalled = true
-
-        defer {
-            if tapInstalled {
-                inputNode.removeTap(onBus: 0)
-            }
-        }
-
-        for _ in 0..<requiredWindows {
-            let result = semaphore.wait(timeout: .now() + 0.25)
-            if result == .timedOut {
-                print("⚠️ airpods RMS validation timed out waiting for buffer")
-                break
-            }
-
-            if silentWindows >= requiredWindows {
-                print("⚠️ airpods validation detected low RMS over \(requiredWindows) windows")
-                return false
-            }
-        }
-
-        return true
+    private enum AirPodsVerificationResult {
+        case pending
+        case confirmed
+        case failed
     }
 
-    private func calculateRMS(for buffer: AVAudioPCMBuffer) -> Float? {
-        guard let floatData = buffer.floatChannelData else { return nil }
-        let frameLength = Int(buffer.frameLength)
-        guard frameLength > 0 else { return nil }
-        let channelCount = Int(buffer.format.channelCount)
+    private func prepareAirPodsVerification() {
+        pendingAirPodsVerification = true
+        pendingAirPodsBufferSum = 0
+        pendingAirPodsSampleCount = 0
+        pendingAirPodsWindowCount = 0
+        pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+    }
 
-        var sum: Float = 0
-        for channel in 0..<channelCount {
-            let channelData = floatData[channel]
-            for frame in 0..<frameLength {
-                let sample = channelData[frame]
-                sum += sample * sample
+    private func clearAirPodsVerification() {
+        pendingAirPodsVerification = false
+        pendingAirPodsBufferSum = 0
+        pendingAirPodsSampleCount = 0
+        pendingAirPodsWindowCount = 0
+        pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+    }
+
+    private func evaluateAirPodsBuffer(_ buffer: AVAudioPCMBuffer) -> AirPodsVerificationResult {
+        guard pendingAirPodsVerification else { return .confirmed }
+        guard let floatData = buffer.floatChannelData else { return .pending }
+
+        let copy = buffer.deepCopy() ?? buffer
+        pendingAirPodsBuffers.append(copy)
+
+        let channelCount = Int(buffer.format.channelCount)
+        let frameLength = Int(buffer.frameLength)
+
+        for frame in 0..<frameLength {
+            var sample: Float = 0
+            for channel in 0..<channelCount {
+                sample += floatData[channel][frame]
+            }
+            sample /= Float(channelCount)
+
+            pendingAirPodsBufferSum += sample * sample
+            pendingAirPodsSampleCount += 1
+
+            if pendingAirPodsSampleCount >= Int(airPodsRMSValidationWindowFrames) {
+                let mean = pendingAirPodsBufferSum / Float(pendingAirPodsSampleCount)
+                let rms = sqrt(mean)
+                pendingAirPodsBufferSum = 0
+                pendingAirPodsSampleCount = 0
+                pendingAirPodsWindowCount += 1
+
+                if rms >= airPodsRMSValidationThreshold {
+                    return .confirmed
+                }
+
+                if pendingAirPodsWindowCount >= airPodsRMSValidationWindowCount {
+                    return .failed
+                }
             }
         }
 
-        return sqrt(sum / Float(frameLength * channelCount))
+        return .pending
+    }
+
+    private func handleAirPodsVerificationFailure() {
+        controllerQueue.async { [weak self] in
+            guard let self else { return }
+            self.setErrorMessage("airpods silent – using mac microphone")
+            if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
+               DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
+                self.stopCurrentSegmentInternal(reason: "airpods-silent")
+                if self.settleDelayNanoseconds > 0 {
+                    Thread.sleep(forTimeInterval: Double(self.settleDelayNanoseconds) / 1_000_000_000)
+                }
+                if !self.startNewSegmentInternal(reason: "airpods-fallback", allowFallback: false) {
+                    print("⚠️ failed to restart built-in mic after airpods silence")
+                }
+            } else {
+                print("⚠️ failed to revert to built-in mic after airpods silence")
+            }
+        }
+    }
+
+    private func writeBuffer(_ buffer: AVAudioPCMBuffer) {
+        do {
+            try audioFile?.write(from: buffer)
+            framesCaptured += Int(buffer.frameLength)
+
+            if framesCaptured % (48000 * 10) < Int(buffer.frameLength) {
+                print("📝 written \(framesCaptured) frames (~\(framesCaptured/48000)s at 48khz)")
+            }
+        } catch {
+            print("❌ write error: \(error)")
+            setErrorMessage("failed to write audio: \(error.localizedDescription)")
+        }
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
