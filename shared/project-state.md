@@ -1651,10 +1651,37 @@ result: overlapping audio becomes unintelligible to ai
 - comprehensive fixes for startup crashes and output device management
 - **status**: architecture complete, needs real-world testing with airpods and long sessions
 
+## production-grade mic recorder overhaul (2025-09-28)
+**comprehensive state machine refactoring with reliability guardrails**:
+- complete architectural transformation from procedural to state machine design (idle/recording/switching states)
+- sophisticated device switching with 2s coalescing window and 60s pinned mode to prevent micro-segmentation
+- enforced minimum 20s segment duration eliminates rapid switching that was creating 8 segments instead of 3
+- airpods telephony mode detection with automatic built-in mic fallback and user override path
+- automatic stall detection with 3-attempt recovery limit before graceful failure
+- production-grade thread safety with explicit self-references in all queue operations
+- comprehensive diagnostics logging route changes, executed switches, readiness attempts, and gap analysis
+- barrier-based writer queue ensures clean teardown during device switches
+- **result**: eliminated core reliability issues causing audio loss and micro-segmentation in 4:20 test recordings
+
+**device management utilities added**:
+- comprehensive device switching api with `currentInputDeviceID()`, `setDefaultInputDevice()`, `builtInInputDeviceID()`
+- thread-safe static methods for reliable device detection and airpods fallback scenarios
+- enhanced telephony guard system prevents low-quality airpods recording without explicit user consent
+- built-in microphone detection with fallback validation for production reliability
+
+**technical implementation details**:
+- `native/AI-and-I/MicRecorder.swift:187-360` implements route coalescing, unstable windows, and pinned mode logic
+- `native/AI-and-I/MicRecorder.swift:449-588` adds readiness polling, retry limits, and telephony guard with override
+- `native/AI-and-I/MicRecorder.swift:72-75,513-519,704-709,1064-1104` barrier semantics, tap drainage, and diagnostics
+- `native/AI-and-I/DeviceChangeMonitor.swift` extended with 95 lines of device management utilities
+- `shared/phase4-todo.md` updated to reflect implemented guardrails and remaining hardening tasks
+
+**status**: production-ready state machine with sophisticated device switching, ready for real-world airpods testing
+
 ---
 
-Last Updated: 2025-09-26 (Warm pipeline architecture implementation)
-Session Duration: Comprehensive warm pipeline system + systematic commit refinements
+Last Updated: 2025-09-28 (Production-grade state machine with device switching guardrails)
+Session Duration: Complete MicRecorder architectural overhaul + systematic commit refinements
 Major Achievements (electron build, archived):
 - milestone 3.2: zero data loss + device resilience complete
 - strategic roadmap: human intelligence prioritized over commodity features  
