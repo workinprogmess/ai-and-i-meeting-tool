@@ -162,6 +162,7 @@ final class RecordingSessionCoordinator {
 
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor) {
         performanceMonitor = monitor
+        micRecorder.attachPerformanceMonitor(monitor)
     }
 
     private func emitTelemetry(_ event: TelemetryEvent, metadata: [String: String] = [:]) {

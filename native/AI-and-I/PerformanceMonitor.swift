@@ -13,6 +13,36 @@ class PerformanceMonitor: ObservableObject {
         let metadata: [String: String]
     }
 
+    struct MicSessionDiagnostics {
+        let routeChanges: Int
+        let executedSwitches: Int
+        let pinnedActivations: Int
+        let averageReadinessAttempts: Double
+        let readinessSamples: Int
+        let warmupDiscardSeconds: Double
+        let segmentCount: Int
+        let totalMicDuration: Double
+        let averageGap: Double
+        let writerDrops: Int
+        let lossiness: String
+
+        var metadata: [String: String] {
+            [
+                "route_changes": String(routeChanges),
+                "switches_executed": String(executedSwitches),
+                "pinned_activations": String(pinnedActivations),
+                "readiness_attempts_avg": String(format: "%.2f", averageReadinessAttempts),
+                "readiness_samples": String(readinessSamples),
+                "warmup_discard_seconds": String(format: "%.2f", warmupDiscardSeconds),
+                "segment_count": String(segmentCount),
+                "total_mic_duration_seconds": String(format: "%.2f", totalMicDuration),
+                "average_gap_seconds": String(format: "%.2f", averageGap),
+                "writer_drops": String(writerDrops),
+                "lossiness": lossiness
+            ]
+        }
+    }
+
     // MARK: - Published Metrics
     @Published var appLaunchTime: TimeInterval = 0
     @Published var recordingStartLatency: TimeInterval = 0
@@ -22,6 +52,7 @@ class PerformanceMonitor: ObservableObject {
     @Published var deviceSwitchTime: TimeInterval = 0
     @Published var audioQuality: AudioQualityMetrics = AudioQualityMetrics()
     @Published var recordingTelemetry: [RecordingTelemetryEntry] = []
+    @Published var lastMicDiagnostics: MicSessionDiagnostics?
     
     // MARK: - Performance History
     @Published var recentLaunchTimes: [TimeInterval] = []
@@ -182,6 +213,11 @@ extension PerformanceMonitor {
         } else {
             print("📡 RecordingEvent: \(event) :: \(metadata)")
         }
+    }
+
+    func recordMicDiagnostics(_ diagnostics: MicSessionDiagnostics) {
+        lastMicDiagnostics = diagnostics
+        recordRecordingEvent("mic_diagnostics", metadata: diagnostics.metadata)
     }
 }
 
