@@ -84,14 +84,14 @@ class MeetingsListViewModel: ObservableObject {
         deviceMonitor.onMicDeviceChange = { [weak self] reason in
             Task {
                 print("🎤 mic device change detected: \(reason)")
-                await self?.sessionCoordinator.handleDeviceChange(reason: reason)
+                await self?.sessionCoordinator.handleMicDeviceChange(reason: reason)
             }
         }
 
         deviceMonitor.onSystemDeviceChange = { [weak self] reason in
             Task {
                 print("🔊 system device change detected: \(reason)")
-                await self?.sessionCoordinator.handleDeviceChange(reason: reason)
+                await self?.sessionCoordinator.handleSystemDeviceChange(reason: reason)
             }
         }
         

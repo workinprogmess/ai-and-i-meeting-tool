@@ -119,10 +119,19 @@ final class RecordingSessionCoordinator {
         emitTelemetry(.sessionStopped)
     }
 
-    func handleDeviceChange(reason: String) async {
+    func handleMicDeviceChange(reason: String) async {
         micRecorder.handleDeviceChange(reason: reason)
+        emitTelemetry(.deviceChangeHandled, metadata: ["pipeline": "mic", "reason": reason])
+    }
+
+    func handleSystemDeviceChange(reason: String) async {
         await systemRecorder.handleDeviceChange(reason: reason)
-        emitTelemetry(.deviceChangeHandled, metadata: ["reason": reason])
+        emitTelemetry(.deviceChangeHandled, metadata: ["pipeline": "system", "reason": reason])
+    }
+
+    func handleDeviceChange(reason: String) async {
+        await handleMicDeviceChange(reason: reason)
+        await handleSystemDeviceChange(reason: reason)
     }
 
     func simulateDeviceChange(reason: String = "debug-trigger") async {
