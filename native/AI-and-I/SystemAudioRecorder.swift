@@ -43,6 +43,8 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private let routeChangeWindow: TimeInterval = 10.0
     private let pinnedSwitchThreshold = 3
     private let pinnedHoldDuration: TimeInterval = 60.0
+    private var pendingSwitchReason: String?
+    private var switchLock: PipelineSwitchLock?
     
     // MARK: - state machine
     private enum RecordingState {
@@ -251,6 +253,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
 
         // Schedule deferred switch to avoid doing work inside the callback
         needsSwitch = true
+        pendingSwitchReason = reason
 
         let timerExists = await MainActor.run { debounceTimer != nil }
         if timerExists {
@@ -272,6 +275,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     func shutdownWarmPipeline() {
         preparedFilter = nil
         preparedDisplay = nil
+    }
+
+    func attachSwitchLock(_ lock: PipelineSwitchLock?) {
+        controllerQueue.async { [weak self] in
+            self?.switchLock = lock
+        }
     }
     
     /// performs the actual switch after debounce
@@ -302,6 +311,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             needsSwitch = true
             await scheduleSystemSwitch(after: remaining)
             return
+        }
+
+        let reason = pendingSwitchReason ?? "device-change"
+        let releaseLock = switchLock?.acquire(for: "system", reason: reason)
+        defer {
+            releaseLock?()
+            pendingSwitchReason = nil
         }
 
         print("🔄 performing debounced system audio switch...")
@@ -473,6 +489,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         stream = nil
         streamOutput = nil
         filter = nil
+        preparedFilter = nil
         
         // save segment metadata
         let metadata = AudioSegmentMetadata(
