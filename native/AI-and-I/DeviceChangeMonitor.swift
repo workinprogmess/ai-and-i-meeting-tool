@@ -518,6 +518,101 @@ class DeviceChangeMonitor: ObservableObject {
         return status == noErr && dataSize > 0
     }
 
+    nonisolated static func currentInputDeviceID() -> AudioDeviceID? {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let result = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+
+        return result == noErr ? deviceID : nil
+    }
+
+    nonisolated static func setDefaultInputDevice(_ deviceID: AudioDeviceID) -> Bool {
+        var mutableDeviceID = deviceID
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            size,
+            &mutableDeviceID
+        )
+
+        if status != noErr {
+            print("⚠️ failed to set default input device: \(status)")
+        }
+
+        return status == noErr
+    }
+
+    nonisolated static func builtInInputDeviceID() -> AudioDeviceID? {
+        var dataSize: UInt32 = 0
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize) == noErr else {
+            return nil
+        }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceIDs
+        ) == noErr else {
+            return nil
+        }
+
+        for id in deviceIDs {
+            guard deviceHasInputStreams(deviceID: id) else { continue }
+            if let name = deviceName(for: id)?.lowercased(),
+               name.contains("built-in") || name.contains("imac microphone") || name.contains("macbook microphone") {
+                return id
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated static func deviceHasInputStreams(deviceID: AudioDeviceID) -> Bool {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: 0
+        )
+
+        var dataSize: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &dataSize)
+        return status == noErr && dataSize > 0
+    }
+
     private func getCurrentInputSampleRate() -> Double? {
         var deviceID: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
