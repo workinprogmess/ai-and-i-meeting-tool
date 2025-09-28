@@ -36,8 +36,8 @@ private extension AVAudioPCMBuffer {
         }
         copy.frameLength = frameLength
 
-        let srcBuffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-        let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.audioBufferList)
+        let srcBuffers = UnsafeMutableAudioBufferListPointer(mutating: audioBufferList)
+        let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
 
         for index in 0..<srcBuffers.count {
             guard let srcData = srcBuffers[index].mData,
@@ -414,8 +414,8 @@ class MicRecorder: ObservableObject {
         segmentStartTime = Date().timeIntervalSince1970 - sessionReferenceTime
 
         bufferCounterQueue.sync {
-            pendingBufferCount = 0
-            droppedBufferCount = 0
+            self.pendingBufferCount = 0
+            self.droppedBufferCount = 0
         }
 
         recordingEnabled = false
@@ -516,9 +516,9 @@ class MicRecorder: ObservableObject {
         writerQueue.sync { }
 
         let dropped = bufferCounterQueue.sync { () -> Int in
-            let dropped = droppedBufferCount
-            droppedBufferCount = 0
-            pendingBufferCount = 0
+            let dropped = self.droppedBufferCount
+            self.droppedBufferCount = 0
+            self.pendingBufferCount = 0
             return dropped
         }
 
@@ -670,18 +670,18 @@ class MicRecorder: ObservableObject {
                                      targetFormat: AVAudioFormat) {
         var shouldDrop = false
         bufferCounterQueue.sync {
-            if pendingBufferCount >= maxPendingBuffers {
-                droppedBufferCount += 1
+            if self.pendingBufferCount >= self.maxPendingBuffers {
+                self.droppedBufferCount += 1
                 shouldDrop = true
             } else {
-                pendingBufferCount += 1
+                self.pendingBufferCount += 1
             }
         }
 
         guard !shouldDrop else { return }
         guard let copy = buffer.deepCopy() else {
             bufferCounterQueue.sync {
-                pendingBufferCount = max(pendingBufferCount - 1, 0)
+                self.pendingBufferCount = max(self.pendingBufferCount - 1, 0)
             }
             return
         }
@@ -690,7 +690,7 @@ class MicRecorder: ObservableObject {
             guard let self else { return }
             self.processAudioBuffer(copy, inputFormat: inputFormat, targetFormat: targetFormat)
             self.bufferCounterQueue.sync {
-                pendingBufferCount = max(pendingBufferCount - 1, 0)
+                self.pendingBufferCount = max(self.pendingBufferCount - 1, 0)
             }
         }
     }
