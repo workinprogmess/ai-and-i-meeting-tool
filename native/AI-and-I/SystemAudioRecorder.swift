@@ -36,6 +36,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private let controllerQueue = DispatchQueue(label: "system.controller.queue", qos: .userInitiated)
     private var needsSwitch = false  // atomic flag for pending switches
     private var debounceTimer: DispatchWorkItem?
+    private var routeChangeTimestamps: [Date] = []
+    private var routeUnstableUntil: Date?
+    private var pinnedUntil: Date?
+    private let routeCoalesceInterval: TimeInterval = 2.0
+    private let routeChangeWindow: TimeInterval = 10.0
+    private let pinnedSwitchThreshold = 3
+    private let pinnedHoldDuration: TimeInterval = 60.0
     
     // MARK: - state machine
     private enum RecordingState {
@@ -214,34 +221,48 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             print("ℹ️ system audio: ignoring non-output change (reason: \(reason))")
             return
         }
-        
-        // CRITICAL: Never do any work in device change callbacks
-        // Just set flag and schedule deferred work to avoid deadlock
+
+        let now = Date()
+
+        if let pinnedUntil, now < pinnedUntil {
+            let remaining = Int(pinnedUntil.timeIntervalSince(now))
+            print("🛑 system audio pinned – ignoring change (remaining: \(remaining)s)")
+            setErrorMessage("holding system audio for stability (\(max(remaining, 1))s)")
+            return
+        }
+
+        // track recent changes to detect instability and pinning
+        routeChangeTimestamps = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeChangeWindow }
+        routeChangeTimestamps.append(now)
+
+        let rapidChanges = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeCoalesceInterval }
+        if rapidChanges.count >= 2 {
+            routeUnstableUntil = now.addingTimeInterval(routeCoalesceInterval)
+            print("⚠️ system route unstable – waiting \(routeCoalesceInterval)s before switching")
+        }
+
+        if routeChangeTimestamps.count >= pinnedSwitchThreshold {
+            pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
+            routeChangeTimestamps.removeAll()
+            print("🧷 system audio pinned for stability for \(Int(pinnedHoldDuration))s")
+            setErrorMessage("holding system audio for stability (\(Int(pinnedHoldDuration))s)")
+            return
+        }
+
+        // Schedule deferred switch to avoid doing work inside the callback
         needsSwitch = true
-        
-        // if we're already debouncing, don't restart the timer - let it complete
-        // this prevents rapid events from constantly resetting the delay
+
         let timerExists = await MainActor.run { debounceTimer != nil }
         if timerExists {
             print("⏱️ already debouncing - ignoring new event to let timer complete")
             return
         }
-        
-        // schedule new debounce (1s for system audio stability)
-        // this gives hardware time to settle and prevents rapid switches
-        let workItem = DispatchWorkItem { [weak self] in
-            Task {
-                await self?.performDebouncedSwitch()
-                await MainActor.run {
-                    self?.debounceTimer = nil  // clear timer after execution
-                }
-            }
-        }
-        
-        await MainActor.run {
-            debounceTimer = workItem
-            controllerQueue.asyncAfter(deadline: .now() + 1.0, execute: workItem)
-        }
+
+        let baseDelay: TimeInterval = 1.0
+        let additionalDelay = max(0, routeUnstableUntil?.timeIntervalSince(now) ?? 0)
+        let delay = max(baseDelay, additionalDelay)
+
+        await scheduleSystemSwitch(after: delay)
     }
 
     func prepareWarmPipeline() async throws {
@@ -263,7 +284,26 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         state = .switching
         needsSwitch = false
-        
+
+        let now = Date()
+        if let pinnedUntil, now < pinnedUntil {
+            let remaining = max(0.5, pinnedUntil.timeIntervalSince(now))
+            print("🧷 system audio pinned during switch request – rescheduling")
+            state = .recording
+            needsSwitch = true
+            await scheduleSystemSwitch(after: remaining)
+            return
+        }
+
+        if let routeUnstableUntil, now < routeUnstableUntil {
+            let remaining = max(0.5, routeUnstableUntil.timeIntervalSince(now))
+            print("⚠️ system route still unstable for \(String(format: "%.2f", remaining))s – deferring switch")
+            state = .recording
+            needsSwitch = true
+            await scheduleSystemSwitch(after: remaining)
+            return
+        }
+
         print("🔄 performing debounced system audio switch...")
         
         // safe teardown
@@ -287,9 +327,33 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         } catch {
             setErrorMessage("system audio switch restart failed: \(error.localizedDescription)")
         }
-        
+
         state = .recording
+        routeUnstableUntil = nil
         print("✅ system audio switch complete")
+    }
+
+    private func scheduleSystemSwitch(after delay: TimeInterval) async {
+        let safeDelay = max(delay, 0.25)
+
+        await MainActor.run {
+            debounceTimer?.cancel()
+            debounceTimer = nil
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            Task {
+                await self?.performDebouncedSwitch()
+                await MainActor.run {
+                    self?.debounceTimer = nil
+                }
+            }
+        }
+
+        await MainActor.run {
+            debounceTimer = workItem
+            controllerQueue.asyncAfter(deadline: .now() + safeDelay, execute: workItem)
+        }
     }
     
     // MARK: - private implementation
