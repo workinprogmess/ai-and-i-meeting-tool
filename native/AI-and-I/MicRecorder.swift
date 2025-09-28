@@ -36,7 +36,7 @@ private extension AVAudioPCMBuffer {
         }
         copy.frameLength = frameLength
 
-        let srcBuffers = UnsafeMutableAudioBufferListPointer(mutating: audioBufferList)
+        let srcBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: audioBufferList))
         let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
 
         for index in 0..<srcBuffers.count {
@@ -69,7 +69,11 @@ class MicRecorder: ObservableObject {
     
     // MARK: - thread safety (production-grade)
     private let controllerQueue = DispatchQueue(label: "mic.controller.queue", qos: .userInitiated)
-    private let writerQueue = DispatchQueue(label: "mic.writer.queue", qos: .userInitiated)
+    private let writerQueue = DispatchQueue(
+        label: "mic.writer.queue",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
     
     // MARK: - state machine
     private enum RecordingState {
@@ -175,12 +179,29 @@ class MicRecorder: ObservableObject {
     private var agcEnabled = true
     private var currentGain: Float = 2.5  // boost for quiet built-in mics
     private let targetLevel: Float = -12.0  // target dBFS
+
+    // MARK: - telephony guard
+    private var lastTelephonyGuardPrompt: Date?
+    private let telephonyGuardWindow: TimeInterval = 8.0
     
     // MARK: - quality control
-    private var lastDeviceChangeTime: Date = Date.distantPast
-    private var deviceChangeCount: Int = 0
-    private let deviceChangeWindow: TimeInterval = 10.0  // for rate limiting
-    private let debounceInterval: TimeInterval = 2.5     // airpods need 2-3s to fully connect
+    private var routeChangeTimestamps: [Date] = []
+    private var routeUnstableUntil: Date?
+    private var pinnedUntil: Date?
+    private var pinnedActivations: Int = 0
+    private let routeCoalesceInterval: TimeInterval = 2.0
+    private let routeChangeWindow: TimeInterval = 10.0
+    private let pinnedSwitchThreshold = 3
+    private let pinnedHoldDuration: TimeInterval = 60.0
+    private let minimumSegmentDuration: TimeInterval = 20.0
+    private var readinessFailureCount = 0
+    private let readinessFailureLimit = 5
+    private var routeChangeRequestCount = 0
+    private var executedSwitchCount = 0
+    private var readinessAttemptLog: [Int] = []
+    private var totalWarmupDiscardedFrames: AVAudioFrameCount = 0
+    private var totalDroppedBuffers = 0
+    private weak var performanceMonitor: PerformanceMonitor?
     
     // MARK: - public interface
     
@@ -198,7 +219,17 @@ class MicRecorder: ObservableObject {
         sessionReferenceTime = context.timestamp
         segmentNumber = 0
         segmentMetadata.removeAll()
-        deviceChangeCount = 0
+        routeChangeTimestamps.removeAll()
+        pinnedUntil = nil
+        routeUnstableUntil = nil
+        pinnedActivations = 0
+        lastTelephonyGuardPrompt = nil
+        readinessFailureCount = 0
+        routeChangeRequestCount = 0
+        executedSwitchCount = 0
+        readinessAttemptLog.removeAll()
+        totalWarmupDiscardedFrames = 0
+        totalDroppedBuffers = 0
         
         // set state first
         state = .recording
@@ -230,6 +261,7 @@ class MicRecorder: ObservableObject {
 
         // save session metadata
         saveSessionMetadata()
+        logSessionDiagnostics()
 
         restorePreferredOutputDeviceIfNeeded()
 
@@ -237,6 +269,12 @@ class MicRecorder: ObservableObject {
         setIsRecording(false)
         preferredOutputDeviceID = nil
         preferredOutputDeviceName = "unknown"
+    }
+
+    func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
+        controllerQueue.async { [weak self] in
+            self?.performanceMonitor = monitor
+        }
     }
     
     /// handles device change during recording (production-safe)
@@ -246,44 +284,62 @@ class MicRecorder: ObservableObject {
         print("🔄 mic device change: \(reason)")
 
         controllerQueue.async { [weak self] in
-            self?.enqueueDeviceSwitchLocked(reason: reason)
+            guard let self else { return }
+            self.routeChangeRequestCount += 1
+            self.enqueueDeviceSwitchLocked(reason: reason)
         }
     }
 
     private func enqueueDeviceSwitchLocked(reason: String) {
-        // rate limiting: allow at most 3 changes per window
         let now = Date()
-        let windowStart = now.addingTimeInterval(-deviceChangeWindow)
-        if lastDeviceChangeTime < windowStart {
-            deviceChangeCount = 0
-        }
-        deviceChangeCount += 1
-        lastDeviceChangeTime = now
 
-        if deviceChangeCount > 3 {
-            print("⚠️ device changes too frequent - holding current mic")
-            setErrorMessage("devices changing rapidly - holding current mic")
+        if let pinnedUntil, now < pinnedUntil {
+            let remaining = Int(pinnedUntil.timeIntervalSince(now))
+            print("🛑 pinned mode active – ignoring device change (remaining: \(remaining)s)")
+            setErrorMessage("holding mic for stability (\(max(remaining, 1))s)")
+            return
+        }
+
+        // trim history to 10s window and append latest change
+        routeChangeTimestamps = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeChangeWindow }
+        routeChangeTimestamps.append(now)
+
+        // coalesce rapid changes within 2s window
+        let recentRapidChanges = routeChangeTimestamps.filter { now.timeIntervalSince($0) <= routeCoalesceInterval }
+        if recentRapidChanges.count >= 2 {
+            routeUnstableUntil = now.addingTimeInterval(routeCoalesceInterval)
+            print("⚠️ route unstable – waiting \(routeCoalesceInterval)s before switching")
+            setErrorMessage("devices still switching – waiting to settle")
+        }
+
+        // pin when we cross threshold within 10 seconds
+        if routeChangeTimestamps.count >= pinnedSwitchThreshold {
+            pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
+            pinnedActivations += 1
+            routeChangeTimestamps.removeAll()
+            print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
+            setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
             return
         }
 
         pendingSwitchReason = reason
-        schedulePendingSwitchLocked()
+        schedulePendingSwitchLocked(after: routeCoalesceInterval)
     }
 
-    private func schedulePendingSwitchLocked() {
+    private func schedulePendingSwitchLocked(after delay: TimeInterval? = nil) {
         guard state != .switching else {
-            // switch in progress; latest reason already stored
             return
         }
 
         switchWorkItem?.cancel()
         let reason = pendingSwitchReason ?? "device-change"
+        let wait = delay ?? routeCoalesceInterval
 
         let workItem = DispatchWorkItem { [weak self] in
             self?.performSwitchLocked(reason: reason)
         }
         switchWorkItem = workItem
-        controllerQueue.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
+        controllerQueue.asyncAfter(deadline: .now() + wait, execute: workItem)
     }
 
     private func performSwitchLocked(reason: String) {
@@ -298,9 +354,40 @@ class MicRecorder: ObservableObject {
         pendingSwitchReason = nil
         switchWorkItem = nil
 
+        let now = Date()
+
+        if let routeUnstableUntil, now < routeUnstableUntil {
+            let remaining = routeUnstableUntil.timeIntervalSince(now)
+            print("⚠️ route still unstable for \(String(format: "%.2f", remaining))s – deferring switch")
+            pendingSwitchReason = reason
+            state = .recording
+            schedulePendingSwitchLocked(after: remaining)
+            return
+        }
+
+        if let pinnedUntil, now < pinnedUntil {
+            let remaining = pinnedUntil.timeIntervalSince(now)
+            print("🧷 pinned mode active during switch request – rescheduling")
+            pendingSwitchReason = reason
+            state = .recording
+            schedulePendingSwitchLocked(after: remaining)
+            return
+        }
+
         print("🔄 performing device switch (reason: \(reason))")
 
         prepareOutputRoutingForCurrentInputDevice()
+
+        if shouldDeferForMinimumSegment(reason: reason) {
+            let remaining = remainingSegmentTime()
+            print("⏱️ segment shorter than minimum – delaying switch by \(String(format: "%.2f", remaining))s")
+            pendingSwitchReason = reason
+            state = .recording
+            schedulePendingSwitchLocked(after: remaining)
+            return
+        }
+
+        routeUnstableUntil = nil
 
         stopCurrentSegmentInternal(reason: reason)
 
@@ -311,27 +398,74 @@ class MicRecorder: ObservableObject {
         resetWarmEngine()
 
         guard startNewSegmentInternal(reason: reason) else {
+            readinessFailureCount += 1
+            if readinessFailureCount >= readinessFailureLimit {
+                print("❌ device never became ready after \(readinessFailureCount) attempts – holding current mic")
+                setErrorMessage("device not ready – holding mic")
+                readinessFailureCount = 0
+                state = .recording
+                return
+            }
+            pendingSwitchReason = reason
             state = .recording
+            schedulePendingSwitchLocked(after: routeCoalesceInterval)
             return
         }
 
+        readinessFailureCount = 0
         state = .recording
+        executedSwitchCount += 1
         print("✅ device switch complete (reason: \(reason))")
     }
 
-    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> AVAudioFormat? {
+    private func shouldDeferForMinimumSegment(reason: String) -> Bool {
+        guard !shouldBypassMinimumDuration(reason: reason) else { return false }
+        return currentSegmentDuration() < minimumSegmentDuration
+    }
+
+    private func shouldBypassMinimumDuration(reason: String) -> Bool {
+        let lowered = reason.lowercased()
+        return lowered.contains("stall") ||
+               lowered.contains("fail") ||
+               lowered.contains("error") ||
+               lowered.contains("session-end") ||
+               lowered.contains("manual") ||
+               lowered.contains("stop")
+    }
+
+    private func currentSegmentDuration() -> TimeInterval {
+        let nowOffset = Date().timeIntervalSince1970 - sessionReferenceTime
+        return max(0, nowOffset - segmentStartTime)
+    }
+
+    private func remainingSegmentTime() -> TimeInterval {
+        let remaining = minimumSegmentDuration - currentSegmentDuration()
+        return max(0.25, remaining)
+    }
+
+    private func shouldAllowTelephonyOverride() -> Bool {
+        guard let prompt = lastTelephonyGuardPrompt else { return false }
+        let elapsed = Date().timeIntervalSince(prompt)
+        if elapsed <= telephonyGuardWindow {
+            lastTelephonyGuardPrompt = nil
+            return true
+        }
+        return false
+    }
+
+    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> (format: AVAudioFormat?, attempts: Int) {
         for attempt in 0..<readinessRetryLimit {
             let format = engine.inputNode.inputFormat(forBus: 0)
             if format.sampleRate > 0 && format.channelCount > 0 {
                 if attempt > 0 {
                     print("ℹ️ input format stabilized after \(attempt + 1) checks")
                 }
-                return format
+                return (format, attempt + 1)
             }
             Thread.sleep(forTimeInterval: Double(readinessRetryDelayNanoseconds) / 1_000_000_000)
         }
         print("⚠️ input format did not stabilize after \(readinessRetryLimit) attempts")
-        return nil
+        return (nil, readinessRetryLimit)
     }
 
     // MARK: - private implementation
@@ -361,7 +495,9 @@ class MicRecorder: ObservableObject {
             Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
         }
 
-        guard let inputFormat = waitForStableInputFormat(engine) else {
+        let readiness = waitForStableInputFormat(engine)
+        readinessAttemptLog.append(readiness.attempts)
+        guard let inputFormat = readiness.format else {
             setErrorMessage("audio device not ready - holding current mic")
             return false
         }
@@ -434,20 +570,29 @@ class MicRecorder: ObservableObject {
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
             setCurrentDeviceName(deviceName)
-            if allowFallback,
-               DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id),
-               negotiatedSampleRate < 44_100 {
-                print("⚠️ airpods reported telephony sample rate (\(negotiatedSampleRate)hz) – falling back to built-in microphone")
-                setErrorMessage("airpods mic in call mode – using mac microphone")
-                if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
-                   DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
-                    Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
-                    return startNewSegmentInternal(reason: reason + "-fallback", allowFallback: false)
-                } else {
-                    print("⚠️ failed to switch input back to built-in microphone; continuing with current device")
-                }
-            }
             if DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id) {
+                if negotiatedSampleRate <= 16_000 {
+                    if allowFallback {
+                        if shouldAllowTelephonyOverride() {
+                            print("⚠️ telephony guard override accepted – recording with airpods at \(negotiatedSampleRate)hz")
+                            setErrorMessage("airpods mic in call mode (lower quality) – recording as requested")
+                        } else {
+                            print("⚠️ airpods reported telephony sample rate (\(negotiatedSampleRate)hz) – holding mac microphone")
+                            setErrorMessage("airpods mic in call mode (lower quality). holding mac mic – switch anyway?")
+                            lastTelephonyGuardPrompt = Date()
+                            if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
+                               DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
+                                Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+                                return startNewSegmentInternal(reason: reason + "-telephony-guard", allowFallback: false)
+                            } else {
+                                print("⚠️ failed to switch input back to built-in microphone; continuing with current device")
+                            }
+                        }
+                    } else {
+                        print("⚠️ telephony guard override active – recording with low-quality airpods mic")
+                        setErrorMessage("airpods mic in call mode (lower quality) – recording as requested")
+                    }
+                }
                 print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
             } else if negotiatedSampleRate < 44_100 {
                 print("⚠️ low sample rate (\(negotiatedSampleRate)hz) – leaving device as is to prevent Core Audio errors")
@@ -513,7 +658,7 @@ class MicRecorder: ObservableObject {
             print("✅ tap removed")
         }
 
-        writerQueue.sync { }
+        writerQueue.sync(flags: .barrier) { }
 
         let dropped = bufferCounterQueue.sync { () -> Int in
             let dropped = self.droppedBufferCount
@@ -560,6 +705,7 @@ class MicRecorder: ObservableObject {
 
         if dropped > 0 {
             print("⚠️ dropped \(dropped) audio buffer(s) due to backpressure")
+            totalDroppedBuffers += dropped
         }
 
         if settleDelayNanoseconds > 0 {
@@ -653,6 +799,7 @@ class MicRecorder: ObservableObject {
         state = .recording
         stallDetectionStart = nil
         lastStallFrameCount = 0
+        executedSwitchCount += 1
     }
 
     func prepareWarmPipeline() async throws {
@@ -686,7 +833,7 @@ class MicRecorder: ObservableObject {
             return
         }
 
-        writerQueue.async { [weak self] in
+        writerQueue.async(flags: .barrier) { [weak self] in
             guard let self else { return }
             self.processAudioBuffer(copy, inputFormat: inputFormat, targetFormat: targetFormat)
             self.bufferCounterQueue.sync {
@@ -704,6 +851,11 @@ class MicRecorder: ObservableObject {
             discardedFrames += buffer.frameLength
             if discardedFrames >= warmupFrames {
                 isWarmedUp = true
+                let warmupFramesDiscarded = discardedFrames
+                controllerQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.totalWarmupDiscardedFrames += warmupFramesDiscarded
+                }
                 print("🔥 warmup complete - starting actual capture")
                 recordingEnabled = true
             }
@@ -1052,16 +1204,78 @@ class MicRecorder: ObservableObject {
             micSegments: segmentMetadata,
             systemSegments: []  // will be filled by SystemAudioRecorder
         )
-        
+
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let recordingsFolder = documentsPath.appendingPathComponent("ai&i-recordings")
         let metadataURL = recordingsFolder.appendingPathComponent("session_\(Int(sessionReferenceTime))_metadata.json")
-        
+
         do {
             try metadata.save(to: metadataURL)
             print("💾 session metadata saved")
         } catch {
             print("❌ failed to save metadata: \(error)")
+        }
+    }
+
+    private func logSessionDiagnostics() {
+        let segments = segmentQueue.sync { segmentMetadata }
+        let sortedSegments = segments.sorted { $0.startSessionTime < $1.startSessionTime }
+
+        let totalMicDuration = sortedSegments.reduce(0.0) { partial, segment in
+            let duration = max(0, segment.endSessionTime - segment.startSessionTime)
+            return partial + duration
+        }
+
+        var totalGap: TimeInterval = 0
+        if sortedSegments.count > 1 {
+            for idx in 1..<sortedSegments.count {
+                let previous = sortedSegments[idx - 1]
+                let current = sortedSegments[idx]
+                let gap = max(0, current.startSessionTime - previous.endSessionTime)
+                totalGap += gap
+            }
+        }
+        let gapCount = max(sortedSegments.count - 1, 0)
+        let averageGap = gapCount > 0 ? totalGap / Double(gapCount) : 0
+
+        let readinessAverage = readinessAttemptLog.isEmpty
+            ? 0
+            : Double(readinessAttemptLog.reduce(0, +)) / Double(readinessAttemptLog.count)
+
+        let warmupSeconds = Double(totalWarmupDiscardedFrames) / 48_000.0
+
+        let diagnostics = PerformanceMonitor.MicSessionDiagnostics(
+            routeChanges: routeChangeRequestCount,
+            executedSwitches: executedSwitchCount,
+            pinnedActivations: pinnedActivations,
+            averageReadinessAttempts: readinessAverage,
+            readinessSamples: readinessAttemptLog.count,
+            warmupDiscardSeconds: warmupSeconds,
+            segmentCount: sortedSegments.count,
+            totalMicDuration: totalMicDuration,
+            averageGap: averageGap,
+            writerDrops: totalDroppedBuffers,
+            lossiness: "unknown"
+        )
+
+        print("📈 mic diagnostics:")
+        print("   route changes observed: \(routeChangeRequestCount)")
+        print("   switches executed: \(executedSwitchCount)")
+        print("   pinned activations: \(pinnedActivations)")
+        print("   readiness attempts avg: \(String(format: "%.2f", readinessAverage))")
+        print("   warmup discard: \(String(format: "%.2f", warmupSeconds))s")
+        print("   total mic duration: \(String(format: "%.2f", totalMicDuration))s across \(sortedSegments.count) segment(s)")
+        print("   average gap between segments: \(String(format: "%.2f", averageGap))s")
+        print("   writer drops: \(totalDroppedBuffers)")
+
+        let monitor = controllerQueue.sync { self.performanceMonitor }
+
+        if let monitor {
+            Task { @MainActor in
+                monitor.recordMicDiagnostics(diagnostics)
+            }
+        } else {
+            print("📡 telemetry (mic diagnostics missing monitor): \(diagnostics.metadata)")
         }
     }
 }
