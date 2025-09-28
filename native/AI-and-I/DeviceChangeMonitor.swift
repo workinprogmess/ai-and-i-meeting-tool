@@ -9,6 +9,7 @@
 import Foundation
 import AVFoundation
 import CoreAudio
+import AudioToolbox
 
 /// monitors audio device changes and coordinates recorder responses
 @MainActor
@@ -143,7 +144,11 @@ class DeviceChangeMonitor: ObservableObject {
     
     private func removeCoreAudioListeners() {
         guard propertyListenerAdded else { return }
-        
+        guard let listenerBlock = audioObjectPropertyListenerBlock else { return }
+
+        let systemObject = AudioObjectID(kAudioObjectSystemObject)
+        var hadFailure = false
+
         // remove all listeners
         let addresses = [
             AudioObjectPropertyAddress(
@@ -162,18 +167,33 @@ class DeviceChangeMonitor: ObservableObject {
                 mElement: kAudioObjectPropertyElementMain
             )
         ]
-        
-        for var address in addresses {
-            AudioObjectRemovePropertyListenerBlock(
-                AudioObjectID(kAudioObjectSystemObject),
-                &address,
-                nil,
-                audioObjectPropertyListenerBlock!
-            )
+
+        for address in addresses {
+            var mutableAddress = address
+            if AudioObjectHasProperty(systemObject, &mutableAddress) {
+                let status = AudioObjectRemovePropertyListenerBlock(
+                    systemObject,
+                    &mutableAddress,
+                    nil,
+                    listenerBlock
+                )
+
+                if status == kAudioHardwareBadObjectError {
+                    print("ℹ️ listener already cleared for selector \(address.mSelector)")
+                } else if status != noErr {
+                    hadFailure = true
+                    print("⚠️ failed to remove listener (selector: \(address.mSelector)) status: \(status)")
+                }
+            }
         }
-        
+
         propertyListenerAdded = false
-        print("✅ core audio listeners removed")
+        audioObjectPropertyListenerBlock = nil
+        if hadFailure {
+            print("⚠️ finished removing core audio listeners with warnings")
+        } else {
+            print("✅ core audio listeners removed")
+        }
     }
     
     @MainActor
