@@ -1678,10 +1678,44 @@ result: overlapping audio becomes unintelligible to ai
 
 **status**: production-ready state machine with sophisticated device switching, ready for real-world airpods testing
 
+## comprehensive reliability hardening (2025-09-28 continued)
+**intelligent stall suppression and pipeline coordination**:
+- stall suppression system aligned with route stability windows prevents false stall alerts during legitimate device switching periods
+- stallSuppressionState() provides unified suppression status across pinned, route-unstable, and cooldown states with remaining time calculations
+- enhanced stall recovery with extended suppression covering idle duration, teardown, and detection windows
+- eliminates cascade stall detection during legitimate recovery operations improving diagnostic accuracy
+
+**system audio switching stabilization**:
+- route coalescing and pinned mode implemented in SystemAudioRecorder matching mic recorder patterns
+- consistent route stability system prevents multi-segment splits during airpods oscillation scenarios
+- unified approach across pipelines with same coalesce intervals (2s) and pinned durations (60s)
+- enhanced device change handling with rapid change detection and unstable period deferral
+
+**enhanced mixer and comprehensive telemetry integration**:
+- mixer support for multiple system audio segments with proper timeline alignment using adelay filters
+- enhanced amix configuration with dropout_transition=0 for clean multi-segment mixing
+- PerformanceMonitor integration with micDiagnosticsHistory providing bounded historical tracking
+- complete telemetry chain: MicRecorder → Coordinator → PerformanceMonitor with comprehensive diagnostic metadata
+
+**pipeline coordination enhancements**:
+- PipelineSwitchLock semaphore system prevents concurrent pipeline switching operations
+- app lifecycle observers for foreground/background pipeline management with automatic pause/resume
+- attachSwitchLock() integration across mic and system recorders for coordinated switching
+- device change validation with hasDeviceOrFormatChanged() prevents unnecessary switches
+
+**technical implementation details**:
+- `native/AI-and-I/MicRecorder.swift` intelligent stall suppression, device validation, and switch lock coordination
+- `native/AI-and-I/SystemAudioRecorder.swift` route coalescing, pinned mode, and enhanced stability patterns
+- `native/Scripts/mix-audio.swift` multi-segment support with timeline alignment and comprehensive mixing summary
+- `native/AI-and-I/PerformanceMonitor.swift` historical diagnostics tracking and centralized telemetry collection
+- `native/AI-and-I/RecordingSessionCoordinator.swift` pipeline switch locks and app lifecycle observers
+
+**result**: comprehensive reliability system eliminating false stall alerts, multi-segment audio issues, and pipeline coordination race conditions
+
 ---
 
-Last Updated: 2025-09-28 (Production-grade state machine with device switching guardrails)
-Session Duration: Complete MicRecorder architectural overhaul + systematic commit refinements
+Last Updated: 2025-09-28 (Comprehensive reliability hardening with pipeline coordination)
+Session Duration: Complete warm pipeline reliability system + systematic hardening refinements
 Major Achievements (electron build, archived):
 - milestone 3.2: zero data loss + device resilience complete
 - strategic roadmap: human intelligence prioritized over commodity features  
