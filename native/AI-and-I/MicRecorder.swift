@@ -198,6 +198,8 @@ class MicRecorder: ObservableObject {
     private var lowQualityAirPodsAttempts: Int = 0
     private let airPodsRecoveryRetryLimit: Int = 2
     private let airPodsRecoveryDelay: TimeInterval = 2.5
+    private let airPodsRMSValidationThreshold: Float = 0.002
+    private let airPodsRMSValidationWindows: Int = 5
     private let minimumSegmentDuration: TimeInterval = 20.0
     private var readinessFailureCount = 0
     private let readinessFailureLimit = 5
@@ -655,6 +657,22 @@ class MicRecorder: ObservableObject {
             }
         } else {
             lowQualityAirPodsAttempts = 0
+            if isAirPodsDevice {
+                if !validateAirPodsSignal(warmEngine: engine, format: inputFormat) {
+                    if allowFallback {
+                        lowQualityAirPodsAttempts += 1
+                        let holdUntil = Date().addingTimeInterval(airPodsRecoveryDelay)
+                        pinnedUntil = holdUntil
+                        extendStallSuppression(until: holdUntil, reason: "airpods-silence")
+                        setErrorMessage("airpods audio silent – retrying")
+                        print("⚠️ airpods audio silent – retrying (\(Int(airPodsRecoveryDelay))s)")
+                        Thread.sleep(forTimeInterval: airPodsRecoveryDelay)
+                        return false
+                    } else {
+                        print("⚠️ airpods audio still silent – recording with current device")
+                    }
+                }
+            }
             if pinnedUntil != nil {
                 pinnedUntil = nil
                 print("🔓 cleared pinned mic – stable input at \(Int(negotiatedSampleRate))hz")
@@ -1185,6 +1203,80 @@ class MicRecorder: ObservableObject {
 
     private func prepareOutputRoutingForCurrentInputDevice() {
         // current behavior: respect the user’s chosen output; we only snapshot for restore-on-stop
+    }
+
+    private func validateAirPodsSignal(warmEngine: AVAudioEngine, format: AVAudioFormat) -> Bool {
+        let inputNode = warmEngine.inputNode
+        let requiredWindows = airPodsRMSValidationWindows
+        guard requiredWindows > 0 else { return true }
+
+        if !warmEngine.isRunning {
+            do {
+                warmEngine.prepare()
+                try warmEngine.start()
+            } catch {
+                print("⚠️ unable to start warm engine for RMS validation: \(error)")
+                return true
+            }
+        }
+
+        var silentWindows = 0
+        let semaphore = DispatchSemaphore(value: 0)
+        var tapInstalled = false
+        let bufferSize: AVAudioFrameCount = 2048
+
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
+            guard let self else {
+                semaphore.signal()
+                return
+            }
+
+            if let rms = self.calculateRMS(for: buffer), rms < self.airPodsRMSValidationThreshold {
+                silentWindows += 1
+            }
+
+            semaphore.signal()
+        }
+        tapInstalled = true
+
+        defer {
+            if tapInstalled {
+                inputNode.removeTap(onBus: 0)
+            }
+        }
+
+        for _ in 0..<requiredWindows {
+            let result = semaphore.wait(timeout: .now() + 0.25)
+            if result == .timedOut {
+                print("⚠️ airpods RMS validation timed out waiting for buffer")
+                break
+            }
+
+            if silentWindows >= requiredWindows {
+                print("⚠️ airpods validation detected low RMS over \(requiredWindows) windows")
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func calculateRMS(for buffer: AVAudioPCMBuffer) -> Float? {
+        guard let floatData = buffer.floatChannelData else { return nil }
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return nil }
+        let channelCount = Int(buffer.format.channelCount)
+
+        var sum: Float = 0
+        for channel in 0..<channelCount {
+            let channelData = floatData[channel]
+            for frame in 0..<frameLength {
+                let sample = channelData[frame]
+                sum += sample * sample
+            }
+        }
+
+        return sqrt(sum / Float(frameLength * channelCount))
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
