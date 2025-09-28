@@ -3,6 +3,18 @@ import Foundation
 import AppKit
 #endif
 
+final class PipelineSwitchLock {
+    private let semaphore = DispatchSemaphore(value: 1)
+
+    func acquire(for pipeline: String, reason: String) -> () -> Void {
+        semaphore.wait()
+        let semaphore = self.semaphore
+        return {
+            semaphore.signal()
+        }
+    }
+}
+
 struct RecordingDebugOptions {
     var simulateDeviceChangeOnStart = false
     var simulateTelephonyMode = false
@@ -16,6 +28,7 @@ final class RecordingSessionCoordinator {
     private let systemRecorder: SystemAudioRecorder
     private let deviceMonitor: DeviceChangeMonitor
     private var performanceMonitor: PerformanceMonitor?
+    private let switchLock = PipelineSwitchLock()
 
     private(set) var currentContext: RecordingSessionContext?
     var debugOptions = RecordingDebugOptions()
@@ -44,6 +57,8 @@ final class RecordingSessionCoordinator {
         self.systemRecorder = systemRecorder
         self.deviceMonitor = deviceMonitor
         self.performanceMonitor = performanceMonitor
+        self.micRecorder.attachSwitchLock(switchLock)
+        self.systemRecorder.attachSwitchLock(switchLock)
         setupLifecycleObservers()
     }
 
@@ -139,6 +154,12 @@ final class RecordingSessionCoordinator {
     }
 
     private func pauseWarmPipelines() {
+        guard !micRecorder.isRecording, !systemRecorder.isRecording else {
+            if debugOptions.logLifecycleTransitions {
+                print("⚙️ skip warm pipeline pause – recording active")
+            }
+            return
+        }
         micRecorder.shutdownWarmPipeline()
         systemRecorder.shutdownWarmPipeline()
         emitTelemetry(.warmPipelinesPaused)
@@ -148,7 +169,9 @@ final class RecordingSessionCoordinator {
 #if canImport(AppKit)
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.pauseWarmPipelines()
+            Task { @MainActor [weak self] in
+                self?.pauseWarmPipelines()
+            }
         })
 
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
