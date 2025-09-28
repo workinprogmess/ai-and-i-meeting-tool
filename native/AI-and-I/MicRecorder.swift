@@ -1184,18 +1184,7 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
-        guard let preservedID = preferredOutputDeviceID else { return }
-        guard let currentID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
-        guard currentID != preservedID else { return }
-
-        if DeviceChangeMonitor.isAirPods(deviceID: currentID) {
-            let preservedName = DeviceChangeMonitor.deviceName(for: preservedID) ?? "previous device"
-            if DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
-                print("🎧 restored preserved output device mid-session: \(preservedName)")
-            } else {
-                print("⚠️ failed to restore preserved output device mid-session")
-            }
-        }
+        // current behavior: respect the user’s chosen output; we only snapshot for restore-on-stop
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
