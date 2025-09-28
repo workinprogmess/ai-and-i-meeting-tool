@@ -204,6 +204,9 @@ class MicRecorder: ObservableObject {
     private var stallSuppressionUntil: Date = .distantPast
     private var lastSuppressedStallLog = Date.distantPast
     private weak var performanceMonitor: PerformanceMonitor?
+    private var switchLock: PipelineSwitchLock?
+    private var lastKnownDeviceAudioID: AudioDeviceID = 0
+    private var lastKnownSampleRate: Double = 0
     
     // MARK: - public interface
     
@@ -234,6 +237,8 @@ class MicRecorder: ObservableObject {
         totalDroppedBuffers = 0
         stallSuppressionUntil = .distantPast
         lastSuppressedStallLog = .distantPast
+        lastKnownDeviceAudioID = 0
+        lastKnownSampleRate = 0
         
         // set state first
         state = .recording
@@ -278,6 +283,12 @@ class MicRecorder: ObservableObject {
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
         controllerQueue.async { [weak self] in
             self?.performanceMonitor = monitor
+        }
+    }
+
+    func attachSwitchLock(_ lock: PipelineSwitchLock?) {
+        controllerQueue.async { [weak self] in
+            self?.switchLock = lock
         }
     }
     
@@ -410,6 +421,13 @@ class MicRecorder: ObservableObject {
 
         print("🔄 performing device switch (reason: \(reason))")
 
+        if shouldValidateDeviceChange(reason: reason) && !hasDeviceOrFormatChanged() {
+            print("ℹ️ device and format unchanged – skipping mic switch")
+            state = .recording
+            extendStallSuppression(by: routeCoalesceInterval, reason: "unchanged-device")
+            return
+        }
+
         prepareOutputRoutingForCurrentInputDevice()
 
         if shouldDeferForMinimumSegment(reason: reason) {
@@ -424,6 +442,9 @@ class MicRecorder: ObservableObject {
 
         routeUnstableUntil = nil
         extendStallSuppression(by: Double(settleDelayNanoseconds) / 1_000_000_000 + 1.0, reason: "switch-teardown")
+
+        let releaseLock = switchLock?.acquire(for: "mic", reason: reason)
+        defer { releaseLock?() }
 
         stopCurrentSegmentInternal(reason: reason)
 
@@ -486,6 +507,28 @@ class MicRecorder: ObservableObject {
             lastTelephonyGuardPrompt = nil
             return true
         }
+        return false
+    }
+
+    private func shouldValidateDeviceChange(reason: String) -> Bool {
+        shouldBypassMinimumDuration(reason: reason) == false
+    }
+
+    private func hasDeviceOrFormatChanged() -> Bool {
+        guard lastKnownDeviceAudioID != 0 else { return true }
+        guard let info = fetchDefaultInputDeviceInfo() else { return true }
+        if info.id != lastKnownDeviceAudioID {
+            return true
+        }
+
+        if lastKnownSampleRate == 0 {
+            return true
+        }
+
+        if let currentRate = querySampleRate(for: info.id), abs(currentRate - lastKnownSampleRate) >= 1 {
+            return true
+        }
+
         return false
     }
 
@@ -678,6 +721,9 @@ class MicRecorder: ObservableObject {
         let warmupDurationSeconds = Double(warmupFrames) / recordingFormat.sampleRate
         extendStallSuppression(by: warmupDurationSeconds + stallDetectionWindow, reason: "segment-warmup")
 
+        lastKnownDeviceAudioID = currentDeviceAudioID
+        lastKnownSampleRate = currentSampleRate
+
         return true
     }
     
@@ -832,6 +878,10 @@ class MicRecorder: ObservableObject {
         let reason = "stall-recovery"
 
         extendStallSuppression(by: idleDuration + Double(settleDelayNanoseconds) / 1_000_000_000 + stallDetectionWindow, reason: "stall-recovery")
+
+        let releaseLock = switchLock?.acquire(for: "mic", reason: reason)
+        defer { releaseLock?() }
+
         stopCurrentSegmentInternal(reason: reason)
 
         if settleDelayNanoseconds > 0 {
