@@ -195,6 +195,9 @@ class MicRecorder: ObservableObject {
     private let routeChangeWindow: TimeInterval = 10.0
     private let pinnedSwitchThreshold = 3
     private let pinnedHoldDuration: TimeInterval = 15.0
+    private var lowQualityAirPodsAttempts: Int = 0
+    private let airPodsRecoveryRetryLimit: Int = 2
+    private let airPodsRecoveryDelay: TimeInterval = 2.5
     private let minimumSegmentDuration: TimeInterval = 20.0
     private var readinessFailureCount = 0
     private let readinessFailureLimit = 5
@@ -232,6 +235,7 @@ class MicRecorder: ObservableObject {
         routeUnstableUntil = nil
         pinnedActivations = 0
         lastRouteChangeDeviceID = 0
+        lowQualityAirPodsAttempts = 0
         lastTelephonyGuardPrompt = nil
         readinessFailureCount = 0
         routeChangeRequestCount = 0
@@ -612,15 +616,45 @@ class MicRecorder: ObservableObject {
         setCurrentDeviceName("initializing...")
 
         let negotiatedSampleRate = inputFormat.sampleRate
+        let fetchedDeviceInfo = fetchDefaultInputDeviceInfo()
+        let isAirPodsDevice = fetchedDeviceInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
         print("📊 input format: \(negotiatedSampleRate)hz, \(inputFormat.channelCount)ch")
         print("📊 target format: \(recordingFormat.sampleRate)hz, \(recordingFormat.channelCount)ch")
         print("📊 formats equal: \(inputFormat == recordingFormat)")
 
         let assessedQuality = AudioSegmentMetadata.assessQuality(sampleRate: inputFormat.sampleRate)
         setCurrentQuality(assessedQuality)
-        if negotiatedSampleRate < 44100 {
+        if negotiatedSampleRate < 44_100 {
             print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
+
+            if isAirPodsDevice {
+                if allowFallback && lowQualityAirPodsAttempts < airPodsRecoveryRetryLimit {
+                    lowQualityAirPodsAttempts += 1
+                    let holdUntil = Date().addingTimeInterval(airPodsRecoveryDelay)
+                    pinnedUntil = holdUntil
+                    extendStallSuppression(until: holdUntil, reason: "airpods-settle")
+                    setErrorMessage("airpods mic settling – retrying shortly")
+                    let retryMessage = Int(ceil(airPodsRecoveryDelay))
+                    print("⚠️ airpods in low-quality mode – retrying (\(retryMessage)s)")
+                    Thread.sleep(forTimeInterval: airPodsRecoveryDelay)
+                    return false
+                }
+
+                if allowFallback && lowQualityAirPodsAttempts >= airPodsRecoveryRetryLimit {
+                    if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
+                       DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
+                        lowQualityAirPodsAttempts = 0
+                        setErrorMessage("airpods mic unstable – using mac microphone")
+                        print("⚠️ airpods still low quality after retries – reverting to built-in mic")
+                        Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
+                        return startNewSegmentInternal(reason: reason + "-airpods-fallback", allowFallback: false)
+                    } else {
+                        print("⚠️ failed to revert to built-in mic; recording with current device")
+                    }
+                }
+            }
         } else {
+            lowQualityAirPodsAttempts = 0
             if pinnedUntil != nil {
                 pinnedUntil = nil
                 print("🔓 cleared pinned mic – stable input at \(Int(negotiatedSampleRate))hz")
@@ -682,7 +716,7 @@ class MicRecorder: ObservableObject {
         startStallMonitor()
 
         let deviceName: String
-        if let deviceInfo = fetchDefaultInputDeviceInfo() {
+        if let deviceInfo = fetchedDeviceInfo {
             currentDeviceAudioID = deviceInfo.id
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
@@ -1150,7 +1184,18 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareOutputRoutingForCurrentInputDevice() {
-        // no-op: we preserve the originally captured output device and restore it when the session ends
+        guard let preservedID = preferredOutputDeviceID else { return }
+        guard let currentID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
+        guard currentID != preservedID else { return }
+
+        if DeviceChangeMonitor.isAirPods(deviceID: currentID) {
+            let preservedName = DeviceChangeMonitor.deviceName(for: preservedID) ?? "previous device"
+            if DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
+                print("🎧 restored preserved output device mid-session: \(preservedName)")
+            } else {
+                print("⚠️ failed to restore preserved output device mid-session")
+            }
+        }
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
