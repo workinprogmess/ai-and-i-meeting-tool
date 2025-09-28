@@ -201,6 +201,8 @@ class MicRecorder: ObservableObject {
     private var readinessAttemptLog: [Int] = []
     private var totalWarmupDiscardedFrames: AVAudioFrameCount = 0
     private var totalDroppedBuffers = 0
+    private var stallSuppressionUntil: Date = .distantPast
+    private var lastSuppressedStallLog = Date.distantPast
     private weak var performanceMonitor: PerformanceMonitor?
     
     // MARK: - public interface
@@ -230,6 +232,8 @@ class MicRecorder: ObservableObject {
         readinessAttemptLog.removeAll()
         totalWarmupDiscardedFrames = 0
         totalDroppedBuffers = 0
+        stallSuppressionUntil = .distantPast
+        lastSuppressedStallLog = .distantPast
         
         // set state first
         state = .recording
@@ -310,6 +314,7 @@ class MicRecorder: ObservableObject {
             routeUnstableUntil = now.addingTimeInterval(routeCoalesceInterval)
             print("⚠️ route unstable – waiting \(routeCoalesceInterval)s before switching")
             setErrorMessage("devices still switching – waiting to settle")
+            extendStallSuppression(by: routeCoalesceInterval + stallDetectionWindow, reason: "route-unstable")
         }
 
         // pin when we cross threshold within 10 seconds
@@ -319,6 +324,7 @@ class MicRecorder: ObservableObject {
             routeChangeTimestamps.removeAll()
             print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
             setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
+            extendStallSuppression(until: pinnedUntil ?? now, reason: "pinned")
             return
         }
 
@@ -342,6 +348,32 @@ class MicRecorder: ObservableObject {
         controllerQueue.asyncAfter(deadline: .now() + wait, execute: workItem)
     }
 
+    private func extendStallSuppression(by interval: TimeInterval, reason: String) {
+        guard interval > 0 else { return }
+        extendStallSuppression(until: Date().addingTimeInterval(interval), reason: reason)
+    }
+
+    private func extendStallSuppression(until newUntil: Date, reason: String) {
+        guard newUntil > stallSuppressionUntil else { return }
+        stallSuppressionUntil = newUntil
+        let remaining = max(0, newUntil.timeIntervalSinceNow)
+        print("⏳ stall suppression extended to +\(String(format: "%.2f", remaining))s (reason: \(reason))")
+    }
+
+    private func stallSuppressionState() -> (active: Bool, reason: String, remaining: TimeInterval) {
+        let now = Date()
+        if let pinnedUntil, now < pinnedUntil {
+            return (true, "pinned", pinnedUntil.timeIntervalSince(now))
+        }
+        if let routeUnstableUntil, now < routeUnstableUntil {
+            return (true, "route-unstable", routeUnstableUntil.timeIntervalSince(now))
+        }
+        if now < stallSuppressionUntil {
+            return (true, "cooldown", stallSuppressionUntil.timeIntervalSince(now))
+        }
+        return (false, "", 0)
+    }
+
     private func performSwitchLocked(reason: String) {
         guard isRecording else { return }
 
@@ -361,6 +393,7 @@ class MicRecorder: ObservableObject {
             print("⚠️ route still unstable for \(String(format: "%.2f", remaining))s – deferring switch")
             pendingSwitchReason = reason
             state = .recording
+            extendStallSuppression(until: routeUnstableUntil, reason: "route-unstable")
             schedulePendingSwitchLocked(after: remaining)
             return
         }
@@ -370,6 +403,7 @@ class MicRecorder: ObservableObject {
             print("🧷 pinned mode active during switch request – rescheduling")
             pendingSwitchReason = reason
             state = .recording
+            extendStallSuppression(until: pinnedUntil, reason: "pinned")
             schedulePendingSwitchLocked(after: remaining)
             return
         }
@@ -383,11 +417,13 @@ class MicRecorder: ObservableObject {
             print("⏱️ segment shorter than minimum – delaying switch by \(String(format: "%.2f", remaining))s")
             pendingSwitchReason = reason
             state = .recording
+            extendStallSuppression(by: remaining + stallDetectionWindow, reason: "min-segment")
             schedulePendingSwitchLocked(after: remaining)
             return
         }
 
         routeUnstableUntil = nil
+        extendStallSuppression(by: Double(settleDelayNanoseconds) / 1_000_000_000 + 1.0, reason: "switch-teardown")
 
         stopCurrentSegmentInternal(reason: reason)
 
@@ -639,6 +675,8 @@ class MicRecorder: ObservableObject {
         }
 
         stallRecoveryAttempts = 0
+        let warmupDurationSeconds = Double(warmupFrames) / recordingFormat.sampleRate
+        extendStallSuppression(by: warmupDurationSeconds + stallDetectionWindow, reason: "segment-warmup")
 
         return true
     }
@@ -755,6 +793,16 @@ class MicRecorder: ObservableObject {
     private func handleStallDetected(idleDuration: TimeInterval) {
         guard !stallRecoveryInProgress else { return }
 
+        let suppression = stallSuppressionState()
+        if suppression.active {
+            if Date().timeIntervalSince(lastSuppressedStallLog) > 1.5 {
+                print("⏳ mic stall suppressed (idle \(String(format: "%.1f", idleDuration))s, reason: \(suppression.reason), remaining: \(String(format: "%.2f", suppression.remaining))s)")
+                lastSuppressedStallLog = Date()
+            }
+            stallDetectionStart = nil
+            return
+        }
+
         if stallRecoveryAttempts >= stallRecoveryAttemptLimit {
             print("❌ mic stall persists after \(stallRecoveryAttempts) recovery attempts – please stop and restart recording")
             setErrorMessage("microphone stalled – stop and restart")
@@ -783,6 +831,7 @@ class MicRecorder: ObservableObject {
 
         let reason = "stall-recovery"
 
+        extendStallSuppression(by: idleDuration + Double(settleDelayNanoseconds) / 1_000_000_000 + stallDetectionWindow, reason: "stall-recovery")
         stopCurrentSegmentInternal(reason: reason)
 
         if settleDelayNanoseconds > 0 {
