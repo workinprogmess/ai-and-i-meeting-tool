@@ -4,14 +4,22 @@
 ai meeting intelligence - native swiftui application for world-class user experience and performance
 
 ## current milestone: transcription integration (0.2.0) 🚧 IN HARDENING
-**status**: core flows implemented, warm pipeline architecture added but needs testing and refinement before declaring reliability.
+**status**: core flows implemented, warm pipeline architecture added but oscillation issues identified requiring strategic solution.
+
+### critical analysis completed (2025-09-30)
+- 📋 **comprehensive debugging session**: identified oscillation pattern where fixing one audio issue resurfaces another
+- 🔍 **root cause analysis**: fighting bluetooth telephony mode and forcing switches during core audio negotiation creates corruption
+- 📝 **key decisions documented**: see `shared/key-decisions.md` for complete analysis and solution approach
+- 🎯 **way forward**: implement "gentle stability" approach - work with system instead of fighting it
+
+### current implementation status:
 - ✅ milestone 1 foundation still holds (hot standby architecture, baseline metrics, core views)
-- 🔄 device switching + mixed audio: warm pipeline architecture implemented (2025-09-26) but requires testing with long sessions and deliberate device switches
-- ⚠️ mixing pipeline: `mix-audio.swift` drops segments when filenames contain `&`; add session-scoped mixing + retries
+- 🔄 device switching + mixed audio: warm pipeline architecture implemented (2025-09-26) but oscillation issues require gentle stability approach
+- ⚠️ mixing pipeline: `mix-audio.swift` works correctly but audio inputs corrupted by aggressive switching
 - 🔄 launch + recording start latency: warm pipelines implemented (2025-09-26) to move processing off main actor, needs performance validation
 - ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
 - ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
-- 🎯 focus: deliver an airtight record → switch devices → mix → mp3 → transcribe loop with clear telemetry
+- 🎯 **revised focus**: implement gentle stability approach first, then deliver airtight transcription loop
 - 🛠 dev helper script `native/Scripts/load_transcription_env.sh` now loads transcription keys from `~/.config/ai-and-i/env` so run-scheme env vars stay clean while cli tools keep working
 
 ## native implementation milestones
