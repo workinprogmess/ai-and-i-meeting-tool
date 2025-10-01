@@ -9,6 +9,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
+import AudioToolbox
 
 struct RecordingSessionContext {
     let id: String
@@ -180,9 +181,6 @@ class MicRecorder: ObservableObject {
     private var currentGain: Float = 2.5  // boost for quiet built-in mics
     private let targetLevel: Float = -12.0  // target dBFS
 
-    // MARK: - telephony guard
-    private var lastTelephonyGuardPrompt: Date?
-    private let telephonyGuardWindow: TimeInterval = 8.0
     
     // MARK: - quality control
     private var routeChangeTimestamps: [Date] = []
@@ -198,12 +196,18 @@ class MicRecorder: ObservableObject {
     private var lowQualityAirPodsAttempts: Int = 0
     private let airPodsRecoveryRetryLimit: Int = 1
     private let airPodsRecoveryDelay: TimeInterval = 1.5
+    private let airPodsStabilityWindow: TimeInterval = 0.4
     private let airPodsRMSValidationThreshold: Float = 0.002
     private let airPodsRMSValidationWindowFrames: AVAudioFrameCount = 4_800  // 0.1s at 48khz
     private let airPodsRMSValidationWindowCount: Int = 10
     private let minimumSegmentDuration: TimeInterval = 20.0
     private var readinessFailureCount = 0
     private let readinessFailureLimit = 5
+    private var readinessStableWindowStart: Date?
+    private var readinessLastSampleRate: Double = 0
+    private var readinessLastChannelCount: AVAudioChannelCount = 0
+    private var readinessBackoffTier = 0
+    private let readinessBackoffSteps: [TimeInterval] = [2.0, 5.0, 8.0, 15.0, 60.0]
     private var routeChangeRequestCount = 0
     private var executedSwitchCount = 0
     private var readinessAttemptLog: [Int] = []
@@ -244,7 +248,6 @@ class MicRecorder: ObservableObject {
         pinnedActivations = 0
         lastRouteChangeDeviceID = 0
         lowQualityAirPodsAttempts = 0
-        lastTelephonyGuardPrompt = nil
         readinessFailureCount = 0
         routeChangeRequestCount = 0
         executedSwitchCount = 0
@@ -255,6 +258,7 @@ class MicRecorder: ObservableObject {
         lastSuppressedStallLog = .distantPast
         lastKnownDeviceAudioID = 0
         lastKnownSampleRate = 0
+        readinessBackoffTier = 0
         
         // set state first
         state = .recording
@@ -407,6 +411,60 @@ class MicRecorder: ObservableObject {
         print("⏳ stall suppression extended to +\(String(format: "%.2f", remaining))s (reason: \(reason))")
     }
 
+    private func applyReadinessBackoff(reason: String) {
+        let tier = min(readinessBackoffTier, readinessBackoffSteps.count - 1)
+        let delay = readinessBackoffSteps[tier]
+        let holdUntil = Date().addingTimeInterval(delay)
+
+        if let existingPinned = pinnedUntil, existingPinned > holdUntil {
+            extendStallSuppression(until: existingPinned, reason: "readiness-extend")
+        } else {
+            pinnedUntil = holdUntil
+            extendStallSuppression(until: holdUntil, reason: "readiness-\(reason)")
+        }
+
+        readinessBackoffTier = min(tier + 1, readinessBackoffSteps.count - 1)
+        print("⏳ readiness backoff engaged (tier: \(tier), duration: \(String(format: "%.2f", delay))s, reason: \(reason))")
+
+        if let monitor = performanceMonitor {
+            let durationMetadata = String(format: "%.2f", delay)
+            Task { @MainActor in
+                monitor.recordRecordingEvent(
+                    "mic_readiness_backoff",
+                    metadata: [
+                        "tier": String(tier),
+                        "duration": durationMetadata,
+                        "reason": reason
+                    ]
+                )
+            }
+        }
+    }
+
+    private func setEngineInputDevice(_ engine: AVAudioEngine, to deviceID: AudioDeviceID) -> Bool {
+        guard deviceID != 0 else { return false }
+        guard let audioUnit = engine.inputNode.audioUnit else {
+            print("⚠️ input audio unit unavailable when selecting device \(deviceID)")
+            return false
+        }
+        var mutableDeviceID = deviceID
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &mutableDeviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        if status != noErr {
+            print("⚠️ failed to set engine input device to \(deviceID): \(status)")
+            return false
+        }
+
+        return true
+    }
+
     private func stallSuppressionState() -> (active: Bool, reason: String, remaining: TimeInterval) {
         let now = Date()
         if let pinnedUntil, now < pinnedUntil {
@@ -511,6 +569,52 @@ class MicRecorder: ObservableObject {
         print("✅ device switch complete (reason: \(reason))")
     }
 
+    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> (format: AVAudioFormat?, attempts: Int) {
+        let pollInterval = Double(readinessRetryDelayNanoseconds) / 1_000_000_000
+
+        for attempt in 0..<readinessRetryLimit {
+            let format = engine.inputNode.inputFormat(forBus: 0)
+            let sampleRate = format.sampleRate
+            let channels = format.channelCount
+
+            if sampleRate >= 8_000 && channels > 0 {
+                if readinessLastSampleRate != sampleRate || readinessLastChannelCount != channels {
+                    readinessStableWindowStart = Date()
+                    readinessLastSampleRate = sampleRate
+                    readinessLastChannelCount = channels
+                }
+
+                if let start = readinessStableWindowStart {
+                    let stableDuration = Date().timeIntervalSince(start)
+                    if stableDuration >= airPodsStabilityWindow {
+                        if attempt > 0 {
+                            let stableMessage = String(
+                                format: "ℹ️ input format stabilized after %d checks (%0.0fhz, %dch, %.2fs window)",
+                                attempt + 1,
+                                sampleRate,
+                                Int(channels),
+                                stableDuration
+                            )
+                            print(stableMessage)
+                        }
+                        return (format, attempt + 1)
+                    }
+                } else {
+                    readinessStableWindowStart = Date()
+                }
+            } else {
+                readinessStableWindowStart = nil
+                readinessLastSampleRate = 0
+                readinessLastChannelCount = 0
+            }
+
+            Thread.sleep(forTimeInterval: pollInterval)
+        }
+
+        print("⚠️ input format did not stabilize after \(readinessRetryLimit) attempts")
+        return (nil, readinessRetryLimit)
+    }
+
     private func shouldDeferForMinimumSegment(reason: String) -> Bool {
         guard !shouldBypassMinimumDuration(reason: reason) else { return false }
         return currentSegmentDuration() < minimumSegmentDuration
@@ -536,16 +640,6 @@ class MicRecorder: ObservableObject {
         return max(0.25, remaining)
     }
 
-    private func shouldAllowTelephonyOverride() -> Bool {
-        guard let prompt = lastTelephonyGuardPrompt else { return false }
-        let elapsed = Date().timeIntervalSince(prompt)
-        if elapsed <= telephonyGuardWindow {
-            lastTelephonyGuardPrompt = nil
-            return true
-        }
-        return false
-    }
-
     private func shouldValidateDeviceChange(reason: String) -> Bool {
         shouldBypassMinimumDuration(reason: reason) == false
     }
@@ -568,21 +662,6 @@ class MicRecorder: ObservableObject {
         return false
     }
 
-    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> (format: AVAudioFormat?, attempts: Int) {
-        for attempt in 0..<readinessRetryLimit {
-            let format = engine.inputNode.inputFormat(forBus: 0)
-            if format.sampleRate > 0 && format.channelCount > 0 {
-                if attempt > 0 {
-                    print("ℹ️ input format stabilized after \(attempt + 1) checks")
-                }
-                return (format, attempt + 1)
-            }
-            Thread.sleep(forTimeInterval: Double(readinessRetryDelayNanoseconds) / 1_000_000_000)
-        }
-        print("⚠️ input format did not stabilize after \(readinessRetryLimit) attempts")
-        return (nil, readinessRetryLimit)
-    }
-
     // MARK: - private implementation
 
     /// internal segment start (must be on controller queue)
@@ -592,11 +671,15 @@ class MicRecorder: ObservableObject {
         hasLoggedFormatMatch = false
         lastConversionLogTime = Date.distantPast
         clearAirPodsVerification()
+        readinessStableWindowStart = nil
+        readinessLastSampleRate = 0
+        readinessLastChannelCount = 0
 
         do {
             try setupWarmEngineIfNeeded(startImmediately: false)
         } catch {
             setErrorMessage("failed to warm audio engine: \(error.localizedDescription)")
+            applyReadinessBackoff(reason: "warm-setup")
             return false
         }
 
@@ -611,10 +694,11 @@ class MicRecorder: ObservableObject {
             Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
         }
 
-        let readiness = waitForStableInputFormat(engine)
-        readinessAttemptLog.append(readiness.attempts)
-        guard let inputFormat = readiness.format else {
+        var readiness = waitForStableInputFormat(engine)
+        var totalReadinessAttempts = readiness.attempts
+        guard var inputFormat = readiness.format else {
             setErrorMessage("audio device not ready - holding current mic")
+            applyReadinessBackoff(reason: "unstable-format")
             return false
         }
 
@@ -624,10 +708,51 @@ class MicRecorder: ObservableObject {
         currentDeviceID = "pending"
         setCurrentDeviceName("initializing...")
 
-        let negotiatedSampleRate = inputFormat.sampleRate
-        let fetchedDeviceInfo = fetchDefaultInputDeviceInfo()
-        let isAirPodsDevice = fetchedDeviceInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
-        print("📊 input format: \(negotiatedSampleRate)hz, \(inputFormat.channelCount)ch")
+        var negotiatedSampleRate = inputFormat.sampleRate
+        let defaultInputInfo = fetchDefaultInputDeviceInfo()
+        var recordingDeviceInfo = defaultInputInfo
+
+        if let deviceInfo = defaultInputInfo,
+           DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id),
+           negotiatedSampleRate < 44_100,
+           let builtInID = DeviceChangeMonitor.builtInInputDeviceID(),
+           builtInID != deviceInfo.id,
+           setEngineInputDevice(engine, to: builtInID) {
+            print("🎤 rerouting recording engine to built-in mic while airpods negotiate")
+            readinessStableWindowStart = nil
+            readinessLastSampleRate = 0
+            readinessLastChannelCount = 0
+            readiness = waitForStableInputFormat(engine)
+            totalReadinessAttempts += readiness.attempts
+
+            guard let fallbackFormat = readiness.format else {
+                setErrorMessage("failed to ready built-in mic fallback")
+                applyReadinessBackoff(reason: "builtin-fallback")
+                return false
+            }
+
+            inputFormat = fallbackFormat
+            negotiatedSampleRate = fallbackFormat.sampleRate
+            let fallbackName = DeviceChangeMonitor.deviceName(for: builtInID) ?? "built-in microphone"
+            recordingDeviceInfo = (builtInID, fallbackName)
+
+            if let monitor = performanceMonitor {
+                Task { @MainActor in
+                    monitor.recordRecordingEvent(
+                        "mic_fallback_engaged",
+                        metadata: [
+                            "fallback_device_id": String(builtInID),
+                            "fallback_device_name": fallbackName
+                        ]
+                    )
+                }
+            }
+        }
+
+        readinessAttemptLog.append(totalReadinessAttempts)
+
+        let isAirPodsDevice = recordingDeviceInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
+        print("📊 input format: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
         print("📊 target format: \(recordingFormat.sampleRate)hz, \(recordingFormat.channelCount)ch")
         print("📊 formats equal: \(inputFormat == recordingFormat)")
 
@@ -635,33 +760,7 @@ class MicRecorder: ObservableObject {
         setCurrentQuality(assessedQuality)
         if negotiatedSampleRate < 44_100 {
             print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
-
-            if isAirPodsDevice {
-                if allowFallback && lowQualityAirPodsAttempts < airPodsRecoveryRetryLimit {
-                    lowQualityAirPodsAttempts += 1
-                    let holdUntil = Date().addingTimeInterval(airPodsRecoveryDelay)
-                    pinnedUntil = holdUntil
-                    extendStallSuppression(until: holdUntil, reason: "airpods-settle")
-                    setErrorMessage("airpods mic settling – retrying shortly")
-                    let retryMessage = Int(ceil(airPodsRecoveryDelay))
-                    print("⚠️ airpods in low-quality mode – retrying (\(retryMessage)s)")
-                    Thread.sleep(forTimeInterval: airPodsRecoveryDelay)
-                    return false
-                }
-
-                if allowFallback && lowQualityAirPodsAttempts >= airPodsRecoveryRetryLimit {
-                    if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
-                       DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
-                        lowQualityAirPodsAttempts = 0
-                        setErrorMessage("airpods mic unstable – using mac microphone")
-                        print("⚠️ airpods still low quality after retries – reverting to built-in mic")
-                        Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
-                        return startNewSegmentInternal(reason: reason + "-airpods-fallback", allowFallback: false)
-                    } else {
-                        print("⚠️ failed to revert to built-in mic; recording with current device")
-                    }
-                }
-            }
+            lowQualityAirPodsAttempts = min(lowQualityAirPodsAttempts + 1, airPodsRecoveryRetryLimit)
         } else {
             lowQualityAirPodsAttempts = 0
             if isAirPodsDevice {
@@ -706,6 +805,7 @@ class MicRecorder: ObservableObject {
             print("📁 created audio file: \(segmentFilePath)")
         } catch {
             setErrorMessage("failed to create audio file: \(error.localizedDescription)")
+            applyReadinessBackoff(reason: "file-create")
             return false
         }
 
@@ -730,34 +830,20 @@ class MicRecorder: ObservableObject {
         startStallMonitor()
 
         let deviceName: String
-        if let deviceInfo = fetchedDeviceInfo {
+        if let deviceInfo = recordingDeviceInfo {
             currentDeviceAudioID = deviceInfo.id
             currentDeviceID = String(deviceInfo.id)
             deviceName = deviceInfo.name
-            lastRouteChangeDeviceID = deviceInfo.id
+            if let defaultID = defaultInputInfo?.id {
+                lastRouteChangeDeviceID = defaultID
+            } else {
+                lastRouteChangeDeviceID = deviceInfo.id
+            }
             setCurrentDeviceName(deviceName)
             if DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id) {
                 if negotiatedSampleRate <= 16_000 {
-                    if allowFallback {
-                        if shouldAllowTelephonyOverride() {
-                            print("⚠️ telephony guard override accepted – recording with airpods at \(negotiatedSampleRate)hz")
-                            setErrorMessage("airpods mic in call mode (lower quality) – recording as requested")
-                        } else {
-                            print("⚠️ airpods reported telephony sample rate (\(negotiatedSampleRate)hz) – holding mac microphone")
-                            setErrorMessage("airpods mic in call mode (lower quality). holding mac mic – switch anyway?")
-                            lastTelephonyGuardPrompt = Date()
-                            if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
-                               DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
-                                Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
-                                return startNewSegmentInternal(reason: reason + "-telephony-guard", allowFallback: false)
-                            } else {
-                                print("⚠️ failed to switch input back to built-in microphone; continuing with current device")
-                            }
-                        }
-                    } else {
-                        print("⚠️ telephony guard override active – recording with low-quality airpods mic")
-                        setErrorMessage("airpods mic in call mode (lower quality) – recording as requested")
-                    }
+                    print("⚠️ airpods captured at telephony rate (\(negotiatedSampleRate)hz) – continuing with stability safeguards")
+                    setErrorMessage("airpods mic in call mode (lower quality) – continuing once stable")
                 }
                 print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
             } else if negotiatedSampleRate < 44_100 {
@@ -770,6 +856,27 @@ class MicRecorder: ObservableObject {
             currentDeviceID = "unknown"
             deviceName = "unknown"
             setCurrentDeviceName(deviceName)
+        }
+
+        let fallbackUsed = recordingDeviceInfo?.id != defaultInputInfo?.id
+        if fallbackUsed {
+            print("🎤 recording fallback active – capturing with \(deviceName)")
+        }
+
+        if let monitor = performanceMonitor {
+            let deviceIDMetadata = currentDeviceID
+            let sampleRateMetadata = Int(negotiatedSampleRate)
+            Task { @MainActor in
+                monitor.recordRecordingEvent(
+                    "mic_device_selected",
+                    metadata: [
+                        "device_id": deviceIDMetadata,
+                        "device_name": deviceName,
+                        "sample_rate": String(sampleRateMetadata),
+                        "fallback": fallbackUsed ? "true" : "false"
+                    ]
+                )
+            }
         }
 
         if deviceName.lowercased().contains("airpod") {
@@ -795,6 +902,7 @@ class MicRecorder: ObservableObject {
             try setupWarmEngineIfNeeded(startImmediately: true)
         } catch {
             setErrorMessage("failed to start audio engine: \(error.localizedDescription)")
+            applyReadinessBackoff(reason: "engine-start")
             return false
         }
 
@@ -808,7 +916,11 @@ class MicRecorder: ObservableObject {
         let warmupDurationSeconds = Double(warmupFrames) / recordingFormat.sampleRate
         extendStallSuppression(by: warmupDurationSeconds + stallDetectionWindow, reason: "segment-warmup")
 
-        lastKnownDeviceAudioID = currentDeviceAudioID
+        if let defaultID = defaultInputInfo?.id {
+            lastKnownDeviceAudioID = defaultID
+        } else {
+            lastKnownDeviceAudioID = currentDeviceAudioID
+        }
         lastKnownSampleRate = currentSampleRate
 
         return true
@@ -849,6 +961,12 @@ class MicRecorder: ObservableObject {
         audioFile = nil
         print("✅ file closed")
         
+        let segmentDuration = segmentEndTime - segmentStartTime
+
+        if segmentDuration >= minimumSegmentDuration {
+            readinessBackoffTier = 0
+        }
+
         if framesCaptured == 0 {
             try? FileManager.default.removeItem(atPath: segmentFilePath)
             print("⚠️ discarding zero-length mic segment #\(segmentNumber)")
@@ -871,7 +989,7 @@ class MicRecorder: ObservableObject {
                 segmentMetadata.append(metadata)
             }
 
-            print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
+            print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentDuration))s, \(framesCaptured) frames")
         }
 
         if dropped > 0 {
@@ -1270,6 +1388,7 @@ class MicRecorder: ObservableObject {
     private func handleAirPodsVerificationFailure() {
         controllerQueue.async { [weak self] in
             guard let self else { return }
+            self.applyReadinessBackoff(reason: "airpods-silent")
             self.setErrorMessage("airpods silent – using mac microphone")
             if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
                DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
