@@ -569,7 +569,7 @@ class MicRecorder: ObservableObject {
         print("✅ device switch complete (reason: \(reason))")
     }
 
-    private func waitForStableInputFormat(_ engine: AVAudioEngine) -> (format: AVAudioFormat?, attempts: Int) {
+    private func waitForStableInputFormat(_ engine: AVAudioEngine, requireStableWindow: Bool) -> (format: AVAudioFormat?, attempts: Int) {
         let pollInterval = Double(readinessRetryDelayNanoseconds) / 1_000_000_000
 
         for attempt in 0..<readinessRetryLimit {
@@ -578,6 +578,13 @@ class MicRecorder: ObservableObject {
             let channels = format.channelCount
 
             if sampleRate >= 8_000 && channels > 0 {
+                if !requireStableWindow {
+                    readinessStableWindowStart = nil
+                    readinessLastSampleRate = sampleRate
+                    readinessLastChannelCount = channels
+                    return (format, attempt + 1)
+                }
+
                 if readinessLastSampleRate != sampleRate || readinessLastChannelCount != channels {
                     readinessStableWindowStart = Date()
                     readinessLastSampleRate = sampleRate
@@ -694,7 +701,11 @@ class MicRecorder: ObservableObject {
             Thread.sleep(forTimeInterval: Double(settleDelayNanoseconds) / 1_000_000_000)
         }
 
-        var readiness = waitForStableInputFormat(engine)
+        let defaultInputInfo = fetchDefaultInputDeviceInfo()
+        let defaultIsAirPods = defaultInputInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
+        let requireStabilityWindow = defaultIsAirPods && segmentNumber > 0
+
+        var readiness = waitForStableInputFormat(engine, requireStableWindow: requireStabilityWindow)
         var totalReadinessAttempts = readiness.attempts
         guard var inputFormat = readiness.format else {
             setErrorMessage("audio device not ready - holding current mic")
@@ -709,7 +720,6 @@ class MicRecorder: ObservableObject {
         setCurrentDeviceName("initializing...")
 
         var negotiatedSampleRate = inputFormat.sampleRate
-        let defaultInputInfo = fetchDefaultInputDeviceInfo()
         var recordingDeviceInfo = defaultInputInfo
 
         if let deviceInfo = defaultInputInfo,
@@ -722,7 +732,7 @@ class MicRecorder: ObservableObject {
             readinessStableWindowStart = nil
             readinessLastSampleRate = 0
             readinessLastChannelCount = 0
-            readiness = waitForStableInputFormat(engine)
+            readiness = waitForStableInputFormat(engine, requireStableWindow: false)
             totalReadinessAttempts += readiness.attempts
 
             guard let fallbackFormat = readiness.format else {
