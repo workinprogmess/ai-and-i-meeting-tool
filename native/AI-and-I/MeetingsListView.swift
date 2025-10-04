@@ -237,7 +237,7 @@ class MeetingsListViewModel: ObservableObject {
         print("⏰ timer created: \(recordingTimer != nil)")
         
         // start recording
-        Task { @MainActor in
+        Task {
             print("🎙️ starting recorders via session coordinator...")
 
             do {
@@ -249,11 +249,13 @@ class MeetingsListViewModel: ObservableObject {
                 print("🎬 segmented recording started")
             } catch {
                 print("❌ failed to start recording pipelines: \(error)")
-                micRecorder.errorMessage = "failed to prepare audio pipelines"
-                systemRecorder.errorMessage = "failed to prepare audio pipelines"
-                recordingTimer?.invalidate()
-                recordingTimer = nil
-                isRecording = false
+                await MainActor.run {
+                    micRecorder.errorMessage = "failed to prepare audio pipelines"
+                    systemRecorder.errorMessage = "failed to prepare audio pipelines"
+                    recordingTimer?.invalidate()
+                    recordingTimer = nil
+                    isRecording = false
+                }
                 if deviceMonitor.isMonitoring {
                     deviceMonitor.stopMonitoring()
                     print("📱 device monitoring stopped after warm failure")
