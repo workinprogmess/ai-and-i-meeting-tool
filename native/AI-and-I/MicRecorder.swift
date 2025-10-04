@@ -17,12 +17,19 @@ struct RecordingSessionContext {
     let timestamp: TimeInterval
 
     static func create() -> RecordingSessionContext {
+        print("🧱 context factory starting on thread: \(Thread.current)")
         let now = Date()
-        return RecordingSessionContext(
-            id: UUID().uuidString,
+        print("🧱 context timestamp prepared: \(now.timeIntervalSince1970)")
+        let id = String(format: "session-%.0f", now.timeIntervalSince1970 * 1_000_000)
+        print("🧱 context id prepared: \(id)")
+        let context = RecordingSessionContext(
+            id: id,
             startDate: now,
             timestamp: now.timeIntervalSince1970
         )
+        print("🧱 context struct initialized")
+        print("🧱 RecordingSessionContext created id: \(context.id)")
+        return context
     }
 
     var timestampInt: Int {
@@ -233,7 +240,9 @@ class MicRecorder: ObservableObject {
         stallRecoveryAttempts = 0
         stallRecoveryInProgress = false
         capturePreferredOutputDeviceSnapshot()
+        print("🎙️ mic session preparing warm pipeline")
         try await prepareWarmPipelineIfNeeded()
+        print("🎙️ mic warm pipeline ready")
 
         // use the shared session context
         sessionID = context.id

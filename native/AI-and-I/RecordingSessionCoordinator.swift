@@ -83,17 +83,23 @@ final class RecordingSessionCoordinator {
 
     @discardableResult
     func startSession() async throws -> RecordingSessionContext {
-        emitTelemetry(.sessionStartRequested)
+        recordTelemetryAsync(.sessionStartRequested)
         if !deviceMonitor.isMonitoring {
             deviceMonitor.startMonitoring()
             print("📱 device monitor started via coordinator")
-            emitTelemetry(.debugToggleActive, metadata: ["toggle": "deviceMonitorAutoStart"])
+            recordTelemetryAsync(.debugToggleActive, metadata: ["toggle": "deviceMonitorAutoStart"])
         }
 
+        print("🎛️ coordinator: preparing session context...")
         let context = RecordingSessionContext.create()
+        print("🎛️ coordinator: context created \(context.id)")
         do {
+            print("🎛️ coordinator: starting mic pipeline")
             try await micRecorder.startSession(context)
+            print("🎛️ coordinator: mic pipeline started")
+            print("🎛️ coordinator: starting system pipeline")
             try await systemRecorder.startSession(context)
+            print("🎛️ coordinator: system pipeline started")
             currentContext = context
 
             if debugOptions.simulateDeviceChangeOnStart {
@@ -105,7 +111,7 @@ final class RecordingSessionCoordinator {
                 emitTelemetry(.debugToggleActive, metadata: ["toggle": "simulateTelephonyMode"])
             }
 
-            emitTelemetry(.sessionStarted, metadata: ["context": context.id])
+            recordTelemetryAsync(.sessionStarted, metadata: ["context": context.id])
 
             return context
         } catch {
@@ -113,7 +119,7 @@ final class RecordingSessionCoordinator {
             await systemRecorder.endSession()
             deviceMonitor.stopMonitoring()
             currentContext = nil
-            emitTelemetry(.sessionStartFailed, metadata: ["error": error.localizedDescription])
+            recordTelemetryAsync(.sessionStartFailed, metadata: ["error": error.localizedDescription])
             throw error
         }
     }
@@ -196,6 +202,15 @@ final class RecordingSessionCoordinator {
                 print("📡 telemetry: \(event.rawValue)")
             } else {
                 print("📡 telemetry: \(event.rawValue) :: \(metadata)")
+            }
+        }
+    }
+
+    private func recordTelemetryAsync(_ event: TelemetryEvent, metadata: [String: String] = [:]) {
+        Task.detached { [metadata, eventName = event.rawValue, weak self] in
+            await MainActor.run {
+                guard let self else { return }
+                self.performanceMonitor?.recordRecordingEvent(eventName, metadata: metadata)
             }
         }
     }
