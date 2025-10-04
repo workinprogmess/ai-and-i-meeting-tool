@@ -10,6 +10,9 @@ import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
 import AudioToolbox
+import OSLog
+
+private let contextLogger = Logger(subsystem: "ai-and-i", category: "RecordingSessionContext")
 
 struct RecordingSessionContext {
     let id: String
@@ -17,22 +20,16 @@ struct RecordingSessionContext {
     let timestamp: TimeInterval
 
     static func create() -> RecordingSessionContext {
-        print("🧱 context factory starting on thread: \(Thread.current)")
+        contextLogger.debug("creating recording session context - capturing timestamp")
         let now = Date()
-        print("🧱 context timestamp prepared: \(now.timeIntervalSince1970)")
-        print("🧱 capturing uptime id... thread=\(Thread.current)")
-        let nanoID = DispatchTime.now().uptimeNanoseconds
-        print("🧱 context nano id prepared: \(nanoID)")
-        let id = "session-\(nanoID)"
-        print("🧱 context id prepared: \(id)")
-        let context = RecordingSessionContext(
-            id: id,
+        contextLogger.debug("recording session context timestamp ready: \(now.timeIntervalSince1970, privacy: .public)")
+        let contextID = UUID().uuidString
+        contextLogger.debug("recording session context uuid ready")
+        return RecordingSessionContext(
+            id: contextID,
             startDate: now,
             timestamp: now.timeIntervalSince1970
         )
-        print("🧱 context struct initialized")
-        print("🧱 RecordingSessionContext created id: \(context.id)")
-        return context
     }
 
     var timestampInt: Int {

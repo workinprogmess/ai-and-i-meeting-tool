@@ -74,6 +74,19 @@ class MeetingsListViewModel: ObservableObject {
         loadMeetings()
         setupDeviceMonitoring()
         sessionCoordinator.attachPerformanceMonitor(performanceMonitor)
+        Task { [weak self] in
+            guard let self else { return }
+            await MainActor.run {
+                if !self.deviceMonitor.isMonitoring {
+                    self.deviceMonitor.startMonitoring()
+                    self.performanceMonitor.recordRecordingEvent(
+                        RecordingSessionCoordinator.TelemetryEvent.debugToggleActive.rawValue,
+                        metadata: ["toggle": "deviceMonitorInitStart"]
+                    )
+                    print("📱 device monitor started during view model init")
+                }
+            }
+        }
         Task {
             await sessionCoordinator.preparePipelinesIfNeeded()
         }
