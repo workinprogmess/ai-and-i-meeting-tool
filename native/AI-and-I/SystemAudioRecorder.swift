@@ -91,6 +91,34 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
     }
 
+    @MainActor
+    private func fetchShareableContentOnMain() async throws -> SCShareableContent {
+        try await SCShareableContent.current
+    }
+
+    @MainActor
+    private func createStreamOnMain(filter: SCContentFilter, configuration: SCStreamConfiguration) async throws -> SCStream {
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        let output = SystemStreamOutput(recorder: self)
+        let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
+        try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: audioQueue)
+
+        self.stream = stream
+        self.streamOutput = output
+
+        return stream
+    }
+
+    @MainActor
+    private func startStreamCaptureOnMain(_ stream: SCStream) async throws {
+        try await stream.startCapture()
+    }
+
+    @MainActor
+    private func stopStreamCaptureOnMain(_ stream: SCStream) async throws {
+        try await stream.stopCapture()
+    }
+
     private func prepareWarmPipelineIfNeeded() async throws {
         if preparedFilter != nil { return }
         var attempt = 0
@@ -113,7 +141,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     }
 
     private func buildWarmFilter() async throws -> SCContentFilter {
-        let content = try await SCShareableContent.current
+        let content = try await fetchShareableContentOnMain()
         guard let display = content.displays.first else {
             throw RecorderError.warmPreparationFailed("no display found")
         }
@@ -168,7 +196,9 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     /// starts a new recording session with shared session id
     func startSession(_ context: RecordingSessionContext) async throws {
         print("🔊 starting system audio recording session with context id: \(context.id)")
+        print("🔊 system session preparing warm pipeline")
         try await prepareWarmPipelineIfNeeded()
+        print("🔊 system warm pipeline ready")
         
         // use the shared session context
         sessionID = context.id
@@ -422,17 +452,10 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             framesCaptured = 0
             
             // create stream (match working ScreenCaptureManager pattern)
-            stream = SCStream(filter: filter!, configuration: config, delegate: nil)
-            
-            // create output handler
-            streamOutput = SystemStreamOutput(recorder: self)
-            
-            // add audio output handler
-            let audioQueue = DispatchQueue(label: "system.audio.capture", qos: .userInteractive)
-            try stream?.addStreamOutput(streamOutput!, type: .audio, sampleHandlerQueue: audioQueue)
+            let streamInstance = try await createStreamOnMain(filter: resolvedFilter, configuration: config)
 
             // start capture with retries (handles transient -10877 during device switches)
-            try await startCaptureWithRetry(stream)
+            try await startCaptureWithRetry(streamInstance)
             
             print("✅ system segment #\(segmentNumber) started")
             
@@ -443,14 +466,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func startCaptureWithRetry(_ stream: SCStream?) async throws {
-        guard let stream else { throw RecorderError.warmPreparationFailed("missing system stream") }
-
+    private func startCaptureWithRetry(_ stream: SCStream) async throws {
         var attempt = 0
         var lastError: Error?
         while attempt < warmRetryLimit {
             do {
-                try await stream.startCapture()
+                try await startStreamCaptureOnMain(stream)
                 return
             } catch {
                 lastError = error
@@ -474,7 +495,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         // stop stream (may fail if device is disconnected)
         if let activeStream = stream {
             do {
-                try await activeStream.stopCapture()
+                try await stopStreamCaptureOnMain(activeStream)
                 print("✅ stream stopped cleanly")
             } catch {
                 // this is expected during device disconnection

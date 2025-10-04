@@ -20,7 +20,10 @@ struct RecordingSessionContext {
         print("🧱 context factory starting on thread: \(Thread.current)")
         let now = Date()
         print("🧱 context timestamp prepared: \(now.timeIntervalSince1970)")
-        let id = String(format: "session-%.0f", now.timeIntervalSince1970 * 1_000_000)
+        print("🧱 capturing uptime id... thread=\(Thread.current)")
+        let nanoID = DispatchTime.now().uptimeNanoseconds
+        print("🧱 context nano id prepared: \(nanoID)")
+        let id = "session-\(nanoID)"
         print("🧱 context id prepared: \(id)")
         let context = RecordingSessionContext(
             id: id,

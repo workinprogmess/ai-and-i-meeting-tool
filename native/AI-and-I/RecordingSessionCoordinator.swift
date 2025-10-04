@@ -91,7 +91,12 @@ final class RecordingSessionCoordinator {
         }
 
         print("🎛️ coordinator: preparing session context...")
-        let context = RecordingSessionContext.create()
+        let context = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let context = RecordingSessionContext.create()
+                continuation.resume(returning: context)
+            }
+        }
         print("🎛️ coordinator: context created \(context.id)")
         do {
             print("🎛️ coordinator: starting mic pipeline")
