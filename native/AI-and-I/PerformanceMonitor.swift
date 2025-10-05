@@ -201,18 +201,22 @@ extension PerformanceMonitor {
 // MARK: - Recording Telemetry
 extension PerformanceMonitor {
 
-    func recordRecordingEvent(_ event: String, metadata: [String: String] = [:]) {
-        let entry = RecordingTelemetryEntry(event: event, timestamp: Date(), metadata: metadata)
-        recordingTelemetry.append(entry)
+    nonisolated func recordRecordingEvent(_ event: String, metadata: [String: String] = [:]) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
 
-        if recordingTelemetry.count > maxHistoryCount {
-            recordingTelemetry.removeFirst()
-        }
+            let entry = RecordingTelemetryEntry(event: event, timestamp: Date(), metadata: metadata)
+            self.recordingTelemetry.append(entry)
 
-        if metadata.isEmpty {
-            print("📡 RecordingEvent: \(event)")
-        } else {
-            print("📡 RecordingEvent: \(event) :: \(metadata)")
+            if self.recordingTelemetry.count > self.maxHistoryCount {
+                self.recordingTelemetry.removeFirst()
+            }
+
+            if metadata.isEmpty {
+                print("📡 RecordingEvent: \(event)")
+            } else {
+                print("📡 RecordingEvent: \(event) :: \(metadata)")
+            }
         }
     }
 

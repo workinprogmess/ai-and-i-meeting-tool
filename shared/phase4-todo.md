@@ -5,7 +5,22 @@
 - ✅ item 2: device monitor restarts per session
 - ✅ item 3: mic/system pipelines moved off main actor (background queues, cached state)
 - ✅ item 4: instrumentation helper + transcription env loader script
-- 🚧 item 5/6: dual warm pipelines + seamless airpods switching (see breakdown below)
+- ❌ **item 5/6: BLOCKED by critical mainactor deadlock (2025-10-05)**
+
+## ⚠️ **critical blocker**: mainactor deadlock prevents recording startup
+**situation**: app hangs completely on "start recording" - cannot even create recording session context
+**severity**: total app dysfunction - no audio capture possible
+
+**attempted debugging & fixes**:
+1. telemetry async restructuring (`Task.detached`, `Task { @MainActor }`, synchronous calls)
+2. context creation off-threading (`withCheckedContinuation`, `DispatchQueue.global`)
+3. device monitoring architecture redesign (early startup vs recording startup)
+4. eliminated nested mainactor patterns and simplified uuid generation
+
+**current hang location**: `UUID().uuidString` on main thread during context creation
+**implication**: swift concurrency executor fundamentally corrupted by earlier airpods telephony work
+
+**status**: all milestone 2 work blocked until concurrency deadlock resolved
 
 ## item 5/6 breakdown
 - [ ] warm prep inside `MicRecorder` using reusable engine

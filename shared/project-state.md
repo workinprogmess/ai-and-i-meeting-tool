@@ -19,8 +19,29 @@ ai meeting intelligence - native swiftui application for world-class user experi
 - 🔄 launch + recording start latency: warm pipelines implemented (2025-09-26) to move processing off main actor, needs performance validation
 - ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
 - ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
-- 🎯 **revised focus**: implement gentle stability approach first, then deliver airtight transcription loop
 - 🛠 dev helper script `native/Scripts/load_transcription_env.sh` now loads transcription keys from `~/.config/ai-and-i/env` so run-scheme env vars stay clean while cli tools keep working
+
+### ⚠️ **critical blocker (2025-10-05)**: mainactor deadlock preventing recording startup
+**problem**: app hangs on "start recording" - cannot even begin audio capture
+**investigation**: systematic debugging session identified severe swift concurrency deadlock in main actor executor
+
+**root cause analysis**:
+- gentle stability implementation (airpods telephony acceptance) triggered complex mainactor interactions
+- core audio device monitoring + performance telemetry + recording coordination all competing for main thread
+- deadlock so severe that even basic foundation calls (`UUID()`, `DispatchTime.now()`) hang on main actor
+
+**attempted solutions** (all unsuccessful):
+1. moved telemetry to async tasks (`Task.detached`, `Task { @MainActor }`)
+2. moved context creation off main thread (`withCheckedContinuation`, `DispatchQueue.global`)
+3. simplified device monitoring initialization (early startup vs recording startup)
+4. eliminated nested mainactor task patterns
+5. removed complex uuid generation, simplified to basic operations
+
+**current status**: app completely unable to start recording - fundamental concurrency architecture issue
+**impact**: milestone 2 blocked, cannot test airpods telephony fixes or any audio functionality
+**next steps**: need to identify and eliminate the root mainactor corruption or redesign concurrency architecture
+
+- 🎯 **blocked focus**: resolve mainactor deadlock before any other development can proceed
 
 ## native implementation milestones
 based on comprehensive native app implementation plan in shared/NATIVE_APP_IMPLEMENTATION_PLAN.md

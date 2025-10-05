@@ -83,19 +83,7 @@ final class RecordingSessionCoordinator {
 
     @discardableResult
     func startSession() async throws -> RecordingSessionContext {
-        recordTelemetryAsync(.sessionStartRequested)
-        if !deviceMonitor.isMonitoring {
-            print("📱 device monitor inactive – scheduling async start")
-            recordTelemetryAsync(.debugToggleActive, metadata: ["toggle": "deviceMonitorAutoStart"])
-            let monitor = deviceMonitor
-            Task { @MainActor in
-                if !monitor.isMonitoring {
-                    monitor.startMonitoring()
-                    print("📱 device monitor started via coordinator (async)")
-                }
-            }
-        }
-
+        emitTelemetry(.sessionStartRequested)
         print("🎛️ coordinator: preparing session context...")
         let context = RecordingSessionContext.create()
         print("🎛️ coordinator: context created \(context.id)")
@@ -213,11 +201,6 @@ final class RecordingSessionCoordinator {
     }
 
     private func recordTelemetryAsync(_ event: TelemetryEvent, metadata: [String: String] = [:]) {
-        Task.detached { [metadata, eventName = event.rawValue, weak self] in
-            await MainActor.run {
-                guard let self else { return }
-                self.performanceMonitor?.recordRecordingEvent(eventName, metadata: metadata)
-            }
-        }
+        performanceMonitor?.recordRecordingEvent(event.rawValue, metadata: metadata)
     }
 }

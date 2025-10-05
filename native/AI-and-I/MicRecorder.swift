@@ -10,9 +10,6 @@ import Foundation
 @preconcurrency import AVFoundation
 import CoreAudio
 import AudioToolbox
-import OSLog
-
-private let contextLogger = Logger(subsystem: "ai-and-i", category: "RecordingSessionContext")
 
 struct RecordingSessionContext {
     let id: String
@@ -20,11 +17,11 @@ struct RecordingSessionContext {
     let timestamp: TimeInterval
 
     static func create() -> RecordingSessionContext {
-        contextLogger.debug("creating recording session context - capturing timestamp")
+        print("🧱 context: create start on thread: \(Thread.isMainThread ? "main" : "background")")
         let now = Date()
-        contextLogger.debug("recording session context timestamp ready: \(now.timeIntervalSince1970, privacy: .public)")
+        print("🧱 context: date captured: \(now)")
         let contextID = UUID().uuidString
-        contextLogger.debug("recording session context uuid ready")
+        print("🧱 context: uuid generated: \(contextID)")
         return RecordingSessionContext(
             id: contextID,
             startDate: now,
