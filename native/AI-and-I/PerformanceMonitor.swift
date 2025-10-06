@@ -202,7 +202,7 @@ extension PerformanceMonitor {
 extension PerformanceMonitor {
 
     nonisolated func recordRecordingEvent(_ event: String, metadata: [String: String] = [:]) {
-        Task { @MainActor [weak self] in
+        let logTask = { [weak self] in
             guard let self else { return }
 
             let entry = RecordingTelemetryEntry(event: event, timestamp: Date(), metadata: metadata)
@@ -217,6 +217,12 @@ extension PerformanceMonitor {
             } else {
                 print("📡 RecordingEvent: \(event) :: \(metadata)")
             }
+        }
+
+        if Thread.isMainThread {
+            logTask()
+        } else {
+            DispatchQueue.main.async(execute: logTask)
         }
     }
 

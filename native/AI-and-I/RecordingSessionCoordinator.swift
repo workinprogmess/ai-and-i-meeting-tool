@@ -98,19 +98,12 @@ actor RecordingSessionCoordinator {
         defer { isLaunchingSession = false }
         do {
             print("🎛️ coordinator: starting mic pipeline")
-            let micTask = Task.detached(priority: .userInitiated) { [micRecorder, context] () throws -> Void in
-                print("🎛️ detached mic task started (thread: \(Thread.isMainThread ? "main" : "background"))")
-                try await micRecorder.startSession(context)
-            }
-            try await micTask.value
+            print("🎛️ coordinator: invoking micRecorder.startSession (thread: \(Thread.isMainThread ? "main" : "background"))")
+            try await micRecorder.startSession(context)
             print("🎛️ coordinator: micRecorder.startSession completed")
-
             print("🎛️ coordinator: starting system pipeline")
-            let systemTask = Task.detached(priority: .userInitiated) { [systemRecorder, context] () throws -> Void in
-                print("🎛️ detached system task started (thread: \(Thread.isMainThread ? "main" : "background"))")
-                try await systemRecorder.startSession(context)
-            }
-            try await systemTask.value
+            print("🎛️ coordinator: invoking systemRecorder.startSession (thread: \(Thread.isMainThread ? "main" : "background"))")
+            try await systemRecorder.startSession(context)
             print("🎛️ coordinator: systemRecorder.startSession completed")
             currentContext = context
 

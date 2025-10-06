@@ -17,11 +17,8 @@ struct RecordingSessionContext {
     let timestamp: TimeInterval
 
     static func create() -> RecordingSessionContext {
-        print("🧱 context: create start on thread: \(Thread.isMainThread ? "main" : "background")")
         let now = Date()
-        print("🧱 context: date captured: \(now)")
         let contextID = StableIDGenerator.make(prefix: "session")
-        print("🧱 context: id generated: \(contextID)")
         return RecordingSessionContext(
             id: contextID,
             startDate: now,
