@@ -92,8 +92,10 @@ actor RecordingSessionCoordinator {
     func startSession() async throws -> RecordingSessionContext {
         emitTelemetry(.sessionStartRequested)
         print("🎛️ coordinator: preparing session context...")
+        print("🎛️ coordinator: creating session context")
         let context = RecordingSessionContext.create()
-        print("🎛️ coordinator: context created \(context.id)")
+        print("🎛️ coordinator: context returned")
+        print("🎛️ coordinator: context created", context.id)
         isLaunchingSession = true
         defer { isLaunchingSession = false }
         do {
