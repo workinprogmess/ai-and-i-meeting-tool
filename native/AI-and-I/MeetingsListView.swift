@@ -73,7 +73,11 @@ class MeetingsListViewModel: ObservableObject {
     init() {
         loadMeetings()
         setupDeviceMonitoring()
-        sessionCoordinator.attachPerformanceMonitor(performanceMonitor)
+        let monitor = performanceMonitor
+        let coordinator = sessionCoordinator
+        Task {
+            await coordinator.attachPerformanceMonitor(monitor)
+        }
         Task { [weak self] in
             guard let self else { return }
             await MainActor.run {

@@ -22,8 +22,7 @@ struct RecordingDebugOptions {
     var disableWarmShutdown = false
 }
 
-@MainActor
-final class RecordingSessionCoordinator {
+actor RecordingSessionCoordinator {
     private let micRecorder: MicRecorder
     private let systemRecorder: SystemAudioRecorder
     private let deviceMonitor: DeviceChangeMonitor
@@ -32,6 +31,7 @@ final class RecordingSessionCoordinator {
 
     private(set) var currentContext: RecordingSessionContext?
     var debugOptions = RecordingDebugOptions()
+    private var isLaunchingSession = false
 
     private var observers: [NSObjectProtocol] = []
 
@@ -70,6 +70,12 @@ final class RecordingSessionCoordinator {
     }
 
     func preparePipelinesIfNeeded() async {
+        guard !isLaunchingSession, currentContext == nil else {
+            if debugOptions.logLifecycleTransitions {
+                print("⚙️ skipping warm prep – session launch in progress or active")
+            }
+            return
+        }
         emitTelemetry(.warmPrepRequested)
         do {
             try await micRecorder.prepareWarmPipeline()
@@ -87,13 +93,17 @@ final class RecordingSessionCoordinator {
         print("🎛️ coordinator: preparing session context...")
         let context = RecordingSessionContext.create()
         print("🎛️ coordinator: context created \(context.id)")
+        isLaunchingSession = true
+        defer { isLaunchingSession = false }
         do {
             print("🎛️ coordinator: starting mic pipeline")
+            print("🎛️ coordinator: invoking micRecorder.startSession (thread: \(Thread.isMainThread ? "main" : "background"))")
             try await micRecorder.startSession(context)
-            print("🎛️ coordinator: mic pipeline started")
+            print("🎛️ coordinator: micRecorder.startSession completed")
             print("🎛️ coordinator: starting system pipeline")
+            print("🎛️ coordinator: invoking systemRecorder.startSession (thread: \(Thread.isMainThread ? "main" : "background"))")
             try await systemRecorder.startSession(context)
-            print("🎛️ coordinator: system pipeline started")
+            print("🎛️ coordinator: systemRecorder.startSession completed")
             currentContext = context
 
             if debugOptions.simulateDeviceChangeOnStart {
@@ -109,9 +119,13 @@ final class RecordingSessionCoordinator {
 
             return context
         } catch {
+            print("❌ coordinator: startSession failed before pipelines ready: \(error)")
             micRecorder.endSession()
             await systemRecorder.endSession()
-            deviceMonitor.stopMonitoring()
+            if await deviceMonitor.isMonitoring {
+                await deviceMonitor.stopMonitoring()
+                print("📱 device monitor stopped after start failure")
+            }
             currentContext = nil
             recordTelemetryAsync(.sessionStartFailed, metadata: ["error": error.localizedDescription])
             throw error
@@ -121,8 +135,9 @@ final class RecordingSessionCoordinator {
     func stopSession() async {
         micRecorder.endSession()
         await systemRecorder.endSession()
-        if deviceMonitor.isMonitoring {
-            deviceMonitor.stopMonitoring()
+        let wasMonitoring = await deviceMonitor.isMonitoring
+        if wasMonitoring {
+            await deviceMonitor.stopMonitoring()
             print("📱 device monitor stopped via coordinator")
         }
         currentContext = nil
@@ -153,8 +168,16 @@ final class RecordingSessionCoordinator {
         await handleDeviceChange(reason: reason)
     }
 
-    private func pauseWarmPipelines() {
-        guard !micRecorder.isRecording, !systemRecorder.isRecording else {
+    private func pauseWarmPipelines() async {
+        guard !isLaunchingSession else {
+            if debugOptions.logLifecycleTransitions {
+                print("⚙️ skipping warm pipeline pause – launch in progress")
+            }
+            return
+        }
+        let micActive = await MainActor.run { micRecorder.isRecording }
+        let systemActive = await MainActor.run { systemRecorder.isRecording }
+        guard !micActive, !systemActive else {
             if debugOptions.logLifecycleTransitions {
                 print("⚙️ skip warm pipeline pause – recording active")
             }
@@ -169,13 +192,14 @@ final class RecordingSessionCoordinator {
 #if canImport(AppKit)
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.pauseWarmPipelines()
+            Task { [weak self] in
+                guard let self else { return }
+                await self.pauseWarmPipelines()
             }
         })
 
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            Task { [weak self] in
                 guard let self else { return }
                 await self.preparePipelinesIfNeeded()
             }

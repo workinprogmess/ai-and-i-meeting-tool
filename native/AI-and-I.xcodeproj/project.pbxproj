@@ -31,6 +31,7 @@
 		BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */; };
 		BEEFFE402E6DD97300A0CF8F /* ScreenCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */; };
 		BEEFFE432E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */; };
+		BEEFDEAD2E8F000100123456 /* StableIDGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFDEAD2E8F000100123457 /* StableIDGenerator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -79,6 +80,7 @@
 		BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureManager.swift; sourceTree = "<group>"; };
 		BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSessionCoordinator.swift; sourceTree = "<group>"; };
+		BEEFDEAD2E8F000100123457 /* StableIDGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StableIDGenerator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +136,7 @@
 				BE95EAC02E71EB38001435A4 /* SystemAudioRecorder.swift */,
 				BEEFFE422E6E2B2E00A0CF8F /* RecordingSessionCoordinator.swift */,
 				BEEFFE3E2E6DD97300A0CF8F /* ScreenCaptureManager.swift */,
+				BEEFDEAD2E8F000100123457 /* StableIDGenerator.swift */,
 				BEEFFE3A2E6B610A00A0CF8F /* AudioManager.swift */,
 				BEEFFE362E6B55AE00A0CF8F /* InsightsDashboard.swift */,
 				BEEFFE372E6B55AE00A0CF8F /* PerformanceMonitor.swift */,
@@ -320,6 +323,7 @@
 				BE95EACE2E736DB8001435A4 /* GeminiTranscriptionService.swift in Sources */,
 				BEEFFE392E6B55AE00A0CF8F /* PerformanceMonitor.swift in Sources */,
 				BEEFFE402E6DD97300A0CF8F /* ScreenCaptureManager.swift in Sources */,
+				BEEFDEAD2E8F000100123456 /* StableIDGenerator.swift in Sources */,
 				BEEFFE3B2E6B610A00A0CF8F /* AudioManager.swift in Sources */,
 				BE95EAE02E78817E001435A4 /* DesignSystem.swift in Sources */,
 				BE95EAC12E71EB38001435A4 /* DeviceChangeMonitor.swift in Sources */,

@@ -120,6 +120,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     }
 
     private func prepareWarmPipelineIfNeeded() async throws {
+        print("🔥 system prepareWarmPipelineIfNeeded invoked (thread: \(Thread.isMainThread ? "main" : "background"))")
         if preparedFilter != nil { return }
         var attempt = 0
         var lastError: Error?
@@ -195,7 +196,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     
     /// starts a new recording session with shared session id
     func startSession(_ context: RecordingSessionContext) async throws {
-        print("🔊 starting system audio recording session with context id: \(context.id)")
+        print("🔊 starting system audio recording session with context id: \(context.id) (thread: \(Thread.isMainThread ? "main" : "background"))")
         print("🔊 system session preparing warm pipeline")
         try await prepareWarmPipelineIfNeeded()
         print("🔊 system warm pipeline ready")
@@ -514,7 +515,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         // save segment metadata
         let metadata = AudioSegmentMetadata(
-            segmentID: UUID().uuidString,
+            segmentID: StableIDGenerator.make(prefix: "system-segment"),
             filePath: segmentFilePath,
             deviceName: deviceName,
             deviceID: deviceID,

@@ -20,8 +20,8 @@ struct RecordingSessionContext {
         print("🧱 context: create start on thread: \(Thread.isMainThread ? "main" : "background")")
         let now = Date()
         print("🧱 context: date captured: \(now)")
-        let contextID = UUID().uuidString
-        print("🧱 context: uuid generated: \(contextID)")
+        let contextID = StableIDGenerator.make(prefix: "session")
+        print("🧱 context: id generated: \(contextID)")
         return RecordingSessionContext(
             id: contextID,
             startDate: now,
@@ -233,12 +233,14 @@ class MicRecorder: ObservableObject {
     
     /// starts a new recording session with shared session id
     func startSession(_ context: RecordingSessionContext) async throws {
-        print("🎙️ starting mic recording session with context id: \(context.id)")
+        print("🎙️ starting mic recording session with context id: \(context.id) (thread: \(Thread.isMainThread ? "main" : "background"))")
         stallRecoveryAttempts = 0
         stallRecoveryInProgress = false
         capturePreferredOutputDeviceSnapshot()
         print("🎙️ mic session preparing warm pipeline")
+        print("🎙️ mic session: invoking prepareWarmPipelineIfNeeded")
         try await prepareWarmPipelineIfNeeded()
+        print("🎙️ mic session: prepareWarmPipelineIfNeeded completed")
         print("🎙️ mic warm pipeline ready")
 
         // use the shared session context
@@ -270,12 +272,15 @@ class MicRecorder: ObservableObject {
         state = .recording
         setIsRecording(true)
         
+        print("🎙️ mic session: dispatching startNewSegmentInternal to controllerQueue")
         controllerQueue.async { [weak self] in
             guard let self else { return }
+            print("🎙️ controllerQueue starting initial segment (thread: \(Thread.isMainThread ? "main" : "background"))")
             self.resetWarmEngine()
             if !self.startNewSegmentInternal(reason: "initial-start") {
                 self.setErrorMessage("failed to prepare audio pipelines")
             }
+            print("🎙️ controllerQueue initial segment call completed")
         }
     }
     
@@ -680,6 +685,7 @@ class MicRecorder: ObservableObject {
     /// internal segment start (must be on controller queue)
     @discardableResult
     private func startNewSegmentInternal(reason: String, allowFallback: Bool = true) -> Bool {
+        print("📝 startNewSegmentInternal begin (reason: \(reason), thread: \(Thread.isMainThread ? "main" : "background"))")
         print("📝 starting new mic segment #\(segmentNumber + 1)")
         hasLoggedFormatMatch = false
         lastConversionLogTime = Date.distantPast
@@ -690,14 +696,17 @@ class MicRecorder: ObservableObject {
 
         do {
             try setupWarmEngineIfNeeded(startImmediately: false)
+            print("📝 warm engine ensured (thread: \(Thread.isMainThread ? "main" : "background"))")
         } catch {
             setErrorMessage("failed to warm audio engine: \(error.localizedDescription)")
             applyReadinessBackoff(reason: "warm-setup")
+            print("❌ startNewSegmentInternal aborting during warm setup")
             return false
         }
 
         guard let engine = warmEngine else {
             setErrorMessage("warm audio engine unavailable")
+            print("❌ startNewSegmentInternal aborting – warmEngine nil")
             return false
         }
 
@@ -716,6 +725,7 @@ class MicRecorder: ObservableObject {
         guard var inputFormat = readiness.format else {
             setErrorMessage("audio device not ready - holding current mic")
             applyReadinessBackoff(reason: "unstable-format")
+            print("❌ startNewSegmentInternal aborting – input format unstable")
             return false
         }
 
@@ -939,6 +949,7 @@ class MicRecorder: ObservableObject {
         }
         lastKnownSampleRate = currentSampleRate
 
+        print("✅ startNewSegmentInternal completed for segment #\(segmentNumber)")
         return true
     }
     
@@ -988,7 +999,7 @@ class MicRecorder: ObservableObject {
             print("⚠️ discarding zero-length mic segment #\(segmentNumber)")
         } else {
             let metadata = AudioSegmentMetadata(
-                segmentID: UUID().uuidString,
+                segmentID: StableIDGenerator.make(prefix: "mic-segment"),
                 filePath: segmentFilePath,
                 deviceName: latestDeviceName,
                 deviceID: currentDeviceID,
@@ -1458,6 +1469,7 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareWarmPipelineIfNeeded() async throws {
+        print("🔥 mic prepareWarmPipelineIfNeeded invoked (thread: \(Thread.isMainThread ? "main" : "background"))")
 #if canImport(AppKit)
         let permission = AVAudioApplication.shared.recordPermission
         guard permission == .granted else {
@@ -1483,6 +1495,7 @@ class MicRecorder: ObservableObject {
 
     private func setupWarmEngineIfNeeded(startImmediately: Bool = true) throws {
         let execute = {
+            print("🔥 mic setupWarmEngineIfNeeded execute on thread: \(Thread.isMainThread ? "main" : "background"), startImmediately=\(startImmediately)")
             if let engine = self.warmEngine {
                 if startImmediately, !engine.isRunning {
                     engine.prepare()
@@ -1525,6 +1538,7 @@ class MicRecorder: ObservableObject {
         var lastError: Error?
         while attempt < warmRetryLimit {
             do {
+                print("🔥 mic setupWarmEngineAsync attempt \(attempt + 1) (thread: \(Thread.isMainThread ? "main" : "background"))")
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     controllerQueue.async { [weak self] in
                         guard let self else {
