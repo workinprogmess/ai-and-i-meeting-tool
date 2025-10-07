@@ -43,7 +43,7 @@ private extension AVAudioPCMBuffer {
     }
 }
 
-extension AVAudioPCMBuffer: @unchecked Sendable {}
+extension AVAudioPCMBuffer: @unchecked @retroactive Sendable {}
 
 /// manages microphone recording with segment-based approach
 class MicRecorder: ObservableObject {
