@@ -119,6 +119,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         try await stream.stopCapture()
     }
 
+    @MainActor
+    private func pauseStreamForRouteChange(_ stream: SCStream) async throws {
+        try await stopStreamCaptureOnMain(stream)
+        self.stream = nil
+        self.streamOutput = nil
+    }
+
     private func prepareWarmPipelineIfNeeded() async throws {
         print("🔥 system prepareWarmPipelineIfNeeded invoked (thread: \(Thread.isMainThread ? "main" : "background"))")
         if preparedFilter != nil { return }
@@ -261,6 +268,14 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         guard isOutputRelated else {
             print("ℹ️ system audio: ignoring non-output change (reason: \(reason))")
             return
+        }
+
+        if let activeStream = stream {
+            do {
+                try await pauseStreamForRouteChange(activeStream)
+            } catch {
+                print("⚠️ system stream pause failed during route change: \(error)")
+            }
         }
 
         let now = Date()
