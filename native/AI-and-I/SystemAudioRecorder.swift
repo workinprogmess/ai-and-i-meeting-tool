@@ -309,17 +309,16 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         needsSwitch = true
         pendingSwitchReason = reason
 
-        let timerExists = await MainActor.run { debounceTimer != nil }
-        if timerExists {
-            print("⏱️ already debouncing - ignoring new event to let timer complete")
-            return
-        }
-
         let baseDelay: TimeInterval = 1.0
         let additionalDelay = max(0, routeUnstableUntil?.timeIntervalSince(now) ?? 0)
         let delay = max(baseDelay, additionalDelay)
 
-        await scheduleSystemSwitch(after: delay)
+        Task { [weak self] in
+            guard let self else { return }
+            let nanoseconds = UInt64(delay * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            await self.performDebouncedSwitch()
+        }
     }
 
     func prepareWarmPipeline() async throws {
