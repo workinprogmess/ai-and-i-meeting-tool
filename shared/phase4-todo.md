@@ -30,10 +30,13 @@
 - [ ] mic pipeline reliability overhaul: adopt single state machine with guarded switching
   - enforce minimum segment duration (~20s) unless we hit a hard failure or explicit stop to prevent micro-segmentation
   - add writer drain barrier on switch (`recordingEnabled=false` → remove tap → `writerQueue.sync` → nil engine → settle delay → open new file) so no writes are in flight
-  - accept telephony mode for AirPods by keeping the Bluetooth input active, upsampling to 48kHz for storage, and coordinating route stabilization instead of forcing a built-in mic fallback
+  - accept telephony mode for AirPods by keeping the Bluetooth input active, upsampling buffers to 48kHz for storage, and letting the pipeline ride through the telephony window without fallback or listener churn
+  - ensure stall suppression and segment stitching behave with telephony segments (no silent gaps; converter verified with real AirPods capture)
   - keep all mic segments at 48kHz mono PCM and stitch with silence insertion or 20ms crossfade when timelines overlap
   - verify long-session stability (current 6min run still drops ~30s – rerun after guardrails land)
 - [ ] warm prep inside `SystemAudioRecorder` with retries and cached SCContentFilter
+  - restart SCStream cleanly on output device changes (AirPods on/off) so system segments match mic segments when routes shift
+  - validate route change rebuilds eliminate `_SCStream … Dropping frame` / `-10877` spam in long sessions
 - [ ] recording session coordinator orchestrating warm prep, lifecycle, retry, and device-change sequencing (initial skeleton exists; needs lifecycle observers, debug toggles, proper warm shutdown, and independent mic/system switching)
 - [ ] replace temporary airpods output reroute with stable output pipeline (preserve user output device)
 - [ ] lifecycle hooks (foreground/background) to pause + rewarm pipelines (treat wake like a route change)
