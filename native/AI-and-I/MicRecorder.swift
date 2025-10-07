@@ -725,41 +725,14 @@ class MicRecorder: ObservableObject {
         var negotiatedSampleRate = inputFormat.sampleRate
         var recordingDeviceInfo = defaultInputInfo
 
-        if let deviceInfo = defaultInputInfo,
-           DeviceChangeMonitor.isAirPods(deviceID: deviceInfo.id),
-           negotiatedSampleRate < 44_100,
-           let builtInID = DeviceChangeMonitor.builtInInputDeviceID(),
-           builtInID != deviceInfo.id,
-           setEngineInputDevice(engine, to: builtInID) {
-            print("🎤 rerouting recording engine to built-in mic while airpods negotiate")
+        // gentle stability: accept airpods telephony mode rather than forcing a device swap
+        let defaultIsAirPods = defaultInputInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
+        if defaultIsAirPods && negotiatedSampleRate < 44_100 {
+            print("🎧 airpods telephony mode detected – will upsample incoming buffers to 48khz")
+            recordingDeviceInfo = defaultInputInfo
             readinessStableWindowStart = nil
-            readinessLastSampleRate = 0
-            readinessLastChannelCount = 0
-            readiness = waitForStableInputFormat(engine, requireStableWindow: false)
-            totalReadinessAttempts += readiness.attempts
-
-            guard let fallbackFormat = readiness.format else {
-                setErrorMessage("failed to ready built-in mic fallback")
-                applyReadinessBackoff(reason: "builtin-fallback")
-                return false
-            }
-
-            inputFormat = fallbackFormat
-            negotiatedSampleRate = fallbackFormat.sampleRate
-            let fallbackName = DeviceChangeMonitor.deviceName(for: builtInID) ?? "built-in microphone"
-            recordingDeviceInfo = (builtInID, fallbackName)
-
-            if let monitor = performanceMonitor {
-                Task { @MainActor in
-                    monitor.recordRecordingEvent(
-                        "mic_fallback_engaged",
-                        metadata: [
-                            "fallback_device_id": String(builtInID),
-                            "fallback_device_name": fallbackName
-                        ]
-                    )
-                }
-            }
+            readinessLastSampleRate = negotiatedSampleRate
+            readinessLastChannelCount = inputFormat.channelCount
         }
 
         readinessAttemptLog.append(totalReadinessAttempts)
@@ -1402,20 +1375,9 @@ class MicRecorder: ObservableObject {
     private func handleAirPodsVerificationFailure() {
         controllerQueue.async { [weak self] in
             guard let self else { return }
-            self.applyReadinessBackoff(reason: "airpods-silent")
-            self.setErrorMessage("airpods silent – using mac microphone")
-            if let fallbackID = DeviceChangeMonitor.builtInInputDeviceID(),
-               DeviceChangeMonitor.setDefaultInputDevice(fallbackID) {
-                self.stopCurrentSegmentInternal(reason: "airpods-silent")
-                if self.settleDelayNanoseconds > 0 {
-                    Thread.sleep(forTimeInterval: Double(self.settleDelayNanoseconds) / 1_000_000_000)
-                }
-                if !self.startNewSegmentInternal(reason: "airpods-fallback", allowFallback: false) {
-                    print("⚠️ failed to restart built-in mic after airpods silence")
-                }
-            } else {
-                print("⚠️ failed to revert to built-in mic after airpods silence")
-            }
+            print("🎧 airpods verification pending – continuing to wait for telephony audio")
+            self.setErrorMessage("airpods still connecting – continuing once audio arrives")
+            self.pendingAirPodsVerification = false
         }
     }
 
