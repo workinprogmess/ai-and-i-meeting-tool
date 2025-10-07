@@ -1374,9 +1374,12 @@ class MicRecorder: ObservableObject {
     private func handleAirPodsVerificationFailure() {
         controllerQueue.async { [weak self] in
             guard let self else { return }
+            let buffered = self.pendingAirPodsBuffers
+            self.pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+            self.pendingAirPodsVerification = false
             print("🎧 airpods verification pending – continuing to wait for telephony audio")
             self.setErrorMessage("airpods still connecting – continuing once audio arrives")
-            self.pendingAirPodsVerification = false
+            buffered.forEach { self.writeBuffer($0) }
         }
     }
 
