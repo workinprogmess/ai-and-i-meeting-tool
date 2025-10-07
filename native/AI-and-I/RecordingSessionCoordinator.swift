@@ -93,9 +93,10 @@ actor RecordingSessionCoordinator {
         emitTelemetry(.sessionStartRequested)
         print("🎛️ coordinator: preparing session context...")
         print("🎛️ coordinator: creating session context")
-        let context = RecordingSessionContext.create()
-        print("🎛️ coordinator: context returned")
-        print("🎛️ coordinator: context created", context.id)
+        let now = Date()
+        let contextID = StableIDGenerator.make(prefix: "session")
+        let context = RecordingSessionContext(id: contextID, startDate: now, timestamp: now.timeIntervalSince1970)
+        print("🎛️ coordinator: context created")
         isLaunchingSession = true
         defer { isLaunchingSession = false }
         do {

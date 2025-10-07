@@ -16,16 +16,6 @@ struct RecordingSessionContext {
     let startDate: Date
     let timestamp: TimeInterval
 
-    static func create() -> RecordingSessionContext {
-        let now = Calendar.current.date(byAdding: .second, value: 0, to: Date()) ?? Date()
-        let contextID = StableIDGenerator.make(prefix: "session")
-        return RecordingSessionContext(
-            id: contextID,
-            startDate: now,
-            timestamp: now.timeIntervalSince1970
-        )
-    }
-
     var timestampInt: Int {
         Int(timestamp)
     }
