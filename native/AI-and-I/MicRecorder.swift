@@ -726,7 +726,6 @@ class MicRecorder: ObservableObject {
         var recordingDeviceInfo = defaultInputInfo
 
         // gentle stability: accept airpods telephony mode rather than forcing a device swap
-        let defaultIsAirPods = defaultInputInfo.map { DeviceChangeMonitor.isAirPods(deviceID: $0.id) } ?? false
         if defaultIsAirPods && negotiatedSampleRate < 44_100 {
             print("🎧 airpods telephony mode detected – will upsample incoming buffers to 48khz")
             recordingDeviceInfo = defaultInputInfo
