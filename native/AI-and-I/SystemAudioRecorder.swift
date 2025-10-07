@@ -249,7 +249,15 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         print("🔄 system audio change: \(reason)")
 
         let normalizedReason = reason.lowercased()
-        let isOutputRelated = normalizedReason.contains("output") || normalizedReason.contains("display") || normalizedReason.contains("system") || normalizedReason.contains("debug")
+        var isOutputRelated = normalizedReason.contains("output") || normalizedReason.contains("display") || normalizedReason.contains("system") || normalizedReason.contains("debug")
+        if !isOutputRelated {
+            if let currentOutput = DeviceChangeMonitor.currentOutputDeviceID(),
+               let outputName = DeviceChangeMonitor.deviceName(for: currentOutput)?.lowercased(),
+               outputName.contains("airpod") {
+                isOutputRelated = true
+                print("ℹ️ system audio: treating AirPods route change as output update")
+            }
+        }
         guard isOutputRelated else {
             print("ℹ️ system audio: ignoring non-output change (reason: \(reason))")
             return
