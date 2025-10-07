@@ -30,7 +30,7 @@
 - [ ] mic pipeline reliability overhaul: adopt single state machine with guarded switching
   - enforce minimum segment duration (~20s) unless we hit a hard failure or explicit stop to prevent micro-segmentation
   - add writer drain barrier on switch (`recordingEnabled=false` → remove tap → `writerQueue.sync` → nil engine → settle delay → open new file) so no writes are in flight
-  - extend telephony fallback so 8/16kHz AirPods inputs stick with the built-in mic by default and prompt the user before overriding
+  - accept telephony mode for AirPods by keeping the Bluetooth input active, upsampling to 48kHz for storage, and coordinating route stabilization instead of forcing a built-in mic fallback
   - keep all mic segments at 48kHz mono PCM and stitch with silence insertion or 20ms crossfade when timelines overlap
   - verify long-session stability (current 6min run still drops ~30s – rerun after guardrails land)
 - [ ] warm prep inside `SystemAudioRecorder` with retries and cached SCContentFilter
