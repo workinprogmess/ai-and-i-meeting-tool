@@ -204,7 +204,7 @@ do {
             // microphone processing
             for (index, segment) in micSegments.enumerated() {
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
-                let micBoost = isAirPods ? "8dB" : "12dB"
+                let micBoost = isAirPods ? "4dB" : "6dB"
                 filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
             }
 
@@ -217,7 +217,7 @@ do {
 
             // system audio alignment with delay padding
             let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
-            let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"
+            let systemReduction = hasBuiltInMic ? "-8dB" : "-4dB"
             let systemStartIndex = micSegments.count
             for (offset, segment) in systemSegments.enumerated() {
                 let absoluteIndex = systemStartIndex + offset
@@ -256,7 +256,7 @@ do {
 
             for (index, segment) in micSegments.enumerated() {
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
-                let micBoost = isAirPods ? "8dB" : "12dB"
+                let micBoost = isAirPods ? "4dB" : "6dB"
                 let deviceType = isAirPods ? "airpods" : "built-in"
                 print("    [\(index)]aresample=48000,volume=\(micBoost)[m\(index)];  # \(deviceType) mic boost \\")
             }
@@ -400,7 +400,7 @@ func executeFFmpegMixing(
     // process mic segments with resampling
     for (index, segment) in micSegments.enumerated() {
         let isAirPods = segment.deviceName.lowercased().contains("airpods")
-        let micBoost = isAirPods ? "8dB" : "12dB"
+        let micBoost = isAirPods ? "4dB" : "6dB"
         
         filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
     }
@@ -415,7 +415,7 @@ func executeFFmpegMixing(
     
     // process system audio with resampling + timeline alignment
     let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
-    let systemReduction = hasBuiltInMic ? "-10dB" : "-6dB"
+    let systemReduction = hasBuiltInMic ? "-8dB" : "-4dB"
     let systemStartIndex = micSegments.count
     let baseStart = min(
         micSegments.map { $0.startSessionTime }.min() ?? 0,
