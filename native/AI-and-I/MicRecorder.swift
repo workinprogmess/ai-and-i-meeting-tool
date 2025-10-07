@@ -746,6 +746,7 @@ class MicRecorder: ObservableObject {
         if negotiatedSampleRate < 44_100 {
             print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
             lowQualityAirPodsAttempts = min(lowQualityAirPodsAttempts + 1, airPodsRecoveryRetryLimit)
+            clearAirPodsVerification()
         } else {
             lowQualityAirPodsAttempts = 0
             if isAirPodsDevice {
