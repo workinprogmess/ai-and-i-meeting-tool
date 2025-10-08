@@ -266,7 +266,10 @@ class MicRecorder: ObservableObject {
         lastKnownDeviceAudioID = 0
         lastKnownSampleRate = 0
         readinessBackoffTier = 0
-        
+        airPodsTelephonyModeActive = false
+        airPodsVerificationMode = .inactive
+        pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+
         // set state first
         state = .recording
         setIsRecording(true)
@@ -768,7 +771,6 @@ class MicRecorder: ObservableObject {
             }
         } else {
             lowQualityAirPodsAttempts = 0
-            airPodsTelephonyModeActive = false
             if isAirPodsDevice {
                 prepareAirPodsVerification()
             } else {
@@ -853,7 +855,15 @@ class MicRecorder: ObservableObject {
                     print("⚠️ airpods captured at telephony rate (\(negotiatedSampleRate)hz) – continuing with stability safeguards")
                     setErrorMessage("airpods mic in call mode (lower quality) – continuing once stable")
                 }
-                print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
+                if airPodsTelephonyModeActive {
+                    agcEnabled = true
+                    currentGain = max(currentGain, airPodsTelephonyInitialGain)
+                    print("🎧 airpods telephony mode – agc enabled at \(String(format: "%.1f", currentGain))x")
+                } else {
+                    agcEnabled = false
+                    currentGain = 1.0
+                    print("🎧 airpods detected – skipping sample rate enforcement to avoid telephony conflicts")
+                }
             } else if negotiatedSampleRate < 44_100 {
                 print("⚠️ low sample rate (\(negotiatedSampleRate)hz) – leaving device as is to prevent Core Audio errors")
             } else {
@@ -1385,7 +1395,7 @@ class MicRecorder: ObservableObject {
                 if sampleRate < 44_100 {
                     self.activateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
                 } else {
-                    self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
+                    self.currentSampleRate = sampleRate
                 }
             } else {
                 self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
