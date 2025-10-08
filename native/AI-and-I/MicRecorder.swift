@@ -211,11 +211,21 @@ class MicRecorder: ObservableObject {
     private var lastKnownDeviceAudioID: AudioDeviceID = 0
     private var lastKnownSampleRate: Double = 0
     
+    private enum AirPodsVerificationMode {
+        case inactive
+        case normal
+        case telephonyBypass
+    }
+
     private var pendingAirPodsVerification = false
     private var pendingAirPodsBufferSum: Float = 0
     private var pendingAirPodsSampleCount: Int = 0
     private var pendingAirPodsWindowCount: Int = 0
     private var pendingAirPodsBuffers: [AVAudioPCMBuffer] = []
+    private var airPodsVerificationMode: AirPodsVerificationMode = .inactive
+    private var airPodsTelephonyModeActive = false
+    private let airPodsTelephonyUpperBound: Double = 24_100
+    private let airPodsTelephonyGain: Float = 1.6
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -746,9 +756,15 @@ class MicRecorder: ObservableObject {
         if negotiatedSampleRate < 44_100 {
             print("⚠️ telephony sample rate detected: \(negotiatedSampleRate)hz (continuing with low-quality segment)")
             lowQualityAirPodsAttempts = min(lowQualityAirPodsAttempts + 1, airPodsRecoveryRetryLimit)
-            clearAirPodsVerification()
+            if isAirPodsDevice {
+                activateAirPodsTelephonyMode(sampleRate: negotiatedSampleRate, reason: "segment-start")
+            } else {
+                airPodsTelephonyModeActive = false
+                clearAirPodsVerification()
+            }
         } else {
             lowQualityAirPodsAttempts = 0
+            airPodsTelephonyModeActive = false
             if isAirPodsDevice {
                 prepareAirPodsVerification()
             } else {
@@ -1154,6 +1170,10 @@ class MicRecorder: ObservableObject {
         }
 
         guard recordingEnabled else { return }
+
+        if latestDeviceName.lowercased().contains("airpod") {
+            updateAirPodsTelephonyState(using: buffer)
+        }
         
         // apply agc if enabled (for built-in mic)
         let processedBuffer: AVAudioPCMBuffer
@@ -1164,7 +1184,7 @@ class MicRecorder: ObservableObject {
         }
         
         // convert format if needed
-        let bufferToWrite: AVAudioPCMBuffer
+        var bufferToWrite: AVAudioPCMBuffer
         if inputFormat != targetFormat {
             print("🔄 format conversion needed:")
             print("   input: \(inputFormat.sampleRate)hz, \(inputFormat.channelCount)ch")
@@ -1210,18 +1230,30 @@ class MicRecorder: ObservableObject {
                 hasLoggedFormatMatch = true
             }
         }
-        
-        if pendingAirPodsVerification {
+
+        if airPodsTelephonyModeActive {
+            bufferToWrite = applyGain(bufferToWrite, multiplier: airPodsTelephonyGain)
+        }
+
+        if pendingAirPodsVerification && airPodsVerificationMode == .normal {
             switch evaluateAirPodsBuffer(bufferToWrite) {
             case .pending:
                 return
             case .confirmed:
-                let buffersToWrite = pendingAirPodsBuffers
+                let flushed = flushPendingAirPodsBuffers()
                 clearAirPodsVerification()
-                buffersToWrite.forEach { writeBuffer($0) }
+                if flushed > 0 {
+                    print("🎧 airpods verification passed after writing \(flushed) buffered buffer(s)")
+                }
                 return
             case .failed:
+                let flushed = flushPendingAirPodsBuffers()
                 clearAirPodsVerification()
+                if flushed > 0 {
+                    print("🎧 airpods verification timed out – released \(flushed) buffered buffer(s)")
+                } else {
+                    print("🎧 airpods verification timed out – no buffered frames to flush")
+                }
                 handleAirPodsVerificationFailure()
                 return
             }
@@ -1317,6 +1349,8 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareAirPodsVerification() {
+        airPodsVerificationMode = .normal
+        airPodsTelephonyModeActive = false
         pendingAirPodsVerification = true
         pendingAirPodsBufferSum = 0
         pendingAirPodsSampleCount = 0
@@ -1330,6 +1364,71 @@ class MicRecorder: ObservableObject {
         pendingAirPodsSampleCount = 0
         pendingAirPodsWindowCount = 0
         pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+        airPodsVerificationMode = .inactive
+    }
+
+    private func activateAirPodsTelephonyMode(sampleRate: Double, reason: String) {
+        if !airPodsTelephonyModeActive {
+            print("🎧 airpods telephony bypass active at \(Int(sampleRate))hz (reason: \(reason))")
+        }
+        airPodsTelephonyModeActive = true
+        if pendingAirPodsVerification {
+            let flushed = flushPendingAirPodsBuffers()
+            if flushed > 0 {
+                print("🎧 flushed \(flushed) pending airpods buffer(s) during telephony handover")
+            }
+        }
+        pendingAirPodsVerification = false
+        airPodsVerificationMode = .telephonyBypass
+        pendingAirPodsBufferSum = 0
+        pendingAirPodsSampleCount = 0
+        pendingAirPodsWindowCount = 0
+        currentGain = airPodsTelephonyGain
+    }
+
+    private func updateAirPodsTelephonyState(using inputBuffer: AVAudioPCMBuffer) {
+        guard latestDeviceName.lowercased().contains("airpod") else { return }
+        let actualSampleRate = inputBuffer.format.sampleRate
+        guard actualSampleRate > 0 else { return }
+
+        if actualSampleRate <= airPodsTelephonyUpperBound {
+            if airPodsVerificationMode != .telephonyBypass || !airPodsTelephonyModeActive {
+                activateAirPodsTelephonyMode(sampleRate: actualSampleRate, reason: "mid-segment")
+            }
+            return
+        }
+
+        if airPodsTelephonyModeActive && actualSampleRate >= 44_100 {
+            airPodsTelephonyModeActive = false
+            if airPodsVerificationMode == .telephonyBypass {
+                airPodsVerificationMode = .inactive
+            }
+            print("🎧 airpods returned to high-quality mode at \(Int(actualSampleRate))hz")
+            currentGain = 1.0
+        }
+    }
+
+    @discardableResult
+    private func flushPendingAirPodsBuffers() -> Int {
+        guard !pendingAirPodsBuffers.isEmpty else { return 0 }
+        let buffers = pendingAirPodsBuffers
+        pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+        buffers.forEach { writeBuffer($0) }
+        return buffers.count
+    }
+
+    private func applyGain(_ buffer: AVAudioPCMBuffer, multiplier: Float) -> AVAudioPCMBuffer {
+        guard multiplier != 1.0 else { return buffer }
+        guard let channelData = buffer.floatChannelData else { return buffer }
+        let channelCount = Int(buffer.format.channelCount)
+        let frameLength = Int(buffer.frameLength)
+        for channel in 0..<channelCount {
+            for frame in 0..<frameLength {
+                let value = channelData[channel][frame] * multiplier
+                channelData[channel][frame] = max(-1.0, min(1.0, value))
+            }
+        }
+        return buffer
     }
 
     private func evaluateAirPodsBuffer(_ buffer: AVAudioPCMBuffer) -> AirPodsVerificationResult {
@@ -1373,15 +1472,8 @@ class MicRecorder: ObservableObject {
     }
 
     private func handleAirPodsVerificationFailure() {
-        controllerQueue.async { [weak self] in
-            guard let self else { return }
-            let buffered = self.pendingAirPodsBuffers
-            self.pendingAirPodsBuffers.removeAll(keepingCapacity: true)
-            self.pendingAirPodsVerification = false
-            print("🎧 airpods verification pending – continuing to wait for telephony audio")
-            self.setErrorMessage("airpods still connecting – continuing once audio arrives")
-            buffered.forEach { self.writeBuffer($0) }
-        }
+        print("🎧 airpods verification pending – continuing to wait for telephony audio")
+        setErrorMessage("airpods still connecting – continuing once audio arrives")
     }
 
     private func writeBuffer(_ buffer: AVAudioPCMBuffer) {
