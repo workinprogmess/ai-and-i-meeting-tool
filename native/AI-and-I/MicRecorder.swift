@@ -772,7 +772,11 @@ class MicRecorder: ObservableObject {
         } else {
             lowQualityAirPodsAttempts = 0
             if isAirPodsDevice {
-                prepareAirPodsVerification()
+                if airPodsTelephonyModeActive {
+                    print("🎧 airpods still flagged as telephony – keeping bypass active")
+                } else {
+                    prepareAirPodsVerification()
+                }
             } else {
                 clearAirPodsVerification()
             }
@@ -1365,8 +1369,12 @@ class MicRecorder: ObservableObject {
     }
 
     private func prepareAirPodsVerification() {
+        guard !airPodsTelephonyModeActive else {
+            pendingAirPodsVerification = false
+            return
+        }
+
         airPodsVerificationMode = .normal
-        airPodsTelephonyModeActive = false
         pendingAirPodsVerification = true
         pendingAirPodsBufferSum = 0
         pendingAirPodsSampleCount = 0
@@ -1449,11 +1457,11 @@ class MicRecorder: ObservableObject {
 
     private func updateAirPodsTelephonyState(using _: AVAudioPCMBuffer) {
         guard latestDeviceName.lowercased().contains("airpod") else { return }
+        guard !airPodsTelephonyModeActive else { return }
+
         let currentRate = currentSampleRate
         if currentRate > 0, currentRate < 44_100 {
             activateAirPodsTelephonyMode(sampleRate: currentRate, reason: "buffer-check")
-        } else if airPodsTelephonyModeActive, currentRate >= 44_100 {
-            deactivateAirPodsTelephonyMode(sampleRate: currentRate, reason: "buffer-check")
         }
     }
 
