@@ -226,12 +226,12 @@ class MicRecorder: ObservableObject {
     private var airPodsVerificationMode: AirPodsVerificationMode = .inactive
     private var airPodsTelephonyModeActive = false
     private let airPodsTelephonyUpperBound: Double = 24_100
-    private let airPodsTelephonyGainBoost: Float = 1.6   // gentle +4dB after conversion
-    private let airPodsTelephonyInitialGain: Float = 1.6
+    private let airPodsTelephonyGainBoost: Float = 1.0   // telephony leveling handles gain
+    private let airPodsTelephonyInitialGain: Float = 1.0
     private let airPodsTelephonyMaximumGain: Float = 4.0
     private var telephonySilentBufferCount = 0
     private let telephonySilenceBufferThreshold = 24  // ~1s with 2048-frame buffers
-    private let airPodsTelephonySilenceRmsThreshold: Float = 0.003
+    private let airPodsTelephonySilenceRmsThreshold: Float = 0.006
     private let airPodsTelephonySilencePeakThreshold: Float = 0.008
     private var telephonyFallbackActive = false
     // MARK: - public interface
@@ -1279,7 +1279,7 @@ class MicRecorder: ObservableObject {
         }
 
         if airPodsTelephonyModeActive {
-            bufferToWrite = applyGain(bufferToWrite, multiplier: airPodsTelephonyGainBoost)
+            bufferToWrite = applyTelephonyLeveling(bufferToWrite, measuredRMS: signalMetrics.rms)
         }
 
         if pendingAirPodsVerification && airPodsVerificationMode == .normal {
@@ -1588,6 +1588,19 @@ class MicRecorder: ObservableObject {
         let sampleCount = Float(frameLength * channelCount)
         let rms = sampleCount > 0 ? sqrtf(sumSquares / sampleCount) : 0
         return (rms, maxAbs)
+    }
+
+    private func applyTelephonyLeveling(_ buffer: AVAudioPCMBuffer, measuredRMS: Float) -> AVAudioPCMBuffer {
+        let epsilon: Float = 0.00001
+        let targetRMS: Float = 0.04  // roughly -28 dBFS for intelligible speech
+        let minGain: Float = 0.8
+        let maxGain: Float = airPodsTelephonyMaximumGain
+
+        let currentRMS = max(measuredRMS, epsilon)
+        var gain = targetRMS / currentRMS
+        gain = max(minGain, min(maxGain, gain))
+
+        return applyGain(buffer, multiplier: gain)
     }
 
     private func evaluateAirPodsBuffer(_ buffer: AVAudioPCMBuffer) -> AirPodsVerificationResult {
