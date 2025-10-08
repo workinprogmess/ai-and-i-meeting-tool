@@ -226,9 +226,9 @@ class MicRecorder: ObservableObject {
     private var airPodsVerificationMode: AirPodsVerificationMode = .inactive
     private var airPodsTelephonyModeActive = false
     private let airPodsTelephonyUpperBound: Double = 24_100
-    private let airPodsTelephonyGainBoost: Float = 2.0
-    private let airPodsTelephonyInitialGain: Float = 6.0
-    private let airPodsTelephonyMaximumGain: Float = 16.0
+    private let airPodsTelephonyGainBoost: Float = 1.6   // gentle +4dB after conversion
+    private let airPodsTelephonyInitialGain: Float = 1.6
+    private let airPodsTelephonyMaximumGain: Float = 4.0
     private var telephonySilentBufferCount = 0
     private let telephonySilenceBufferThreshold = 24  // ~1s with 2048-frame buffers
     private let airPodsTelephonySilenceRmsThreshold: Float = 0.003
@@ -1227,7 +1227,7 @@ class MicRecorder: ObservableObject {
         } else {
             processedBuffer = buffer
         }
-        
+
         // convert format if needed
         var bufferToWrite: AVAudioPCMBuffer
         if inputFormat != targetFormat {
