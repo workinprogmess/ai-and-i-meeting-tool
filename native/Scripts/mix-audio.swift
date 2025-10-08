@@ -136,6 +136,9 @@ do {
         }
         
         // analyze segments
+        micSegments.sort { $0.startSessionTime < $1.startSessionTime }
+        systemSegments.sort { $0.startSessionTime < $1.startSessionTime }
+
         print("\n🎤 microphone segments: \(micSegments.count)")
         if !micSegments.isEmpty {
             var totalMicAudio: TimeInterval = 0
@@ -210,9 +213,9 @@ do {
 
             if micSegments.count > 1 {
                 let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
-                filterParts.append("\(micLabels)concat=n=\(micSegments.count):v=0:a=1[mic]")
+                filterParts.append("\(micLabels)concat=n=\(micSegments.count):v=0:a=1[micCombined]")
             } else {
-                filterParts.append("[m0]acopy[mic]")
+                filterParts.append("[m0]acopy[micCombined]")
             }
 
             // system audio alignment with delay padding
@@ -231,13 +234,13 @@ do {
 
             if systemSegments.count > 1 {
                 let sysLabels = (0..<systemSegments.count).map { "[sys\($0)]" }.joined()
-                filterParts.append("\(sysLabels)amix=inputs=\(systemSegments.count):dropout_transition=0[sys]")
+                filterParts.append("\(sysLabels)amix=inputs=\(systemSegments.count):dropout_transition=0[sysCombined]")
             } else {
-                filterParts.append("[sys0]acopy[sys]")
+                filterParts.append("[sys0]acopy[sysCombined]")
             }
 
             // final mix
-            filterParts.append("[mic][sys]amix=inputs=2:duration=longest[out]")
+            filterParts.append("[micCombined][sysCombined]amix=inputs=2:duration=longest[out]")
 
             let filterComplex = filterParts.joined(separator: "; ")
             ffmpegCmd += " -filter_complex \"\(filterComplex)\""
@@ -263,9 +266,9 @@ do {
 
             if micSegments.count > 1 {
                 let micLabels = (0..<micSegments.count).map { "[m\($0)]" }.joined()
-                print("    \(micLabels)concat=n=\(micSegments.count):v=0:a=1[mic];  # concatenate mic segments \\")
+                print("    \(micLabels)concat=n=\(micSegments.count):v=0:a=1[micCombined];  # concatenate mic segments \\")
             } else {
-                print("    [m0]acopy[mic]; \\")
+                print("    [m0]acopy[micCombined]; \\")
             }
 
             for (offset, segment) in systemSegments.enumerated() {
@@ -278,12 +281,12 @@ do {
 
             if systemSegments.count > 1 {
                 let sysLabels = (0..<systemSegments.count).map { "[sys\($0)]" }.joined()
-                print("    \(sysLabels)amix=inputs=\(systemSegments.count):dropout_transition=0[sys];  # align + mix system segments \\")
+                print("    \(sysLabels)amix=inputs=\(systemSegments.count):dropout_transition=0[sysCombined];  # align + merge system segments \\")
             } else {
-                print("    [sys0]acopy[sys]; \\")
+                print("    [sys0]acopy[sysCombined]; \\")
             }
 
-            print("    [mic][sys]amix=inputs=2:duration=longest[out]\"  # final mix \\")
+            print("    [micCombined][sysCombined]amix=inputs=2:duration=longest[out]\"  # final mix \\")
             print("  -map \"[out]\" \\")
             print("  -acodec pcm_s16le \\")
             print("  -ar 48000 \\")
@@ -376,19 +379,22 @@ func executeFFmpegMixing(
     sessionTimestamp: Int,
     recordingsPath: String
 ) -> Bool {
+    let sortedMicSegments = micSegments.sorted { $0.startSessionTime < $1.startSessionTime }
+    let sortedSystemSegments = systemSegments.sorted { $0.startSessionTime < $1.startSessionTime }
+
     // build ffmpeg arguments
     var args: [String] = []
     
     // add input files
-    for segment in micSegments {
+    for segment in sortedMicSegments {
         args.append("-i")
         args.append(segment.filePath)
     }
     
     // add system audio segments (support multiple files)
-    let systemInputs = systemSegments.isEmpty
+    let systemInputs = sortedSystemSegments.isEmpty
         ? ["\(recordingsPath)/system_\(sessionTimestamp)_001.wav"]
-        : systemSegments.map { $0.filePath }
+        : sortedSystemSegments.map { $0.filePath }
     for path in systemInputs {
         args.append("-i")
         args.append(path)
@@ -396,34 +402,34 @@ func executeFFmpegMixing(
     
     // build filter complex
     var filterParts: [String] = []
-    
+
     // process mic segments with resampling
-    for (index, segment) in micSegments.enumerated() {
+    for (index, segment) in sortedMicSegments.enumerated() {
         let isAirPods = segment.deviceName.lowercased().contains("airpods")
         let micBoost = isAirPods ? "4dB" : "6dB"
-        
+
         filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
     }
-    
+
     // concatenate mic segments if multiple
-    if micSegments.count > 1 {
-        let concatInputs = (0..<micSegments.count).map { "[m\($0)]" }.joined()
-        filterParts.append("\(concatInputs)concat=n=\(micSegments.count):v=0:a=1[mic]")
+    if sortedMicSegments.count > 1 {
+        let concatInputs = (0..<sortedMicSegments.count).map { "[m\($0)]" }.joined()
+        filterParts.append("\(concatInputs)concat=n=\(sortedMicSegments.count):v=0:a=1[micCombined]")
     } else {
-        filterParts.append("[m0]acopy[mic]")
+        filterParts.append("[m0]acopy[micCombined]")
     }
-    
+
     // process system audio with resampling + timeline alignment
-    let hasBuiltInMic = micSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
+    let hasBuiltInMic = sortedMicSegments.contains { !$0.deviceName.lowercased().contains("airpods") }
     let systemReduction = hasBuiltInMic ? "-8dB" : "-4dB"
-    let systemStartIndex = micSegments.count
+    let systemStartIndex = sortedMicSegments.count
     let baseStart = min(
-        micSegments.map { $0.startSessionTime }.min() ?? 0,
-        systemSegments.map { $0.startSessionTime }.min() ?? 0
+        sortedMicSegments.map { $0.startSessionTime }.min() ?? 0,
+        sortedSystemSegments.map { $0.startSessionTime }.min() ?? 0
     )
 
-    if !systemSegments.isEmpty {
-        for (offset, segment) in systemSegments.enumerated() {
+    if !sortedSystemSegments.isEmpty {
+        for (offset, segment) in sortedSystemSegments.enumerated() {
             let absoluteIndex = systemStartIndex + offset
             var chain = "[\(absoluteIndex)]aresample=48000,volume=\(systemReduction)"
             let delayMs = max(0, Int(round((segment.startSessionTime - baseStart) * 1000)))
@@ -433,18 +439,18 @@ func executeFFmpegMixing(
             filterParts.append("\(chain)[sys\(offset)]")
         }
 
-        if systemSegments.count > 1 {
-            let concatInputs = (0..<systemSegments.count).map { "[sys\($0)]" }.joined()
-            filterParts.append("\(concatInputs)amix=inputs=\(systemSegments.count):dropout_transition=0[sys]")
+        if sortedSystemSegments.count > 1 {
+            let concatInputs = (0..<sortedSystemSegments.count).map { "[sys\($0)]" }.joined()
+            filterParts.append("\(concatInputs)amix=inputs=\(sortedSystemSegments.count):dropout_transition=0[sysCombined]")
         } else {
-            filterParts.append("[sys0]acopy[sys]")
+            filterParts.append("[sys0]acopy[sysCombined]")
         }
     } else if !systemInputs.isEmpty {
-        filterParts.append("[\(systemStartIndex)]aresample=48000,volume=\(systemReduction)[sys]")
+        filterParts.append("[\(systemStartIndex)]aresample=48000,volume=\(systemReduction)[sysCombined]")
     }
-    
+
     // mix together (use 'longest' duration so system audio can cover mic dropouts)
-    filterParts.append("[mic][sys]amix=inputs=2:duration=longest[out]")
+    filterParts.append("[micCombined][sysCombined]amix=inputs=2:duration=longest[out]")
     
     let filterComplex = filterParts.joined(separator: ";")
     args.append("-filter_complex")
