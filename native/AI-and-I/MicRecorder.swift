@@ -96,6 +96,7 @@ class MicRecorder: ObservableObject {
     private var segmentStartTime: TimeInterval = 0
     private var segmentNumber: Int = 0
     private var segmentFilePath: String = ""
+    private var currentSegmentError: String?
     private var currentDeviceID: String = ""
     private var currentDeviceAudioID: AudioDeviceID = 0
     private var framesCaptured: Int = 0
@@ -228,6 +229,11 @@ class MicRecorder: ObservableObject {
     private let airPodsTelephonyGainBoost: Float = 2.0
     private let airPodsTelephonyInitialGain: Float = 6.0
     private let airPodsTelephonyMaximumGain: Float = 16.0
+    private var telephonySilentBufferCount = 0
+    private let telephonySilenceBufferThreshold = 24  // ~1s with 2048-frame buffers
+    private let airPodsTelephonySilenceRmsThreshold: Float = 0.003
+    private let airPodsTelephonySilencePeakThreshold: Float = 0.008
+    private var telephonyFallbackActive = false
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -269,6 +275,8 @@ class MicRecorder: ObservableObject {
         airPodsTelephonyModeActive = false
         airPodsVerificationMode = .inactive
         pendingAirPodsBuffers.removeAll(keepingCapacity: true)
+        telephonySilentBufferCount = 0
+        telephonyFallbackActive = false
 
         // set state first
         state = .recording
@@ -311,6 +319,8 @@ class MicRecorder: ObservableObject {
         setIsRecording(false)
         preferredOutputDeviceID = nil
         preferredOutputDeviceName = "unknown"
+        telephonyFallbackActive = false
+        telephonySilentBufferCount = 0
     }
 
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
@@ -697,6 +707,7 @@ class MicRecorder: ObservableObject {
         readinessStableWindowStart = nil
         readinessLastSampleRate = 0
         readinessLastChannelCount = 0
+        currentSegmentError = nil
 
         do {
             try setupWarmEngineIfNeeded(startImmediately: false)
@@ -870,14 +881,23 @@ class MicRecorder: ObservableObject {
                 }
             } else if negotiatedSampleRate < 44_100 {
                 print("⚠️ low sample rate (\(negotiatedSampleRate)hz) – leaving device as is to prevent Core Audio errors")
+                telephonyFallbackActive = false
+                telephonySilentBufferCount = 0
+                airPodsTelephonyModeActive = false
             } else {
                 enforceSampleRateIfNeeded(for: deviceInfo.id)
+                telephonyFallbackActive = false
+                telephonySilentBufferCount = 0
+                airPodsTelephonyModeActive = false
             }
         } else {
             currentDeviceAudioID = 0
             currentDeviceID = "unknown"
             deviceName = "unknown"
             setCurrentDeviceName(deviceName)
+            telephonyFallbackActive = false
+            telephonySilentBufferCount = 0
+            airPodsTelephonyModeActive = false
         }
 
         let fallbackUsed = recordingDeviceInfo?.id != defaultInputInfo?.id
@@ -1005,7 +1025,7 @@ class MicRecorder: ObservableObject {
                 endSessionTime: segmentEndTime,
                 frameCount: framesCaptured,
                 quality: latestQuality,
-                error: nil
+                error: currentSegmentError
             )
 
             segmentQueue.sync {
@@ -1192,9 +1212,14 @@ class MicRecorder: ObservableObject {
         guard recordingEnabled else { return }
 
         if latestDeviceName.lowercased().contains("airpod") {
+            let signalMetrics = analyzeSignal(buffer)
             updateAirPodsTelephonyState(using: buffer)
+            updateTelephonySignalMonitor(rms: signalMetrics.rms, peak: signalMetrics.peak)
+        } else {
+            telephonySilentBufferCount = 0
+            telephonyFallbackActive = false
         }
-        
+
         // apply agc if enabled (for built-in mic)
         let processedBuffer: AVAudioPCMBuffer
         if agcEnabled {
@@ -1465,6 +1490,52 @@ class MicRecorder: ObservableObject {
         }
     }
 
+    private func updateTelephonySignalMonitor(rms: Float, peak: Float) {
+        guard airPodsTelephonyModeActive else {
+            telephonySilentBufferCount = 0
+            telephonyFallbackActive = false
+            return
+        }
+
+        if peak < airPodsTelephonySilencePeakThreshold && rms < airPodsTelephonySilenceRmsThreshold {
+            telephonySilentBufferCount += 1
+            if !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
+                telephonyFallbackActive = true
+                controllerQueue.async { [weak self] in
+                    self?.engageTelephonyFallback(reason: "airpods-silent")
+                }
+            }
+        } else {
+            telephonySilentBufferCount = 0
+        }
+    }
+
+    private func engageTelephonyFallback(reason: String) {
+        guard isRecording else { return }
+        guard let builtInID = DeviceChangeMonitor.builtInInputDeviceID() else {
+            print("⚠️ telephony fallback requested but no built-in input device found")
+            return
+        }
+
+        let currentInputID = DeviceChangeMonitor.currentInputDeviceID()
+        if currentInputID == builtInID {
+            telephonyFallbackActive = true
+            airPodsTelephonyModeActive = false
+            return
+        }
+
+        print("🚨 airpods telephony audio silent – switching to built-in mic")
+        setErrorMessage("airpods mic quiet – capturing with mac mic")
+        currentSegmentError = "airpods-mic-silent"
+        let success = DeviceChangeMonitor.setDefaultInputDevice(builtInID)
+        if !success {
+            print("⚠️ unable to switch default input to built-in mic during fallback")
+        }
+
+        airPodsTelephonyModeActive = false
+        telephonySilentBufferCount = 0
+    }
+
     @discardableResult
     private func flushPendingAirPodsBuffers() -> Int {
         guard !pendingAirPodsBuffers.isEmpty else { return 0 }
@@ -1486,6 +1557,35 @@ class MicRecorder: ObservableObject {
             }
         }
         return buffer
+    }
+
+    private func analyzeSignal(_ buffer: AVAudioPCMBuffer) -> (rms: Float, peak: Float) {
+        guard let channelData = buffer.floatChannelData else { return (0, 0) }
+        let channelCount = Int(buffer.format.channelCount)
+        let frameLength = Int(buffer.frameLength)
+
+        if frameLength == 0 || channelCount == 0 {
+            return (0, 0)
+        }
+
+        var sumSquares: Float = 0
+        var maxAbs: Float = 0
+
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            for frame in 0..<frameLength {
+                let sample = samples[frame]
+                let absSample = fabsf(sample)
+                sumSquares += sample * sample
+                if absSample > maxAbs {
+                    maxAbs = absSample
+                }
+            }
+        }
+
+        let sampleCount = Float(frameLength * channelCount)
+        let rms = sampleCount > 0 ? sqrtf(sumSquares / sampleCount) : 0
+        return (rms, maxAbs)
     }
 
     private func evaluateAirPodsBuffer(_ buffer: AVAudioPCMBuffer) -> AirPodsVerificationResult {
