@@ -284,9 +284,10 @@ class DeviceChangeMonitor: ObservableObject {
         print("🎤 input device change: \(reason)")
         
         // get new device info
+        let previousDevice = currentInputDevice
         let newDevice = getCurrentInputDeviceName()
-        if newDevice != currentInputDevice {
-            print("🎤 switched from '\(currentInputDevice)' to '\(newDevice)'")
+        if newDevice != previousDevice {
+            print("🎤 switched from '\(previousDevice)' to '\(newDevice)'")
             currentInputDevice = newDevice
             if let rate = getCurrentInputSampleRate() {
                 print("🎚️ current input sample rate: \(Int(rate))hz")
@@ -294,7 +295,17 @@ class DeviceChangeMonitor: ObservableObject {
             
             // notify mic recorder
             onMicDeviceChange?(reason)
+            notifySystemRecorderForAirPodsChange(previous: previousDevice, current: newDevice, reason: reason)
         }
+    }
+
+    private func notifySystemRecorderForAirPodsChange(previous: String, current: String, reason: String) {
+        let previousIsAirPods = previous.lowercased().contains("airpod")
+        let currentIsAirPods = current.lowercased().contains("airpod")
+        guard previousIsAirPods || currentIsAirPods else { return }
+
+        let descriptor = reason + " (input: \(current))"
+        onSystemDeviceChange?(descriptor)
     }
     
     private func handleOutputDeviceChange(reason: String) {
