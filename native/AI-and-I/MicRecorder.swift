@@ -225,7 +225,9 @@ class MicRecorder: ObservableObject {
     private var airPodsVerificationMode: AirPodsVerificationMode = .inactive
     private var airPodsTelephonyModeActive = false
     private let airPodsTelephonyUpperBound: Double = 24_100
-    private let airPodsTelephonyGain: Float = 1.6
+    private let airPodsTelephonyGainBoost: Float = 2.0
+    private let airPodsTelephonyInitialGain: Float = 6.0
+    private let airPodsTelephonyMaximumGain: Float = 16.0
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -335,6 +337,8 @@ class MicRecorder: ObservableObject {
 
     private func enqueueDeviceSwitchLocked(reason: String) {
         let now = Date()
+
+        refreshAirPodsTelephonyModeLocked(reason: reason)
 
         if let pinnedUntil, now < pinnedUntil {
             let remaining = Int(pinnedUntil.timeIntervalSince(now))
@@ -792,6 +796,8 @@ class MicRecorder: ObservableObject {
             setErrorMessage("mic in low quality mode - recording anyway")
         }
 
+        refreshAirPodsTelephonyModeLocked(reason: "segment-start")
+
         segmentNumber += 1
         let sessionTimestamp = Int(sessionReferenceTime)
         segmentFilePath = createSegmentFilePath(sessionTimestamp: sessionTimestamp, segmentNumber: segmentNumber)
@@ -1177,7 +1183,7 @@ class MicRecorder: ObservableObject {
         
         // apply agc if enabled (for built-in mic)
         let processedBuffer: AVAudioPCMBuffer
-        if agcEnabled && latestDeviceName.lowercased().contains("mac") {
+        if agcEnabled {
             processedBuffer = applyAGC(to: buffer) ?? buffer
         } else {
             processedBuffer = buffer
@@ -1232,7 +1238,7 @@ class MicRecorder: ObservableObject {
         }
 
         if airPodsTelephonyModeActive {
-            bufferToWrite = applyGain(bufferToWrite, multiplier: airPodsTelephonyGain)
+            bufferToWrite = applyGain(bufferToWrite, multiplier: airPodsTelephonyGainBoost)
         }
 
         if pendingAirPodsVerification && airPodsVerificationMode == .normal {
@@ -1367,44 +1373,77 @@ class MicRecorder: ObservableObject {
         airPodsVerificationMode = .inactive
     }
 
+    private func refreshAirPodsTelephonyModeLocked(reason: String) {
+        guard isRecording else { return }
+        guard let info = fetchDefaultInputDeviceInfo() else { return }
+        let isAirPods = DeviceChangeMonitor.isAirPods(deviceID: info.id)
+        let sampleRate = querySampleRate(for: info.id) ?? 0
+
+        writerQueue.async(flags: .barrier) { [weak self] in
+            guard let self else { return }
+            if isAirPods, sampleRate > 0 {
+                if sampleRate < 44_100 {
+                    self.activateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
+                } else {
+                    self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
+                }
+            } else {
+                self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
+            }
+        }
+    }
+
     private func activateAirPodsTelephonyMode(sampleRate: Double, reason: String) {
+        if airPodsTelephonyModeActive, abs(currentSampleRate - sampleRate) < 1 {
+            return
+        }
+
+        currentSampleRate = sampleRate
+
         if !airPodsTelephonyModeActive {
             print("🎧 airpods telephony bypass active at \(Int(sampleRate))hz (reason: \(reason))")
         }
+
         airPodsTelephonyModeActive = true
-        if pendingAirPodsVerification {
+        airPodsVerificationMode = .telephonyBypass
+        pendingAirPodsVerification = false
+        pendingAirPodsBufferSum = 0
+        pendingAirPodsSampleCount = 0
+        pendingAirPodsWindowCount = 0
+
+        if pendingAirPodsBuffers.isEmpty == false {
             let flushed = flushPendingAirPodsBuffers()
             if flushed > 0 {
                 print("🎧 flushed \(flushed) pending airpods buffer(s) during telephony handover")
             }
         }
-        pendingAirPodsVerification = false
-        airPodsVerificationMode = .telephonyBypass
-        pendingAirPodsBufferSum = 0
-        pendingAirPodsSampleCount = 0
-        pendingAirPodsWindowCount = 0
-        currentGain = airPodsTelephonyGain
+
+        agcEnabled = true
+        currentGain = max(currentGain, airPodsTelephonyInitialGain)
     }
 
-    private func updateAirPodsTelephonyState(using inputBuffer: AVAudioPCMBuffer) {
-        guard latestDeviceName.lowercased().contains("airpod") else { return }
-        let actualSampleRate = inputBuffer.format.sampleRate
-        guard actualSampleRate > 0 else { return }
+    private func deactivateAirPodsTelephonyMode(sampleRate: Double, reason: String) {
+        currentSampleRate = sampleRate
+        guard airPodsTelephonyModeActive else { return }
 
-        if actualSampleRate <= airPodsTelephonyUpperBound {
-            if airPodsVerificationMode != .telephonyBypass || !airPodsTelephonyModeActive {
-                activateAirPodsTelephonyMode(sampleRate: actualSampleRate, reason: "mid-segment")
-            }
-            return
+        airPodsTelephonyModeActive = false
+        if airPodsVerificationMode == .telephonyBypass {
+            airPodsVerificationMode = .inactive
         }
+        currentGain = 1.0
+        agcEnabled = latestDeviceName.lowercased().contains("mac")
+        if sampleRate >= 44_100 {
+            print("🎧 airpods returned to high-quality mode at \(Int(sampleRate))hz (reason: \(reason))")
+        }
+    }
 
-        if airPodsTelephonyModeActive && actualSampleRate >= 44_100 {
-            airPodsTelephonyModeActive = false
-            if airPodsVerificationMode == .telephonyBypass {
-                airPodsVerificationMode = .inactive
-            }
-            print("🎧 airpods returned to high-quality mode at \(Int(actualSampleRate))hz")
-            currentGain = 1.0
+    private func updateAirPodsTelephonyState(using _: AVAudioPCMBuffer) {
+        guard latestDeviceName.lowercased().contains("airpod") else { return }
+        let currentRate = currentSampleRate
+        if currentRate > 0, currentRate < 44_100 {
+            activateAirPodsTelephonyMode(sampleRate: currentRate, reason: "buffer-check")
+        } else if airPodsTelephonyModeActive, currentRate >= 44_100 {
+            deactivateAirPodsTelephonyMode(sampleRate: currentRate, reason: "buffer-check")
         }
     }
 
@@ -1653,9 +1692,11 @@ class MicRecorder: ObservableObject {
         let currentDB = 20 * log10(max(rms, 0.00001))
         
         // adjust gain to reach target level
+        let maxGain: Float = airPodsTelephonyModeActive ? airPodsTelephonyMaximumGain : 4.0
+
         if currentDB < targetLevel - 3 {
-            // increase gain (up to 4x)
-            currentGain = min(currentGain * 1.1, 4.0)
+            // increase gain up to configured maximum
+            currentGain = min(currentGain * 1.1, maxGain)
         } else if currentDB > targetLevel + 3 {
             // decrease gain (down to 1x)
             currentGain = max(currentGain * 0.9, 1.0)
