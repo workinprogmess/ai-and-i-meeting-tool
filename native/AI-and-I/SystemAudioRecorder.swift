@@ -386,7 +386,8 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         // let hardware settle
         try? await Task.sleep(nanoseconds: 200_000_000)  // 0.2s
-        
+        await waitForStableOutputRoute()
+
         // safe restart
         do {
             try await performOnControllerQueue { [weak self] in
@@ -423,6 +424,36 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             debounceTimer = workItem
             controllerQueue.asyncAfter(deadline: .now() + safeDelay, execute: workItem)
         }
+    }
+
+    private func waitForStableOutputRoute(maxWait: TimeInterval = 2.0,
+                                          settleSamplesRequired: Int = 3,
+                                          pollInterval: TimeInterval = 0.15) async {
+        let start = Date()
+        let deadline = start.addingTimeInterval(maxWait)
+        var consecutiveMatches = 0
+        var lastDevice: UInt32 = 0
+        var hadDevice = false
+
+        while Date() < deadline {
+            let currentDevice = DeviceChangeMonitor.currentOutputDeviceID() ?? 0
+            if hadDevice && currentDevice == lastDevice && currentDevice != 0 {
+                consecutiveMatches += 1
+                if consecutiveMatches >= settleSamplesRequired {
+                    let elapsed = Date().timeIntervalSince(start)
+                    print("🔊 output route stable after \(String(format: "%.2f", elapsed))s")
+                    return
+                }
+            } else {
+                consecutiveMatches = 0
+                lastDevice = currentDevice
+                hadDevice = currentDevice != 0
+            }
+
+            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+        }
+
+        print("⚠️ output route stability check timed out after \(String(format: "%.2f", Date().timeIntervalSince(start)))s – proceeding with restart")
     }
     
     // MARK: - private implementation
