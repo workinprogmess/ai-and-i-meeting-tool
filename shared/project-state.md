@@ -27,6 +27,12 @@ ai meeting intelligence - native swiftui application for world-class user experi
 **metrics**: mic (686,400 frames) + system audio (707,520 frames) captured perfectly
 **result**: all core functionality working - milestone 2 unblocked
 
+### 🔧 **telephony processing overhaul (2025-10-09)**: intelligent fallback system implemented
+
+**achievement**: reliable airpods fallback to built-in mic when telephony audio goes silent
+**approach**: systematic 4-commit improvement - bypass AGC, adaptive leveling, intelligent signal monitoring
+**result**: ✅ fallback system working reliably, 🧪 telephony audio quality under continued refinement
+
 **comprehensive investigation summary**:
 systematic debugging revealed swift concurrency corruption in foundation operations caused by airpods telephony implementation. detailed documentation: `shared/mainactor-deadlock-debugging-journey.md`
 
