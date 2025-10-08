@@ -1221,8 +1221,10 @@ class MicRecorder: ObservableObject {
         }
 
         // apply agc if enabled (for built-in mic)
+        let isTelephonyInput = airPodsTelephonyModeActive || latestDeviceName.lowercased().contains("airpod")
+
         let processedBuffer: AVAudioPCMBuffer
-        if agcEnabled {
+        if agcEnabled && !isTelephonyInput {
             processedBuffer = applyAGC(to: buffer) ?? buffer
         } else {
             processedBuffer = buffer
