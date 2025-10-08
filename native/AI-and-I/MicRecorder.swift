@@ -1493,22 +1493,30 @@ class MicRecorder: ObservableObject {
     }
 
     private func updateTelephonySignalMonitor(rms: Float, peak: Float) {
-        guard airPodsTelephonyModeActive else {
+        let isAirPods = latestDeviceName.lowercased().contains("airpod")
+        if !isAirPods {
             telephonySilentBufferCount = 0
             telephonyFallbackActive = false
             return
         }
 
-        if peak < airPodsTelephonySilencePeakThreshold && rms < airPodsTelephonySilenceRmsThreshold {
+        let lowSignal = peak < airPodsTelephonySilencePeakThreshold && rms < airPodsTelephonySilenceRmsThreshold
+
+        if lowSignal {
             telephonySilentBufferCount += 1
-            if !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
-                telephonyFallbackActive = true
-                controllerQueue.async { [weak self] in
-                    self?.engageTelephonyFallback(reason: "airpods-silent")
-                }
-            }
         } else {
             telephonySilentBufferCount = 0
+        }
+
+        if lowSignal && !airPodsTelephonyModeActive {
+            activateAirPodsTelephonyMode(sampleRate: currentSampleRate > 0 ? currentSampleRate : airPodsTelephonyUpperBound, reason: "low-signal")
+        }
+
+        if lowSignal && !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
+            telephonyFallbackActive = true
+            controllerQueue.async { [weak self] in
+                self?.engageTelephonyFallback(reason: "airpods-silent")
+            }
         }
     }
 
