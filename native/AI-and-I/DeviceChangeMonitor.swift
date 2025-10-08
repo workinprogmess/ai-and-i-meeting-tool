@@ -27,6 +27,7 @@ class DeviceChangeMonitor: ObservableObject {
     private var propertyListenerAdded = false
     private var lastChangeTime = Date.distantPast
     private let debounceInterval: TimeInterval = 1.0  // 1 second debounce
+    private var lastKnownOutputDeviceID: AudioDeviceID = 0
     
     // MARK: - core audio property listener
     private var audioObjectPropertyListenerBlock: AudioObjectPropertyListenerBlock?
@@ -304,18 +305,38 @@ class DeviceChangeMonitor: ObservableObject {
         if newDevice != currentOutputDevice {
             print("🔊 switched from '\(currentOutputDevice)' to '\(newDevice)'")
             currentOutputDevice = newDevice
-        
+            lastKnownOutputDeviceID = DeviceChangeMonitor.currentOutputDeviceID() ?? 0
+
             // output changes might affect system audio capture
             onSystemDeviceChange?(reason)
         }
     }
     
     private func handleDeviceListChange() {
-        // device was added or removed
-        // check if it affects current defaults
+        let previousInput = currentInputDevice
+        let previousOutput = currentOutputDevice
+        let previousOutputID = lastKnownOutputDeviceID
+
         updateCurrentDevices()
 
-        // notify recorders to check their devices
+        let outputChanged = previousOutputID != lastKnownOutputDeviceID || currentOutputDevice != previousOutput
+        if outputChanged {
+            print("🔊 device list detected output route change: '\(previousOutput)' → '\(currentOutputDevice)'")
+            onSystemDeviceChange?("device list changed (output poll)")
+        } else {
+            if let currentID = DeviceChangeMonitor.currentOutputDeviceID(),
+               DeviceChangeMonitor.isAirPods(deviceID: currentID),
+               !previousOutput.lowercased().contains("airpod") {
+                print("🔊 device list inferred airpods activation without default output event")
+                onSystemDeviceChange?("device list changed (airpods inferred)")
+            }
+        }
+
+        if currentInputDevice != previousInput {
+            print("🎤 device list detected input update: '\(previousInput)' → '\(currentInputDevice)'")
+        }
+
+        // always notify mic recorder so it can validate state against the new device list
         onMicDeviceChange?("device list changed")
     }
     
@@ -324,6 +345,7 @@ class DeviceChangeMonitor: ObservableObject {
     private func updateCurrentDevices() {
         currentInputDevice = getCurrentInputDeviceName()
         currentOutputDevice = getCurrentOutputDeviceName()
+        lastKnownOutputDeviceID = DeviceChangeMonitor.currentOutputDeviceID() ?? 0
 
         if let rate = getCurrentInputSampleRate() {
             print("📱 current devices - input: \(currentInputDevice) (\(Int(rate))hz), output: \(currentOutputDevice)")
