@@ -147,8 +147,11 @@ do {
                 let duration = segment.endSessionTime - segment.startSessionTime
                 totalMicAudio += duration
                 
+                let isTelephony = segment.quality.lowercased() == "low" || segment.error?.contains("telephony") == true
+                let qualityLabel = isTelephony ? " [telephony]" : ""
+
                 print("  segment #\(index + 1):")
-                print("    device: \(segment.deviceName)")
+                print("    device: \(segment.deviceName)\(qualityLabel)")
                 print("    timing: \(String(format: "%.3f", segment.startSessionTime))s - \(String(format: "%.3f", segment.endSessionTime))s")
                 print("    duration: \(String(format: "%.3f", duration))s")
                 
@@ -185,7 +188,7 @@ do {
         
         // generate ffmpeg command for perfect mixing
         if !micSegments.isEmpty && !systemSegments.isEmpty {
-            print("\n🎬 generating ffmpeg command for perfect mixing...")
+            print("\n🎬 generating ffmpeg command for perfect mixing (with telephony enhancement)...")
             print("=" * 60)
 
             let micFilenames = micSegments.map { URL(fileURLWithPath: $0.filePath).lastPathComponent }
@@ -204,11 +207,25 @@ do {
 
             var filterParts: [String] = []
 
-            // microphone processing
+            // microphone processing with telephony enhancement
             for (index, segment) in micSegments.enumerated() {
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
-                let micBoost = isAirPods ? "4dB" : "6dB"
-                filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
+                let isTelephony = segment.quality.lowercased() == "low" || segment.error?.contains("telephony") == true
+
+                var micBoost: String
+                var filterChain = "[\(index)]aresample=48000"
+
+                if isTelephony {
+                    // telephony segment: gentle boost + bandwidth preservation
+                    micBoost = "8dB"  // extra boost for telephony compression
+                    filterChain += ",volume=\(micBoost),highpass=f=200,lowpass=f=3400"  // preserve telephony bandwidth
+                } else {
+                    // normal segment processing
+                    micBoost = isAirPods ? "4dB" : "6dB"
+                    filterChain += ",volume=\(micBoost)"
+                }
+
+                filterParts.append("\(filterChain)[m\(index)]")
             }
 
             if micSegments.count > 1 {
@@ -259,9 +276,23 @@ do {
 
             for (index, segment) in micSegments.enumerated() {
                 let isAirPods = segment.deviceName.lowercased().contains("airpods")
-                let micBoost = isAirPods ? "4dB" : "6dB"
-                let deviceType = isAirPods ? "airpods" : "built-in"
-                print("    [\(index)]aresample=48000,volume=\(micBoost)[m\(index)];  # \(deviceType) mic boost \\")
+                let isTelephony = segment.quality.lowercased() == "low" || segment.error?.contains("telephony") == true
+
+                var micBoost: String
+                var deviceType: String
+                var filterChain = "[\(index)]aresample=48000"
+
+                if isTelephony {
+                    micBoost = "8dB"
+                    deviceType = "telephony"
+                    filterChain += ",volume=\(micBoost),highpass=f=200,lowpass=f=3400"
+                } else {
+                    micBoost = isAirPods ? "4dB" : "6dB"
+                    deviceType = isAirPods ? "airpods" : "built-in"
+                    filterChain += ",volume=\(micBoost)"
+                }
+
+                print("    \(filterChain)[m\(index)];  # \(deviceType) mic boost \\")
             }
 
             if micSegments.count > 1 {
@@ -292,12 +323,20 @@ do {
             print("  -ar 48000 \\")
             print("  \(outputFile)")
 
-            print("\n✅ command generated successfully!")
+            let telephonyCount = micSegments.filter { $0.quality.lowercased() == "low" || $0.error?.contains("telephony") == true }.count
+            let enhancementNote = telephonyCount > 0 ? " (\(telephonyCount) telephony segments enhanced)" : ""
+            print("\n✅ command generated successfully!\(enhancementNote)")
 
             // show timing summary
             print("\n📊 mixing summary:")
             print("  mic segments: \(micSegments.count)")
             print("  devices used: \(Set(micSegments.map { $0.deviceName }).joined(separator: ", "))")
+
+            let telephonySegments = micSegments.filter { $0.quality.lowercased() == "low" || $0.error?.contains("telephony") == true }
+            if !telephonySegments.isEmpty {
+                print("  telephony segments: \(telephonySegments.count) (enhanced with 8dB boost + bandwidth filter)")
+            }
+
             print("  total mic audio: \(String(format: "%.1f", micSegments.reduce(0) { $0 + ($1.endSessionTime - $1.startSessionTime) }))s")
             print("  system audio: \(String(format: "%.1f", systemSegments.reduce(0) { $0 + ($1.endSessionTime - $1.startSessionTime) }))s")
 
@@ -403,12 +442,25 @@ func executeFFmpegMixing(
     // build filter complex
     var filterParts: [String] = []
 
-    // process mic segments with resampling
+    // process mic segments with resampling and telephony enhancement
     for (index, segment) in sortedMicSegments.enumerated() {
         let isAirPods = segment.deviceName.lowercased().contains("airpods")
-        let micBoost = isAirPods ? "4dB" : "6dB"
+        let isTelephony = segment.quality.lowercased() == "low" || segment.error?.contains("telephony") == true
 
-        filterParts.append("[\(index)]aresample=48000,volume=\(micBoost)[m\(index)]")
+        var micBoost: String
+        var filterChain = "[\(index)]aresample=48000"
+
+        if isTelephony {
+            // telephony segment: gentle boost + bandwidth preservation
+            micBoost = "8dB"  // extra boost for telephony compression
+            filterChain += ",volume=\(micBoost),highpass=f=200,lowpass=f=3400"  // preserve telephony bandwidth
+        } else {
+            // normal segment processing
+            micBoost = isAirPods ? "4dB" : "6dB"
+            filterChain += ",volume=\(micBoost)"
+        }
+
+        filterParts.append("\(filterChain)[m\(index)]")
     }
 
     // concatenate mic segments if multiple
