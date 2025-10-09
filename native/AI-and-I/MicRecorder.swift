@@ -1215,11 +1215,8 @@ class MicRecorder: ObservableObject {
 
         guard recordingEnabled else { return }
 
-        let signalMetrics = analyzeSignal(buffer)
-
         if latestDeviceName.lowercased().contains("airpod") {
             updateAirPodsTelephonyState(using: buffer)
-            updateTelephonySignalMonitor(rms: signalMetrics.rms, peak: signalMetrics.peak)
         } else {
             telephonySilentBufferCount = 0
             telephonyFallbackActive = false
@@ -1283,10 +1280,9 @@ class MicRecorder: ObservableObject {
             }
         }
 
-        let signalMetrics = analyzeSignal(bufferToWrite)
-
+        // single signal analysis on final converted buffer for efficiency and correctness
         if latestDeviceName.lowercased().contains("airpod") {
-            updateAirPodsTelephonyState(using: buffer)
+            let signalMetrics = analyzeSignal(bufferToWrite)
             updateTelephonySignalMonitor(rms: signalMetrics.rms, peak: signalMetrics.peak)
             bufferToWrite = applyTelephonyLeveling(bufferToWrite, measuredRMS: signalMetrics.rms)
         } else {
