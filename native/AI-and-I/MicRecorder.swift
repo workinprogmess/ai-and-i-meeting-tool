@@ -233,7 +233,9 @@ class MicRecorder: ObservableObject {
     private let telephonySilenceBufferThreshold = 24  // ~1s with 2048-frame buffers
     private let airPodsTelephonySilenceRmsThreshold: Float = 0.006
     private let airPodsTelephonySilencePeakThreshold: Float = 0.008
+    private let airPodsTelephonySpeechPeakThreshold: Float = 0.05
     private var telephonyFallbackActive = false
+    private var telephonySpeechDetected = false
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -277,6 +279,7 @@ class MicRecorder: ObservableObject {
         pendingAirPodsBuffers.removeAll(keepingCapacity: true)
         telephonySilentBufferCount = 0
         telephonyFallbackActive = false
+        telephonySpeechDetected = false
 
         // set state first
         state = .recording
@@ -321,6 +324,7 @@ class MicRecorder: ObservableObject {
         preferredOutputDeviceName = "unknown"
         telephonyFallbackActive = false
         telephonySilentBufferCount = 0
+        telephonySpeechDetected = false
     }
 
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
@@ -1211,8 +1215,9 @@ class MicRecorder: ObservableObject {
 
         guard recordingEnabled else { return }
 
+        let signalMetrics = analyzeSignal(buffer)
+
         if latestDeviceName.lowercased().contains("airpod") {
-            let signalMetrics = analyzeSignal(buffer)
             updateAirPodsTelephonyState(using: buffer)
             updateTelephonySignalMonitor(rms: signalMetrics.rms, peak: signalMetrics.peak)
         } else {
@@ -1278,8 +1283,16 @@ class MicRecorder: ObservableObject {
             }
         }
 
-        if airPodsTelephonyModeActive {
+        let signalMetrics = analyzeSignal(bufferToWrite)
+
+        if latestDeviceName.lowercased().contains("airpod") {
+            updateAirPodsTelephonyState(using: buffer)
+            updateTelephonySignalMonitor(rms: signalMetrics.rms, peak: signalMetrics.peak)
             bufferToWrite = applyTelephonyLeveling(bufferToWrite, measuredRMS: signalMetrics.rms)
+        } else {
+            telephonySilentBufferCount = 0
+            telephonyFallbackActive = false
+            telephonySpeechDetected = false
         }
 
         if pendingAirPodsVerification && airPodsVerificationMode == .normal {
@@ -1497,13 +1510,20 @@ class MicRecorder: ObservableObject {
         if !isAirPods {
             telephonySilentBufferCount = 0
             telephonyFallbackActive = false
+            telephonySpeechDetected = false
             return
+        }
+
+        if peak >= airPodsTelephonySpeechPeakThreshold {
+            telephonySpeechDetected = true
         }
 
         let lowSignal = peak < airPodsTelephonySilencePeakThreshold && rms < airPodsTelephonySilenceRmsThreshold
 
         if lowSignal {
-            telephonySilentBufferCount += 1
+            if telephonySpeechDetected {
+                telephonySilentBufferCount += 1
+            }
         } else {
             telephonySilentBufferCount = 0
         }
@@ -1512,7 +1532,7 @@ class MicRecorder: ObservableObject {
             activateAirPodsTelephonyMode(sampleRate: currentSampleRate > 0 ? currentSampleRate : airPodsTelephonyUpperBound, reason: "low-signal")
         }
 
-        if lowSignal && !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
+        if telephonySpeechDetected && lowSignal && !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
             telephonyFallbackActive = true
             controllerQueue.async { [weak self] in
                 self?.engageTelephonyFallback(reason: "airpods-silent")
@@ -1537,6 +1557,7 @@ class MicRecorder: ObservableObject {
         print("🚨 airpods telephony audio silent – switching to built-in mic")
         setErrorMessage("airpods mic quiet – capturing with mac mic")
         currentSegmentError = "airpods-mic-silent"
+        telephonySpeechDetected = false
         let success = DeviceChangeMonitor.setDefaultInputDevice(builtInID)
         if !success {
             print("⚠️ unable to switch default input to built-in mic during fallback")
