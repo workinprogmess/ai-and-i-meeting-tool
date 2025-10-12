@@ -457,20 +457,28 @@ class MeetingsListViewModel: ObservableObject {
     }
 
     private func transcribeWithProgress(audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
+        print("🔑 checking environment variables for transcription services...")
+        let env = ProcessInfo.processInfo.environment
+        print("   GEMINI_API_KEY: \(env["GEMINI_API_KEY"] != nil && !env["GEMINI_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
+        print("   DEEPGRAM_API_KEY: \(env["DEEPGRAM_API_KEY"] != nil && !env["DEEPGRAM_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
+        print("   ASSEMBLYAI_API_KEY: \(env["ASSEMBLYAI_API_KEY"] != nil && !env["ASSEMBLYAI_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
+
         // create services
         let serviceFactories: [(name: String, loader: () -> TranscriptionService?)] = [
             ("gemini", { GeminiTranscriptionService.createFromEnvironment() }),
             ("deepgram", { DeepgramTranscriptionService.createFromEnvironment() }),
             ("assembly", { AssemblyAITranscriptionService.createFromEnvironment() })
         ]
-        
+
         var configuredServices: [(name: String, service: TranscriptionService)] = []
         var unavailableServices: [String] = []
-        
+
         for entry in serviceFactories {
             if let service = entry.loader() {
+                print("✅ \(entry.name) service configured and available")
                 configuredServices.append((entry.name, service))
             } else {
+                print("❌ \(entry.name) service unavailable (api key missing or invalid)")
                 unavailableServices.append(entry.name)
             }
         }
