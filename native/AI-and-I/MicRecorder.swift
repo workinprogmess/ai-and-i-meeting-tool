@@ -124,6 +124,8 @@ class MicRecorder: ObservableObject {
     private var stallRecoveryInProgress = false
     private var stallRecoveryAttempts = 0
     private let stallRecoveryAttemptLimit = 3
+    private let stallSuppressionWarmupPadding: TimeInterval = 0.5
+    private let stallSuppressionRecoveryPadding: TimeInterval = 0.75
 
     enum RecorderError: Error, LocalizedError {
         case warmPreparationFailed(String)
@@ -236,6 +238,8 @@ class MicRecorder: ObservableObject {
     private let airPodsTelephonySpeechPeakThreshold: Float = 0.05
     private var telephonyFallbackActive = false
     private var telephonySpeechDetected = false
+    private var lastTelephonySpeechAt: Date?
+    private let telephonySpeechFreshnessWindow: TimeInterval = 1.5
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -280,6 +284,7 @@ class MicRecorder: ObservableObject {
         telephonySilentBufferCount = 0
         telephonyFallbackActive = false
         telephonySpeechDetected = false
+        lastTelephonySpeechAt = nil
 
         // set state first
         state = .recording
@@ -325,6 +330,7 @@ class MicRecorder: ObservableObject {
         telephonyFallbackActive = false
         telephonySilentBufferCount = 0
         telephonySpeechDetected = false
+        lastTelephonySpeechAt = nil
     }
 
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
@@ -960,7 +966,7 @@ class MicRecorder: ObservableObject {
 
         stallRecoveryAttempts = 0
         let warmupDurationSeconds = Double(warmupFrames) / recordingFormat.sampleRate
-        extendStallSuppression(by: warmupDurationSeconds + stallDetectionWindow, reason: "segment-warmup")
+        extendStallSuppression(by: max(stallSuppressionWarmupPadding, warmupDurationSeconds), reason: "segment-warmup")
 
         if let defaultID = defaultInputInfo?.id {
             lastKnownDeviceAudioID = defaultID
@@ -1129,7 +1135,7 @@ class MicRecorder: ObservableObject {
 
         let reason = "stall-recovery"
 
-        extendStallSuppression(by: idleDuration + Double(settleDelayNanoseconds) / 1_000_000_000 + stallDetectionWindow, reason: "stall-recovery")
+        extendStallSuppression(by: idleDuration + Double(settleDelayNanoseconds) / 1_000_000_000 + stallSuppressionRecoveryPadding, reason: "stall-recovery")
 
         let releaseLock = switchLock?.acquire(for: "mic", reason: reason)
         defer { releaseLock?() }
@@ -1289,6 +1295,7 @@ class MicRecorder: ObservableObject {
             telephonySilentBufferCount = 0
             telephonyFallbackActive = false
             telephonySpeechDetected = false
+            lastTelephonySpeechAt = nil
         }
 
         if pendingAirPodsVerification && airPodsVerificationMode == .normal {
@@ -1507,11 +1514,13 @@ class MicRecorder: ObservableObject {
             telephonySilentBufferCount = 0
             telephonyFallbackActive = false
             telephonySpeechDetected = false
+            lastTelephonySpeechAt = nil
             return
         }
 
         if peak >= airPodsTelephonySpeechPeakThreshold {
             telephonySpeechDetected = true
+            lastTelephonySpeechAt = Date()
         }
 
         let lowSignal = peak < airPodsTelephonySilencePeakThreshold && rms < airPodsTelephonySilenceRmsThreshold
@@ -1525,10 +1534,17 @@ class MicRecorder: ObservableObject {
         }
 
         if lowSignal && !airPodsTelephonyModeActive {
-            activateAirPodsTelephonyMode(sampleRate: currentSampleRate > 0 ? currentSampleRate : airPodsTelephonyUpperBound, reason: "low-signal")
+            let negotiatedRate = currentSampleRate
+            if negotiatedRate > 0 && negotiatedRate >= 44_100 {
+                // format still looks like wideband – avoid forcing telephony mode purely on a quiet buffer
+            } else {
+                activateAirPodsTelephonyMode(sampleRate: negotiatedRate > 0 ? negotiatedRate : airPodsTelephonyUpperBound, reason: "low-signal")
+            }
         }
 
-        if telephonySpeechDetected && lowSignal && !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
+        let speechIsFresh = lastTelephonySpeechAt.map { Date().timeIntervalSince($0) <= telephonySpeechFreshnessWindow } ?? false
+
+        if airPodsTelephonyModeActive && speechIsFresh && telephonySpeechDetected && lowSignal && !telephonyFallbackActive && telephonySilentBufferCount >= telephonySilenceBufferThreshold {
             telephonyFallbackActive = true
             controllerQueue.async { [weak self] in
                 self?.engageTelephonyFallback(reason: "airpods-silent")
@@ -1561,6 +1577,7 @@ class MicRecorder: ObservableObject {
 
         airPodsTelephonyModeActive = false
         telephonySilentBufferCount = 0
+        lastTelephonySpeechAt = nil
     }
 
     @discardableResult
