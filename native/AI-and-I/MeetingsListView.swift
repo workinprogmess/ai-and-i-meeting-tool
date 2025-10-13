@@ -458,6 +458,8 @@ class MeetingsListViewModel: ObservableObject {
 
     private func transcribeWithProgress(audioURL: URL, sessionDir: URL, sessionTimestamp: Int) async {
         print("🔑 checking environment variables for transcription services...")
+        let loaderTimestamp = ISO8601DateFormatter().string(from: Date())
+        print("🕒 transcription loader invoked at \(loaderTimestamp)")
         let env = ProcessInfo.processInfo.environment
         print("   GEMINI_API_KEY: \(env["GEMINI_API_KEY"] != nil && !env["GEMINI_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
         print("   DEEPGRAM_API_KEY: \(env["DEEPGRAM_API_KEY"] != nil && !env["DEEPGRAM_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
