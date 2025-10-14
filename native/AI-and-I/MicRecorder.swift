@@ -1752,43 +1752,23 @@ class MicRecorder: ObservableObject {
     }
 
     private func setupWarmEngineIfNeeded(startImmediately: Bool = true) throws {
-        let execute = {
-            print("🔥 mic setupWarmEngineIfNeeded execute on thread: \(Thread.isMainThread ? "main" : "background"), startImmediately=\(startImmediately)")
-            if let engine = self.warmEngine {
-                if startImmediately, !engine.isRunning {
-                    engine.prepare()
-                    try engine.start()
-                }
-                return
-            }
+        print("🔥 mic setupWarmEngineIfNeeded execute on thread: \(Thread.isMainThread ? "main" : "background"), startImmediately=\(startImmediately)")
 
-            let engine = AVAudioEngine()
-            if startImmediately {
+        if let engine = self.warmEngine {
+            if startImmediately, !engine.isRunning {
                 engine.prepare()
                 try engine.start()
             }
-            self.warmEngine = engine
-            print(startImmediately ? "🔥 mic warm pipeline ready" : "🔥 mic warm engine primed (will start on first segment)")
+            return
         }
 
-        if Thread.isMainThread {
-            try execute()
-        } else {
-            var capturedError: Error?
-            let semaphore = DispatchSemaphore(value: 0)
-            DispatchQueue.main.async {
-                do {
-                    try execute()
-                } catch {
-                    capturedError = error
-                }
-                semaphore.signal()
-            }
-            semaphore.wait()
-            if let error = capturedError {
-                throw error
-            }
+        let engine = AVAudioEngine()
+        if startImmediately {
+            engine.prepare()
+            try engine.start()
         }
+        self.warmEngine = engine
+        print(startImmediately ? "🔥 mic warm pipeline ready" : "🔥 mic warm engine primed (will start on first segment)")
     }
 
     private func setupWarmEngineAsync(startImmediately: Bool) async throws {
