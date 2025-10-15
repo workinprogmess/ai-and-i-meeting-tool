@@ -212,6 +212,7 @@ class MicRecorder: ObservableObject {
     private weak var performanceMonitor: PerformanceMonitor?
     private var switchLock: PipelineSwitchLock?
     private var lastKnownDeviceAudioID: AudioDeviceID = 0
+    private var lastKnownDeviceName: String = ""
     private var lastKnownSampleRate: Double = 0
     
     private enum AirPodsVerificationMode {
@@ -276,6 +277,7 @@ class MicRecorder: ObservableObject {
         stallSuppressionUntil = .distantPast
         lastSuppressedStallLog = .distantPast
         lastKnownDeviceAudioID = 0
+        lastKnownDeviceName = ""
         lastKnownSampleRate = 0
         readinessBackoffTier = 0
         airPodsTelephonyModeActive = false
@@ -693,6 +695,12 @@ class MicRecorder: ObservableObject {
             return true
         }
 
+        if let currentName = DeviceChangeMonitor.deviceName(for: info.id),
+           !lastKnownDeviceName.isEmpty,
+           currentName.caseInsensitiveCompare(lastKnownDeviceName) != .orderedSame {
+            return true
+        }
+
         if lastKnownSampleRate == 0 {
             return true
         }
@@ -794,10 +802,9 @@ class MicRecorder: ObservableObject {
             lowQualityAirPodsAttempts = 0
             if isAirPodsDevice {
                 if airPodsTelephonyModeActive {
-                    print("🎧 airpods still flagged as telephony – keeping bypass active")
-                } else {
-                    prepareAirPodsVerification()
+                    deactivateAirPodsTelephonyMode(sampleRate: negotiatedSampleRate, reason: "segment-high-quality")
                 }
+                prepareAirPodsVerification()
             } else {
                 clearAirPodsVerification()
             }
@@ -970,8 +977,10 @@ class MicRecorder: ObservableObject {
 
         if let defaultID = defaultInputInfo?.id {
             lastKnownDeviceAudioID = defaultID
+            lastKnownDeviceName = DeviceChangeMonitor.deviceName(for: defaultID) ?? deviceName
         } else {
             lastKnownDeviceAudioID = currentDeviceAudioID
+            lastKnownDeviceName = deviceName
         }
         lastKnownSampleRate = currentSampleRate
 
@@ -1447,6 +1456,7 @@ class MicRecorder: ObservableObject {
                     self.activateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
                 } else {
                     self.currentSampleRate = sampleRate
+                    self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
                 }
             } else {
                 self.deactivateAirPodsTelephonyMode(sampleRate: sampleRate, reason: reason)
