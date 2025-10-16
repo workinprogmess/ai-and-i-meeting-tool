@@ -191,7 +191,7 @@ class MicRecorder: ObservableObject {
     private let airPodsRecoveryRetryLimit: Int = 1
     private let airPodsRecoveryDelay: TimeInterval = 1.5
     private let airPodsStabilityWindow: TimeInterval = 0.4
-    private let airPodsRMSValidationThreshold: Float = 0.002
+    private let airPodsRMSValidationThreshold: Float = 0.0004
     private let airPodsRMSValidationWindowFrames: AVAudioFrameCount = 4_800  // 0.1s at 48khz
     private let airPodsRMSValidationWindowCount: Int = 10
     private let minimumSegmentDuration: TimeInterval = 20.0
@@ -1658,6 +1658,11 @@ class MicRecorder: ObservableObject {
     private func evaluateAirPodsBuffer(_ buffer: AVAudioPCMBuffer) -> AirPodsVerificationResult {
         guard pendingAirPodsVerification else { return .confirmed }
         guard let floatData = buffer.floatChannelData else { return .pending }
+
+        // Wideband AirPods streams (>= 44.1 kHz) should pass immediately; they're already clean.
+        if currentSampleRate >= 44_100 && !airPodsTelephonyModeActive {
+            return .confirmed
+        }
 
         let copy = buffer.deepCopy() ?? buffer
         pendingAirPodsBuffers.append(copy)
