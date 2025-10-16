@@ -461,9 +461,17 @@ class MeetingsListViewModel: ObservableObject {
         let loaderTimestamp = ISO8601DateFormatter().string(from: Date())
         print("🕒 transcription loader invoked at \(loaderTimestamp)")
         let env = ProcessInfo.processInfo.environment
-        print("   GEMINI_API_KEY: \(env["GEMINI_API_KEY"] != nil && !env["GEMINI_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
-        print("   DEEPGRAM_API_KEY: \(env["DEEPGRAM_API_KEY"] != nil && !env["DEEPGRAM_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
-        print("   ASSEMBLYAI_API_KEY: \(env["ASSEMBLYAI_API_KEY"] != nil && !env["ASSEMBLYAI_API_KEY"]!.isEmpty ? "✅ present" : "❌ missing")")
+
+        func describeEnv(_ key: String) -> String {
+            guard let value = env[key], !value.isEmpty else { return "❌ missing" }
+            let prefix = value.prefix(4)
+            let suffix = value.suffix(4)
+            return "✅ present (\(prefix)...\(suffix), len=\(value.count))"
+        }
+
+        print("   GEMINI_API_KEY: \(describeEnv("GEMINI_API_KEY"))")
+        print("   DEEPGRAM_API_KEY: \(describeEnv("DEEPGRAM_API_KEY"))")
+        print("   ASSEMBLYAI_API_KEY: \(describeEnv("ASSEMBLYAI_API_KEY"))")
 
         // create services
         let serviceFactories: [(name: String, loader: () -> TranscriptionService?)] = [
