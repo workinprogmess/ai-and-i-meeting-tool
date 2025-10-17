@@ -241,6 +241,8 @@ class MicRecorder: ObservableObject {
     private var telephonySpeechDetected = false
     private var lastTelephonySpeechAt: Date?
     private let telephonySpeechFreshnessWindow: TimeInterval = 1.5
+    private let telephonyMaxDuration: TimeInterval = 8.0
+    private var telephonyActivatedAt: Date?
     // MARK: - public interface
     
     /// starts a new recording session with shared session id
@@ -1481,6 +1483,7 @@ class MicRecorder: ObservableObject {
         pendingAirPodsBufferSum = 0
         pendingAirPodsSampleCount = 0
         pendingAirPodsWindowCount = 0
+        telephonyActivatedAt = Date()
 
         if pendingAirPodsBuffers.isEmpty == false {
             let flushed = flushPendingAirPodsBuffers()
@@ -1503,6 +1506,7 @@ class MicRecorder: ObservableObject {
         }
         currentGain = 1.0
         agcEnabled = latestDeviceName.lowercased().contains("mac")
+        telephonyActivatedAt = nil
         if sampleRate >= 44_100 {
             print("🎧 airpods returned to high-quality mode at \(Int(sampleRate))hz (reason: \(reason))")
         }
@@ -1541,6 +1545,17 @@ class MicRecorder: ObservableObject {
             }
         } else {
             telephonySilentBufferCount = 0
+        }
+
+        if airPodsTelephonyModeActive,
+           let activatedAt = telephonyActivatedAt,
+           !telephonyFallbackActive,
+           Date().timeIntervalSince(activatedAt) >= telephonyMaxDuration {
+            print("⏱️ telephony mode exceeded \(telephonyMaxDuration)s – requesting fallback")
+            telephonyFallbackActive = true
+            controllerQueue.async { [weak self] in
+                self?.engageTelephonyFallback(reason: "telephony-duration")
+            }
         }
 
         if lowSignal && !airPodsTelephonyModeActive {
@@ -1588,6 +1603,7 @@ class MicRecorder: ObservableObject {
         airPodsTelephonyModeActive = false
         telephonySilentBufferCount = 0
         lastTelephonySpeechAt = nil
+        telephonyActivatedAt = nil
     }
 
     @discardableResult
