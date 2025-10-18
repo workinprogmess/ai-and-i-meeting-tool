@@ -14,10 +14,10 @@ ai meeting intelligence - native swiftui application for world-class user experi
 
 ### current implementation status:
 - ✅ milestone 1 foundation still holds (hot standby architecture, baseline metrics, core views)
-- 🔄 device switching + mixed audio: warm pipeline architecture implemented (2025-09-26) but oscillation issues require gentle stability approach
-- ⚠️ mixing pipeline: `mix-audio.swift` works correctly but audio inputs corrupted by aggressive switching
+- ✅ device switching + mixed audio: warm pipeline architecture hardened (2025-10-11) with gentle stability + telephony fallback
+- ✅ mixing pipeline: `mix-audio.swift` operating on clean inputs post-fallback fixes
 - 🔄 launch + recording start latency: warm pipelines implemented (2025-09-26) to move processing off main actor, needs performance validation
-- ✅ mp3 conversion + multi-service transcription exist, but error handling/retries need upgrades and confidence scores are not surfaced yet
+- ✅ mp3 conversion + multi-service transcription exist; keys now managed via per-user scheme and auto-run after each mix
 - ✅ japanese design system largely implemented; polish pending around action tray (hide unfinished share/export/correct)
 - 🛠 dev helper script `native/Scripts/load_transcription_env.sh` now loads transcription keys from `~/.config/ai-and-i/env` so run-scheme env vars stay clean while cli tools keep working
 
@@ -27,11 +27,11 @@ ai meeting intelligence - native swiftui application for world-class user experi
 **metrics**: mic (686,400 frames) + system audio (707,520 frames) captured perfectly
 **result**: all core functionality working - milestone 2 unblocked
 
-### 🔧 **telephony processing overhaul (2025-10-09)**: intelligent fallback system implemented
+### 🔧 **telephony processing overhaul (2025-10-09 → 2025-10-11)**: intelligent fallback system implemented
 
-**achievement**: reliable airpods fallback to built-in mic when telephony audio goes silent
-**approach**: systematic 4-commit improvement - bypass AGC, adaptive leveling, intelligent signal monitoring
-**result**: ✅ fallback system working reliably, 🧪 telephony audio quality under continued refinement
+**achievement**: reliable AirPods fallback to built-in mic when telephony audio goes silent; wideband sessions stay stable after route churn
+**approach**: systematic 4-commit improvement - bypass AGC, adaptive leveling, intelligent signal monitoring, plus telephony timeout + pinning refinements
+**result**: ✅ fallback system working reliably, ✅ multi-minute AirPods recordings verified with automatic transcription
 
 **comprehensive investigation summary**:
 systematic debugging revealed swift concurrency corruption in foundation operations caused by airpods telephony implementation. detailed documentation: `shared/mainactor-deadlock-debugging-journey.md`
