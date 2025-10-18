@@ -14,13 +14,18 @@
 **current status**:
 - ✅ **fallback system reliable**: automatic switch to built-in mic when airpods go silent
 - ✅ telephony processing improvements implemented (AGC bypass, adaptive leveling, signal monitoring)
-- 🧪 **telephony audio quality under testing**: improvements made but still evaluating natural sound quality
+- ✅ telephony audio quality verified across 5–6 minute AirPods sessions with live fallback/recovery
 - ✅ comprehensive 4-commit systematic approach for telephony handling
 
 **technical approach**: accept telephony compression, apply minimal enhancement, fall back when needed
 **working well**: built-in mic fallback provides reliable capture when airpods fail
 
-**status**: fallback system proven reliable, continuing to refine airpods telephony audio quality
+**status**: fallback system proven reliable; AirPods segments stay wideband after route churn and transcription now runs automatically
+
+**trail**:
+- 2025-10-09: initial fallback stability, AGC bypass, and telephony leveler in place
+- 2025-10-10: resolved verification stalls, added speech freshness + telephony timeout safeguards
+- 2025-10-11: tuned route pinning for AirPods removal, confirmed 5m+ sessions with seamless transcription
 
 ## item 5/6 breakdown
 - [x] warm prep inside `MicRecorder` using reusable engine
@@ -33,7 +38,7 @@
   - ✅ **telephony processing improvements**: bypass AGC, intelligent leveling, automatic activation + reliable fallback to built-in mic
   - ✅ ensure stall suppression and segment stitching behave with telephony segments (no silent gaps; converter verified with real AirPods capture)
   - ✅ keep all mic segments at 48kHz mono PCM and stitch with silence insertion or 20ms crossfade when timelines overlap
-  - [ ] verify long-session stability with new telephony handling (pending real-world testing)
+  - [x] verify long-session stability with new telephony handling (real-world 5–6 minute AirPods sessions, transcription enabled)
 - [ ] warm prep inside `SystemAudioRecorder` with retries and cached SCContentFilter
   - restart SCStream cleanly on output device changes (AirPods on/off) so system segments match mic segments when routes shift
   - validate route change rebuilds eliminate `_SCStream … Dropping frame` / `-10877` spam in long sessions
