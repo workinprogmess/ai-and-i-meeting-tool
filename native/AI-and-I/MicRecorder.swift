@@ -408,14 +408,28 @@ class MicRecorder: ObservableObject {
 
         // pin when we cross threshold within 10 seconds
         if significantRouteChangeTimes.count >= pinnedSwitchThreshold {
-            pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
-            pinnedActivations += 1
-            routeChangeTimestamps.removeAll()
-            significantRouteChangeTimes.removeAll()
-            print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
-            setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
-            extendStallSuppression(until: pinnedUntil ?? now, reason: "pinned")
-            return
+            let currentIsAirPods = currentDefaultDeviceID != 0 && DeviceChangeMonitor.isAirPods(deviceID: currentDefaultDeviceID)
+            let previousWasAirPods: Bool
+            if lastKnownDeviceAudioID != 0 {
+                previousWasAirPods = DeviceChangeMonitor.isAirPods(deviceID: lastKnownDeviceAudioID)
+            } else {
+                previousWasAirPods = latestDeviceName.lowercased().contains("airpod")
+            }
+
+            if !currentIsAirPods && previousWasAirPods {
+                print("🧷 route stabilized on non-airpods device – skipping pin to allow immediate fallback")
+                routeChangeTimestamps.removeAll()
+                significantRouteChangeTimes.removeAll()
+            } else {
+                pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
+                pinnedActivations += 1
+                routeChangeTimestamps.removeAll()
+                significantRouteChangeTimes.removeAll()
+                print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
+                setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
+                extendStallSuppression(until: pinnedUntil ?? now, reason: "pinned")
+                return
+            }
         }
 
         pendingSwitchReason = reason
