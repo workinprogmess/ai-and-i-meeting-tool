@@ -8,6 +8,7 @@
 
 import Foundation
 import ScreenCaptureKit
+import CoreGraphics
 @preconcurrency import AVFoundation
 
 /// manages system audio recording with segment-based approach
@@ -23,6 +24,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private var filter: SCContentFilter?
     private var preparedFilter: SCContentFilter?
     private var preparedDisplay: SCDisplay?
+    private var preparedDisplayID: CGDirectDisplayID?
     private let warmRetryLimit = 3
     private let warmRetryDelayNanoseconds: UInt64 = 300_000_000
 
@@ -128,7 +130,19 @@ class SystemAudioRecorder: NSObject, ObservableObject {
 
     private func prepareWarmPipelineIfNeeded() async throws {
         print("🔥 system prepareWarmPipelineIfNeeded invoked (thread: \(Thread.isMainThread ? "main" : "background"))")
-        if preparedFilter != nil { return }
+
+        if preparedFilter != nil {
+            if let cachedDisplayID = preparedDisplayID,
+               let currentDisplayID = try? await currentPrimaryDisplayID(),
+               cachedDisplayID == currentDisplayID {
+                return
+            }
+
+            print("ℹ️ system warm cache invalidated – rebuilding filter for updated display")
+            preparedFilter = nil
+            preparedDisplay = nil
+            preparedDisplayID = nil
+        }
         var attempt = 0
         var lastError: Error?
         while attempt < warmRetryLimit {
@@ -154,6 +168,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             throw RecorderError.warmPreparationFailed("no display found")
         }
         preparedDisplay = display
+        preparedDisplayID = display.displayID
         let excludedApps = content.applications.filter { app in
             app.applicationName.lowercased().contains("ai&i") ||
             app.applicationName.lowercased().contains("ai-and-i")
@@ -161,6 +176,11 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         return SCContentFilter(display: display,
                                excludingApplications: excludedApps,
                                exceptingWindows: [])
+    }
+
+    private func currentPrimaryDisplayID() async throws -> CGDirectDisplayID? {
+        let content = try await fetchShareableContentOnMain()
+        return content.displays.first?.displayID
     }
 
     private func resolvedContentFilter() async throws -> SCContentFilter {
@@ -328,6 +348,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     func shutdownWarmPipeline() {
         preparedFilter = nil
         preparedDisplay = nil
+        preparedDisplayID = nil
     }
 
     func attachSwitchLock(_ lock: PipelineSwitchLock?) {
@@ -557,6 +578,16 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             }
         }
         
+        if let activeStream = stream, let output = streamOutput {
+            await MainActor.run {
+                do {
+                    try activeStream.removeStreamOutput(output, type: .audio)
+                } catch {
+                    print("⚠️ failed to detach system audio output: \(error)")
+                }
+            }
+        }
+        
         // close file
         audioFile = nil
         
@@ -564,7 +595,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         stream = nil
         streamOutput = nil
         filter = nil
-        preparedFilter = nil
+        // retain preparedFilter for warm reuse
         
         // save segment metadata
         let metadata = AudioSegmentMetadata(
@@ -583,6 +614,11 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         segmentQueue.sync {
             segmentMetadata.append(metadata)
+        }
+        
+        Task { [weak self] in
+            guard let self else { return }
+            try? await self.prepareWarmPipelineIfNeeded()
         }
         
         print("📊 segment #\(segmentNumber): \(String(format: "%.1f", segmentEndTime - segmentStartTime))s, \(framesCaptured) frames")
