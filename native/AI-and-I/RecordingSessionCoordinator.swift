@@ -20,6 +20,11 @@ struct RecordingDebugOptions {
     var simulateTelephonyMode = false
     var logLifecycleTransitions = false
     var disableWarmShutdown = false
+    var autoStartDeviceMonitor = true
+    var autoWarmOnLaunch = true
+    var autoWarmOnResume = true
+    var autoPauseOnBackground = true
+    var autoWarmAfterStop = true
 }
 
 actor RecordingSessionCoordinator {
@@ -44,6 +49,8 @@ actor RecordingSessionCoordinator {
         case warmPrepRequested
         case warmPrepCompleted
         case warmPrepFailed
+        case warmPipelineShutdown
+        case warmPipelineResume
         case sessionStartRequested
         case sessionStarted
         case sessionStartFailed
@@ -87,6 +94,7 @@ actor RecordingSessionCoordinator {
                 try await systemRecorder.prepareWarmPipeline()
             }
             emitTelemetry(.warmPrepCompleted, metadata: ["pipeline": pipelineName])
+            emitTelemetry(.warmPipelineResume, metadata: ["pipeline": pipelineName])
         } catch {
             let pipelineName = kind.rawValue
             print("⚠️ warm pipeline preparation warning (\(pipelineName)): \(error)")
@@ -100,14 +108,25 @@ actor RecordingSessionCoordinator {
         }
     }
 
-    func preparePipelinesIfNeeded() async {
+    private func shutdownPipeline(kind: PipelineKind) {
+        let pipelineName = kind.rawValue
+        switch kind {
+        case .mic:
+            micRecorder.shutdownWarmPipeline()
+        case .system:
+            systemRecorder.shutdownWarmPipeline()
+        }
+        emitTelemetry(.warmPipelineShutdown, metadata: ["pipeline": pipelineName])
+    }
+
+    func preparePipelinesIfNeeded(trigger: String = "manual") async {
         guard !isLaunchingSession, currentContext == nil else {
             if debugOptions.logLifecycleTransitions {
                 print("⚙️ skipping warm prep – session launch in progress or active")
             }
             return
         }
-        emitTelemetry(.warmPrepRequested)
+        emitTelemetry(.warmPrepRequested, metadata: ["trigger": trigger])
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in
@@ -118,12 +137,24 @@ actor RecordingSessionCoordinator {
             }
         }
 
-        emitTelemetry(.warmPrepCompleted)
+        emitTelemetry(.warmPrepCompleted, metadata: ["trigger": trigger])
     }
 
     @discardableResult
     func startSession() async throws -> RecordingSessionContext {
-        await preparePipelinesIfNeeded()
+        await MainActor.run {
+            if debugOptions.autoStartDeviceMonitor, !deviceMonitor.isMonitoring {
+                deviceMonitor.startMonitoring()
+            } else if debugOptions.logLifecycleTransitions, !debugOptions.autoStartDeviceMonitor {
+                print("⚙️ skipping device monitor auto-start – debug option disabled")
+            }
+        }
+
+        if debugOptions.autoWarmOnLaunch {
+            await preparePipelinesIfNeeded(trigger: "session-start")
+        } else if debugOptions.logLifecycleTransitions {
+            print("⚙️ skipping warm prep on session start – autoWarmOnLaunch disabled")
+        }
         emitTelemetry(.sessionStartRequested)
         print("🎛️ coordinator: preparing session context...")
         print("🎛️ coordinator: creating session context")
@@ -151,6 +182,7 @@ actor RecordingSessionCoordinator {
 
             if debugOptions.simulateTelephonyMode {
                 emitTelemetry(.debugToggleActive, metadata: ["toggle": "simulateTelephonyMode"])
+                micRecorder.handleDeviceChange(reason: "debug-telephony")
             }
 
             recordTelemetryAsync(.sessionStarted, metadata: ["context": context.id])
@@ -182,7 +214,12 @@ actor RecordingSessionCoordinator {
         if debugOptions.disableWarmShutdown {
             emitTelemetry(.warmShutdownSkipped)
         } else {
-            await preparePipelinesIfNeeded()
+            await pauseWarmPipelines(trigger: "session-stop", force: true)
+            if debugOptions.autoWarmAfterStop {
+                await preparePipelinesIfNeeded(trigger: "post-stop")
+            } else if debugOptions.logLifecycleTransitions {
+                print("⚙️ skipping post-stop warm prep – autoWarmAfterStop disabled")
+            }
         }
         emitTelemetry(.sessionStopped)
     }
@@ -206,7 +243,7 @@ actor RecordingSessionCoordinator {
         await handleDeviceChange(reason: reason)
     }
 
-    private func pauseWarmPipelines() async {
+    private func pauseWarmPipelines(trigger: String = "manual", force: Bool = false) async {
         guard !isLaunchingSession else {
             if debugOptions.logLifecycleTransitions {
                 print("⚙️ skipping warm pipeline pause – launch in progress")
@@ -221,9 +258,15 @@ actor RecordingSessionCoordinator {
             }
             return
         }
-        micRecorder.shutdownWarmPipeline()
-        systemRecorder.shutdownWarmPipeline()
-        emitTelemetry(.warmPipelinesPaused)
+        if !force && !debugOptions.autoPauseOnBackground {
+            if debugOptions.logLifecycleTransitions {
+                print("⚙️ skipping warm pipeline pause for trigger \(trigger) – autoPauseOnBackground disabled")
+            }
+            return
+        }
+        shutdownPipeline(kind: .mic)
+        shutdownPipeline(kind: .system)
+        emitTelemetry(.warmPipelinesPaused, metadata: ["trigger": trigger])
     }
 
     private func setupLifecycleObservers() {
@@ -232,14 +275,18 @@ actor RecordingSessionCoordinator {
         observers.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { [weak self] in
                 guard let self else { return }
-                await self.pauseWarmPipelines()
+                await self.pauseWarmPipelines(trigger: "app-background")
             }
         })
 
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { [weak self] in
                 guard let self else { return }
-                await self.preparePipelinesIfNeeded()
+                if self.debugOptions.autoWarmOnResume {
+                    await self.preparePipelinesIfNeeded(trigger: "app-foreground")
+                } else if self.debugOptions.logLifecycleTransitions {
+                    print("⚙️ skipping warm prep on resume – autoWarmOnResume disabled")
+                }
             }
         })
 #endif
