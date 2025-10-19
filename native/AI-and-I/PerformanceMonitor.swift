@@ -59,6 +59,8 @@ class PerformanceMonitor: ObservableObject {
     @Published var recentLaunchTimes: [TimeInterval] = []
     @Published var recentRecordingLatencies: [TimeInterval] = []
     @Published var isRecording = false
+    @Published var warmPipelineStates: [String: String] = ["mic": "unknown", "system": "unknown"]
+    @Published var lastWarmPrepTrigger: String = "manual"
     
     // MARK: - Private Properties
     private var measurements: [String: [TimeInterval]] = [:]
@@ -210,6 +212,27 @@ extension PerformanceMonitor {
 
             if self.recordingTelemetry.count > self.maxHistoryCount {
                 self.recordingTelemetry.removeFirst()
+            }
+
+            if let trigger = metadata["trigger"] {
+                self.lastWarmPrepTrigger = trigger
+            }
+
+            if let pipeline = metadata["pipeline"] {
+                switch event {
+                case "warmPrepRequested":
+                    self.warmPipelineStates[pipeline] = "warming"
+                case "warmPrepCompleted":
+                    self.warmPipelineStates[pipeline] = "warm"
+                case "warmPrepFailed":
+                    self.warmPipelineStates[pipeline] = "failed"
+                case "warmPipelineShutdown":
+                    self.warmPipelineStates[pipeline] = "shutdown"
+                case "warmPipelineResume":
+                    self.warmPipelineStates[pipeline] = "ready"
+                default:
+                    break
+                }
             }
 
             if metadata.isEmpty {
