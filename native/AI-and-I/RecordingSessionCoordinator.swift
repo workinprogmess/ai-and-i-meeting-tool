@@ -29,6 +29,11 @@ actor RecordingSessionCoordinator {
     private var performanceMonitor: PerformanceMonitor?
     private let switchLock = PipelineSwitchLock()
 
+    private enum PipelineKind: String {
+        case mic
+        case system
+    }
+
     private(set) var currentContext: RecordingSessionContext?
     var debugOptions = RecordingDebugOptions()
     private var isLaunchingSession = false
@@ -59,8 +64,9 @@ actor RecordingSessionCoordinator {
         self.performanceMonitor = performanceMonitor
         self.micRecorder.attachSwitchLock(switchLock)
         self.systemRecorder.attachSwitchLock(switchLock)
-        // TODO: lifecycle observers temporarily disabled while debugging startup deadlock
-        //setupLifecycleObservers()
+#if canImport(AppKit)
+        setupLifecycleObservers()
+#endif
     }
 
     deinit {
@@ -68,6 +74,30 @@ actor RecordingSessionCoordinator {
             NotificationCenter.default.removeObserver(observer)
         }
         observers.removeAll()
+    }
+
+    private func preparePipeline(kind: PipelineKind) async {
+        do {
+            let pipelineName = kind.rawValue
+            emitTelemetry(.warmPrepRequested, metadata: ["pipeline": pipelineName])
+            switch kind {
+            case .mic:
+                try await micRecorder.prepareWarmPipeline()
+            case .system:
+                try await systemRecorder.prepareWarmPipeline()
+            }
+            emitTelemetry(.warmPrepCompleted, metadata: ["pipeline": pipelineName])
+        } catch {
+            let pipelineName = kind.rawValue
+            print("⚠️ warm pipeline preparation warning (\(pipelineName)): \(error)")
+            emitTelemetry(
+                .warmPrepFailed,
+                metadata: [
+                    "pipeline": pipelineName,
+                    "error": error.localizedDescription
+                ]
+            )
+        }
     }
 
     func preparePipelinesIfNeeded() async {
@@ -78,18 +108,22 @@ actor RecordingSessionCoordinator {
             return
         }
         emitTelemetry(.warmPrepRequested)
-        do {
-            try await micRecorder.prepareWarmPipeline()
-            try await systemRecorder.prepareWarmPipeline()
-            emitTelemetry(.warmPrepCompleted)
-        } catch {
-            print("⚠️ warm pipeline preparation warning: \(error)")
-            emitTelemetry(.warmPrepFailed, metadata: ["error": error.localizedDescription])
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in
+                await self?.preparePipeline(kind: .mic)
+            }
+            group.addTask { [weak self] in
+                await self?.preparePipeline(kind: .system)
+            }
         }
+
+        emitTelemetry(.warmPrepCompleted)
     }
 
     @discardableResult
     func startSession() async throws -> RecordingSessionContext {
+        await preparePipelinesIfNeeded()
         emitTelemetry(.sessionStartRequested)
         print("🎛️ coordinator: preparing session context...")
         print("🎛️ coordinator: creating session context")
