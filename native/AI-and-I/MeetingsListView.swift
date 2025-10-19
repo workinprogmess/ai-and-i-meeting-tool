@@ -92,7 +92,7 @@ class MeetingsListViewModel: ObservableObject {
             }
         }
         Task {
-            await sessionCoordinator.preparePipelinesIfNeeded()
+            await sessionCoordinator.preparePipelinesIfNeeded(trigger: "app-launch")
         }
     }
     
