@@ -45,6 +45,53 @@ private extension AVAudioPCMBuffer {
 
 extension AVAudioPCMBuffer: @unchecked @retroactive Sendable {}
 
+private final class OutputRouteController {
+    private(set) var preferredDeviceID: AudioDeviceID?
+    private(set) var preferredDeviceName: String = "unknown"
+    private var lastRestoreAttempt: Date = .distantPast
+    private let restoreCooldown: TimeInterval = 1.0
+
+    func snapshotCurrentDevice() {
+        guard let outputID = DeviceChangeMonitor.currentOutputDeviceID() else {
+            preferredDeviceID = nil
+            preferredDeviceName = "unknown"
+            print("⚠️ unable to detect current output device for preservation")
+            return
+        }
+
+        preferredDeviceID = outputID
+        preferredDeviceName = DeviceChangeMonitor.deviceName(for: outputID) ?? "unknown"
+        print("💾 preserved output device: \(preferredDeviceName)")
+    }
+
+    @discardableResult
+    func restoreIfNeeded(reason: String) -> Bool {
+        guard let targetID = preferredDeviceID else { return false }
+        guard let currentID = DeviceChangeMonitor.currentOutputDeviceID() else { return false }
+        guard currentID != targetID else { return false }
+
+        let elapsed = Date().timeIntervalSince(lastRestoreAttempt)
+        guard elapsed >= restoreCooldown else {
+            print("ℹ️ skipping output restore (cooldown \(String(format: "%.2f", restoreCooldown - elapsed))s)")
+            return false
+        }
+
+        lastRestoreAttempt = Date()
+        if DeviceChangeMonitor.setDefaultOutputDevice(targetID) {
+            print("🎧 output route restored to \(preferredDeviceName) (reason: \(reason))")
+            return true
+        }
+
+        print("⚠️ failed to restore output device to \(preferredDeviceName) (reason: \(reason))")
+        return false
+    }
+
+    func clearSnapshot() {
+        preferredDeviceID = nil
+        preferredDeviceName = "unknown"
+    }
+}
+
 /// manages microphone recording with segment-based approach
 class MicRecorder: ObservableObject {
     // MARK: - published state
@@ -86,8 +133,7 @@ class MicRecorder: ObservableObject {
     private var sessionReferenceTime: TimeInterval = 0  // mach time for precision
 
     // MARK: - output preservation
-    private var preferredOutputDeviceID: AudioDeviceID?
-    private var preferredOutputDeviceName: String = "unknown"
+    private let outputRouteController = OutputRouteController()
 
     /// public accessor for the session timestamp (used for mixing)
     var currentSessionTimestamp: Int {
@@ -146,7 +192,16 @@ class MicRecorder: ObservableObject {
             DispatchQueue.main.async(execute: block)
         }
     }
-    
+
+    private func recordTelemetry(_ event: String, metadata: [String: String] = [:]) {
+        controllerQueue.async { [weak self] in
+            guard let monitor = self?.performanceMonitor else { return }
+            Task { @MainActor in
+                monitor.recordRecordingEvent(event, metadata: metadata)
+            }
+        }
+    }
+
     private func setIsRecording(_ value: Bool) {
         updateOnMain { self.isRecording = value }
     }
@@ -325,12 +380,11 @@ class MicRecorder: ObservableObject {
         saveSessionMetadata()
         logSessionDiagnostics()
 
-        restorePreferredOutputDeviceIfNeeded()
+        restorePreferredOutputDeviceIfNeeded(reason: "session-end")
 
         state = .idle
         setIsRecording(false)
-        preferredOutputDeviceID = nil
-        preferredOutputDeviceName = "unknown"
+        outputRouteController.clearSnapshot()
         telephonyFallbackActive = false
         telephonySilentBufferCount = 0
         telephonySpeechDetected = false
@@ -354,6 +408,12 @@ class MicRecorder: ObservableObject {
         guard isRecording else { return }
 
         print("🔄 mic device change: \(reason)")
+        recordTelemetry(
+            "mic_route_change_detected",
+            metadata: [
+                "reason": reason
+            ]
+        )
 
         controllerQueue.async { [weak self] in
             guard let self else { return }
@@ -371,6 +431,13 @@ class MicRecorder: ObservableObject {
             let remaining = Int(pinnedUntil.timeIntervalSince(now))
             print("🛑 pinned mode active – ignoring device change (remaining: \(remaining)s)")
             setErrorMessage("holding mic for stability (\(max(remaining, 1))s)")
+            recordTelemetry(
+                "mic_pin_active_skip",
+                metadata: [
+                    "reason": reason,
+                    "remaining_seconds": String(remaining)
+                ]
+            )
             return
         }
 
@@ -404,6 +471,13 @@ class MicRecorder: ObservableObject {
             print("⚠️ route unstable – waiting \(routeCoalesceInterval)s before switching")
             setErrorMessage("devices still switching – waiting to settle")
             extendStallSuppression(by: routeCoalesceInterval + stallDetectionWindow, reason: "route-unstable")
+            recordTelemetry(
+                "mic_route_unstable",
+                metadata: [
+                    "reason": reason,
+                    "cooldown_seconds": String(format: "%.2f", routeCoalesceInterval)
+                ]
+            )
         }
 
         // pin when we cross threshold within 10 seconds
@@ -420,6 +494,13 @@ class MicRecorder: ObservableObject {
                 print("🧷 route stabilized on non-airpods device – skipping pin to allow immediate fallback")
                 routeChangeTimestamps.removeAll()
                 significantRouteChangeTimes.removeAll()
+                recordTelemetry(
+                    "mic_pin_skipped",
+                    metadata: [
+                        "reason": reason,
+                        "context": "allow-fallback"
+                    ]
+                )
             } else {
                 pinnedUntil = now.addingTimeInterval(pinnedHoldDuration)
                 pinnedActivations += 1
@@ -428,6 +509,13 @@ class MicRecorder: ObservableObject {
                 print("🧷 pinned mic for stability for \(Int(pinnedHoldDuration))s")
                 setErrorMessage("holding mic for stability (\(Int(pinnedHoldDuration))s)")
                 extendStallSuppression(until: pinnedUntil ?? now, reason: "pinned")
+                recordTelemetry(
+                    "mic_pinned",
+                    metadata: [
+                        "reason": reason,
+                        "duration_seconds": String(Int(pinnedHoldDuration))
+                    ]
+                )
                 return
             }
         }
@@ -567,6 +655,12 @@ class MicRecorder: ObservableObject {
         }
 
         print("🔄 performing device switch (reason: \(reason))")
+        recordTelemetry(
+            "mic_switch_begin",
+            metadata: [
+                "reason": reason
+            ]
+        )
 
         if shouldValidateDeviceChange(reason: reason) && !hasDeviceOrFormatChanged() {
             print("ℹ️ device and format unchanged – skipping mic switch")
@@ -575,7 +669,7 @@ class MicRecorder: ObservableObject {
             return
         }
 
-        prepareOutputRoutingForCurrentInputDevice()
+        prepareOutputRoutingForCurrentInputDevice(reason: reason)
 
         if shouldDeferForMinimumSegment(reason: reason) {
             let remaining = remainingSegmentTime()
@@ -608,11 +702,24 @@ class MicRecorder: ObservableObject {
                 setErrorMessage("device not ready – holding mic")
                 readinessFailureCount = 0
                 state = .recording
+                recordTelemetry(
+                    "mic_switch_failed",
+                    metadata: [
+                        "reason": reason,
+                        "stage": "readiness-limit"
+                    ]
+                )
                 return
             }
             pendingSwitchReason = reason
             state = .recording
             schedulePendingSwitchLocked(after: routeCoalesceInterval)
+            recordTelemetry(
+                "mic_switch_retry_scheduled",
+                metadata: [
+                    "reason": reason
+                ]
+            )
             return
         }
 
@@ -620,6 +727,14 @@ class MicRecorder: ObservableObject {
         state = .recording
         executedSwitchCount += 1
         print("✅ device switch complete (reason: \(reason))")
+        recordTelemetry(
+            "mic_switch_complete",
+            metadata: [
+                "reason": reason,
+                "device": latestDeviceName,
+                "segment": String(segmentNumber)
+            ]
+        )
     }
 
     private func waitForStableInputFormat(_ engine: AVAudioEngine, requireStableWindow: Bool) -> (format: AVAudioFormat?, attempts: Int) {
@@ -1426,8 +1541,16 @@ class MicRecorder: ObservableObject {
         return status == noErr ? currentRate : nil
     }
 
-    private func prepareOutputRoutingForCurrentInputDevice() {
-        // current behavior: respect the user’s chosen output; we only snapshot for restore-on-stop
+    private func prepareOutputRoutingForCurrentInputDevice(reason: String) {
+        if outputRouteController.restoreIfNeeded(reason: reason) {
+            recordTelemetry(
+                "output_route_restored",
+                metadata: [
+                    "reason": reason,
+                    "device": outputRouteController.preferredDeviceName
+                ]
+            )
+        }
     }
 
     private enum AirPodsVerificationResult {
@@ -1595,6 +1718,12 @@ class MicRecorder: ObservableObject {
         guard isRecording else { return }
         guard let builtInID = DeviceChangeMonitor.builtInInputDeviceID() else {
             print("⚠️ telephony fallback requested but no built-in input device found")
+            recordTelemetry(
+                "mic_fallback_no_builtin",
+                metadata: [
+                    "reason": reason
+                ]
+            )
             return
         }
 
@@ -1609,10 +1738,23 @@ class MicRecorder: ObservableObject {
         setErrorMessage("airpods mic quiet – capturing with mac mic")
         currentSegmentError = "airpods-mic-silent"
         telephonySpeechDetected = false
+        recordTelemetry(
+            "mic_fallback_engaged",
+            metadata: [
+                "reason": reason
+            ]
+        )
         let success = DeviceChangeMonitor.setDefaultInputDevice(builtInID)
         if !success {
             print("⚠️ unable to switch default input to built-in mic during fallback")
+            recordTelemetry(
+                "mic_fallback_switch_failed",
+                metadata: [
+                    "reason": reason
+                ]
+            )
         }
+        restorePreferredOutputDeviceIfNeeded(reason: "telephony-fallback")
 
         airPodsTelephonyModeActive = false
         telephonySilentBufferCount = 0
@@ -1750,24 +1892,27 @@ class MicRecorder: ObservableObject {
     }
 
     private func capturePreferredOutputDeviceSnapshot() {
-        guard let outputID = DeviceChangeMonitor.currentOutputDeviceID() else {
-            print("⚠️ unable to detect current output device for preservation")
-            return
+        outputRouteController.snapshotCurrentDevice()
+        if let id = outputRouteController.preferredDeviceID {
+            recordTelemetry(
+                "output_route_snapshot",
+                metadata: [
+                    "device": outputRouteController.preferredDeviceName,
+                    "device_id": String(id)
+                ]
+            )
         }
-
-        preferredOutputDeviceID = outputID
-        preferredOutputDeviceName = DeviceChangeMonitor.deviceName(for: outputID) ?? "unknown"
-        print("💾 preserved output device: \(preferredOutputDeviceName)")
     }
 
-    private func restorePreferredOutputDeviceIfNeeded() {
-        guard let preservedID = preferredOutputDeviceID else { return }
-        guard let currentID = DeviceChangeMonitor.currentOutputDeviceID() else { return }
-        guard currentID != preservedID else { return }
-
-        print("🎧 restoring user output device after recording: \(preferredOutputDeviceName)")
-        if !DeviceChangeMonitor.setDefaultOutputDevice(preservedID) {
-            print("⚠️ failed to restore output device on session end")
+    private func restorePreferredOutputDeviceIfNeeded(reason: String = "session-end") {
+        if outputRouteController.restoreIfNeeded(reason: reason) {
+            recordTelemetry(
+                "output_route_restored",
+                metadata: [
+                    "reason": reason,
+                    "device": outputRouteController.preferredDeviceName
+                ]
+            )
         }
     }
 
