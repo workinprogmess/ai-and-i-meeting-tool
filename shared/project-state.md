@@ -1755,6 +1755,35 @@ result: overlapping audio becomes unintelligible to ai
 
 **result**: comprehensive reliability system eliminating false stall alerts, multi-segment audio issues, and pipeline coordination race conditions
 
+## system warm prep resiliency confirmed (2025-10-12)
+**system pipeline warm cache**:
+- `SystemAudioRecorder.prepareWarmPipelineIfNeeded()` caches the `SCContentFilter` per display id and retries warm prep up to three times
+- session starts and debounced rebuilds reuse the cached filter before creating new segments for crash-free warm restarts
+- `_SCStream` start failures are retried with 300ms backoff during capture startup, eliminating lingering `-10877` spam in looped tests
+
+**lifecycle automation solidified**:
+- recording coordinator observes app foreground/background transitions and pauses warm resources when the app resigns active
+- foreground resumes automatically warm both pipelines when debug options permit, ensuring launch-ready pipelines after backgrounding
+- warm shutdown honors debug toggles so diagnostics can exercise failure paths without impacting production defaults
+
+**result**: warm pipelines stay ready across route churn and lifecycle transitions without manual resets
+
+## output routing + telemetry instrumentation (2025-10-20)
+**dedicated output pipeline**:
+- `MicRecorder` snapshots the user’s speaker route through `OutputRouteController` and restores it after fallback or pinned switches
+- fallback now restores the preserved device immediately (no more AirPods → built-in strandings)
+- coordinator logs `output_route_restored` events with device ids for every restoration attempt
+
+**telemetry coverage**:
+- mic recorder emits events for route detections, unstable windows, pinning, switch begin/complete/failure, and fallback activation
+- system recorder mirrors telemetry for output churn, debounced switches, and segment lifecycle (`system_segment_started/stopped`)
+- session coordinator attaches the shared `PerformanceMonitor` to both pipelines so dashboard metrics include system audio
+
+**automated validation**:
+- added `native/Scripts/phase4-end-to-end-check.swift` to sanity-check long sessions (segment coverage, max gap, fallback counts)
+- run with `swift -module-cache-path .swift-module-cache native/Scripts/phase4-end-to-end-check.swift`
+- script falls back to a synthetic AirPods-toggle scenario when no metadata is present, keeping CI/workstation checks deterministic
+
 ---
 
 Last Updated: 2025-09-28 (Comprehensive reliability hardening with pipeline coordination)
