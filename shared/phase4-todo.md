@@ -39,15 +39,15 @@
   - ✅ ensure stall suppression and segment stitching behave with telephony segments (no silent gaps; converter verified with real AirPods capture)
   - ✅ keep all mic segments at 48kHz mono PCM and stitch with silence insertion or 20ms crossfade when timelines overlap
   - [x] verify long-session stability with new telephony handling (real-world 5–6 minute AirPods sessions, transcription enabled)
-- [ ] warm prep inside `SystemAudioRecorder` with retries and cached SCContentFilter
-  - restart SCStream cleanly on output device changes (AirPods on/off) so system segments match mic segments when routes shift
-  - validate route change rebuilds eliminate `_SCStream … Dropping frame` / `-10877` spam in long sessions
-- [ ] recording session coordinator orchestrating warm prep, lifecycle, retry, and device-change sequencing (initial skeleton exists; needs lifecycle observers, debug toggles, proper warm shutdown, and independent mic/system switching)
-- [ ] replace temporary airpods output reroute with stable output pipeline (preserve user output device)
-- [ ] lifecycle hooks (foreground/background) to pause + rewarm pipelines (treat wake like a route change)
-- [ ] debug hooks for simulated device changes/telephony mode
-- [ ] telemetry wiring into `PerformanceMonitor` once pipelines are stable (log route changes, executed switches, pinned activations, readiness attempts, segment counts, mic vs system duration, warm-up discards, writer drops, lossiness flag)
-- [ ] end-to-end tests: long session with repeated airpods toggles, playback verification, transcription pass
+- [x] warm prep inside `SystemAudioRecorder` with retries and cached SCContentFilter
+  - ✅ restart SCStream cleanly on output device changes (AirPods on/off) so system segments match mic segments when routes shift
+  - ✅ validate route change rebuilds eliminate `_SCStream … Dropping frame` / `-10877` spam in long sessions
+- [x] recording session coordinator orchestrating warm prep, lifecycle, retry, and device-change sequencing (initial skeleton exists; needs lifecycle observers, debug toggles, proper warm shutdown, and independent mic/system switching)
+- [x] replace temporary airpods output reroute with stable output pipeline (preserve user output device)
+- [x] lifecycle hooks (foreground/background) to pause + rewarm pipelines (treat wake like a route change)
+- [x] debug hooks for simulated device changes/telephony mode
+- [x] telemetry wiring into `PerformanceMonitor` once pipelines are stable (log route changes, executed switches, pinned activations, readiness attempts, segment counts, mic vs system duration, warm-up discards, writer drops, lossiness flag)
+- [x] end-to-end tests: long session with repeated airpods toggles, playback verification, transcription pass
 
 ## remaining plan (copied from milestone 2 phase 4 codex plan)
 
