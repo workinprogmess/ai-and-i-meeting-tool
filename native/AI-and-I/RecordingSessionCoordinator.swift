@@ -295,6 +295,7 @@ actor RecordingSessionCoordinator {
     func attachPerformanceMonitor(_ monitor: PerformanceMonitor) {
         performanceMonitor = monitor
         micRecorder.attachPerformanceMonitor(monitor)
+        systemRecorder.attachPerformanceMonitor(monitor)
     }
 
     private func emitTelemetry(_ event: TelemetryEvent, metadata: [String: String] = [:]) {
