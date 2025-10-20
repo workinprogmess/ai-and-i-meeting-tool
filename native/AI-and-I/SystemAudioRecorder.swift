@@ -33,6 +33,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
     private var segmentMetadata: [AudioSegmentMetadata] = []
     private let segmentQueue = DispatchQueue(label: "system.segment.queue", qos: .userInitiated)
     private let fileWriteQueue = DispatchQueue(label: "system.file.write", qos: .userInitiated)
+    private var performanceMonitor: PerformanceMonitor?
     
     // MARK: - thread safety (production-grade)
     private let controllerQueue = DispatchQueue(label: "system.controller.queue", qos: .userInitiated)
@@ -203,6 +204,21 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
     }
 
+    private func recordTelemetry(_ event: String, metadata: [String: String] = [:]) {
+        controllerQueue.async { [weak self] in
+            guard let monitor = self?.performanceMonitor else { return }
+            Task { @MainActor in
+                monitor.recordRecordingEvent(event, metadata: metadata)
+            }
+        }
+    }
+
+    func attachPerformanceMonitor(_ monitor: PerformanceMonitor?) {
+        controllerQueue.async { [weak self] in
+            self?.performanceMonitor = monitor
+        }
+    }
+
     private func setIsRecording(_ value: Bool) {
         updateOnMain { self.isRecording = value }
     }
@@ -238,7 +254,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         // set state first
         state = .recording
         setIsRecording(true)
-        
+        recordTelemetry(
+            "system_session_start",
+            metadata: [
+                "context": context.id
+            ]
+        )
+
         try await performOnControllerQueue { [weak self] in
             guard let self else { throw RecorderError.warmPreparationFailed("system recorder unavailable") }
             try await self.startNewSegment()
@@ -267,6 +289,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         
         state = .idle
         setIsRecording(false)
+        recordTelemetry(
+            "system_session_end",
+            metadata: [
+                "context": sessionID
+            ]
+        )
     }
     
     /// handles display/system audio device changes (production-safe)
@@ -274,6 +302,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         guard isRecording else { return }
         
         print("🔄 system audio change: \(reason)")
+        recordTelemetry(
+            "system_route_change_detected",
+            metadata: [
+                "reason": reason
+            ]
+        )
 
         let normalizedReason = reason.lowercased()
         var isOutputRelated = normalizedReason.contains("output") || normalizedReason.contains("display") || normalizedReason.contains("system") || normalizedReason.contains("debug")
@@ -304,6 +338,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             let remaining = Int(pinnedUntil.timeIntervalSince(now))
             print("🛑 system audio pinned – ignoring change (remaining: \(remaining)s)")
             setErrorMessage("holding system audio for stability (\(max(remaining, 1))s)")
+            recordTelemetry(
+                "system_pin_active_skip",
+                metadata: [
+                    "reason": reason,
+                    "remaining_seconds": String(remaining)
+                ]
+            )
             return
         }
 
@@ -315,6 +356,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         if rapidChanges.count >= 2 {
             routeUnstableUntil = now.addingTimeInterval(routeCoalesceInterval)
             print("⚠️ system route unstable – waiting \(routeCoalesceInterval)s before switching")
+            recordTelemetry(
+                "system_route_unstable",
+                metadata: [
+                    "reason": reason,
+                    "cooldown_seconds": String(format: "%.2f", routeCoalesceInterval)
+                ]
+            )
         }
 
         if routeChangeTimestamps.count >= pinnedSwitchThreshold {
@@ -322,6 +370,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             routeChangeTimestamps.removeAll()
             print("🧷 system audio pinned for stability for \(Int(pinnedHoldDuration))s")
             setErrorMessage("holding system audio for stability (\(Int(pinnedHoldDuration))s)")
+            recordTelemetry(
+                "system_pinned",
+                metadata: [
+                    "reason": reason,
+                    "duration_seconds": String(Int(pinnedHoldDuration))
+                ]
+            )
             return
         }
 
@@ -368,6 +423,7 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         state = .switching
         needsSwitch = false
 
+        let reason = pendingSwitchReason ?? "device-change"
         let now = Date()
         if let pinnedUntil, now < pinnedUntil {
             let remaining = max(0.5, pinnedUntil.timeIntervalSince(now))
@@ -375,6 +431,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             state = .recording
             needsSwitch = true
             await scheduleSystemSwitch(after: remaining)
+            recordTelemetry(
+                "system_switch_rescheduled",
+                metadata: [
+                    "reason": reason,
+                    "delay_seconds": String(format: "%.2f", remaining)
+                ]
+            )
             return
         }
 
@@ -384,10 +447,16 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             state = .recording
             needsSwitch = true
             await scheduleSystemSwitch(after: remaining)
+            recordTelemetry(
+                "system_switch_deferred",
+                metadata: [
+                    "reason": reason,
+                    "delay_seconds": String(format: "%.2f", remaining)
+                ]
+            )
             return
         }
 
-        let reason = pendingSwitchReason ?? "device-change"
         let releaseLock = switchLock?.acquire(for: "system", reason: reason)
         defer {
             releaseLock?()
@@ -395,6 +464,12 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         }
 
         print("🔄 performing debounced system audio switch...")
+        recordTelemetry(
+            "system_switch_begin",
+            metadata: [
+                "reason": reason
+            ]
+        )
         
         // safe teardown
         do {
@@ -403,6 +478,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             }
         } catch {
             setErrorMessage("system audio switch teardown failed: \(error.localizedDescription)")
+            recordTelemetry(
+                "system_switch_teardown_failed",
+                metadata: [
+                    "reason": reason,
+                    "error": error.localizedDescription
+                ]
+            )
         }
         
         // let hardware settle
@@ -417,11 +499,25 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             }
         } catch {
             setErrorMessage("system audio switch restart failed: \(error.localizedDescription)")
+            recordTelemetry(
+                "system_switch_restart_failed",
+                metadata: [
+                    "reason": reason,
+                    "error": error.localizedDescription
+                ]
+            )
         }
 
         state = .recording
         routeUnstableUntil = nil
         print("✅ system audio switch complete")
+        recordTelemetry(
+            "system_switch_complete",
+            metadata: [
+                "reason": reason,
+                "segment": String(segmentNumber)
+            ]
+        )
     }
 
     private func scheduleSystemSwitch(after delay: TimeInterval) async {
@@ -533,6 +629,13 @@ class SystemAudioRecorder: NSObject, ObservableObject {
             try await startCaptureWithRetry(streamInstance)
             
             print("✅ system segment #\(segmentNumber) started")
+            recordTelemetry(
+                "system_segment_started",
+                metadata: [
+                    "segment": String(segmentNumber),
+                    "file": segmentFilePath
+                ]
+            )
             
         } catch {
             setErrorMessage("system capture failed: \(error.localizedDescription)")
@@ -615,6 +718,16 @@ class SystemAudioRecorder: NSObject, ObservableObject {
         segmentQueue.sync {
             segmentMetadata.append(metadata)
         }
+
+        recordTelemetry(
+            "system_segment_stopped",
+            metadata: [
+                "segment": String(segmentNumber),
+                "file": segmentFilePath,
+                "duration_seconds": String(format: "%.2f", segmentEndTime - segmentStartTime),
+                "frames": String(framesCaptured)
+            ]
+        )
         
         Task { [weak self] in
             guard let self else { return }
