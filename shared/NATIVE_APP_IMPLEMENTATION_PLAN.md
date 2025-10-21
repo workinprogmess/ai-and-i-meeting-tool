@@ -28,130 +28,135 @@ native mac app using swiftui + core audio that captures perfectly mixed audio (m
 
 ---
 
-## milestone structure & timeline
+## version roadmap
 
-### milestone 1: core foundation (phased approach) → version 0.1.0
+### v0.1: core foundation (complete)
 **goal**: performance-first foundation with real-time mixed audio capture
 
-**critical architectural insight - electron dual-stream vs native real-time mixing**:
+**critical architectural insight — electron dual-stream vs native real-time mixing**:
 - **electron dual-stream failure**: two separate files (mic.webm, system.webm) with temporal alignment issues, 33-50% content loss in transcription
 - **native real-time mixing**: single synchronized stream mixed during recording, perfect temporal alignment, transcription-ready output
-- **key difference**: mixing happens DURING recording (not post-processing), exactly what zoom/teams produce
+- **key difference**: mixing happens *during* recording (not post-processing), exactly what Zoom/Teams produce
 
-**phase 1 - foundation (complete)**:
-- ✅ swiftui app scaffold with performance monitoring
-- ✅ user-initiated permissions architecture (no app launch dialogs)
-- ✅ admin insights dashboard (cmd+shift+i) with microsecond precision
-- ✅ app launch time measurement (~50-200ms typical)
-- ✅ minimal audiomanager with state-only recording
+**what shipped**:
+- ✅ SwiftUI shell with admin performance dashboard (cmd+shift+i)
+- ✅ One-click permission flow (no surprise dialogs)
+- ✅ Hot-standby audio architecture with warm engine preparation
+- ✅ Baseline telemetry for launch, start, and stop timings
+- ✅ Initial mic/system capture with metadata journaling
 
-**phase 2 - real-time mixed audio (current)**:
-implementation approach (not auhal - that's overkill for meeting capture):
-- **mic capture**: avaudioengine with lazy init after permission granted
-- **system audio**: screencapturekit (apple's recommended api)
-- **real-time mixing**: avaudioengine mixer nodes combine streams during recording
-- **single output**: one .wav file with perfect synchronization
+**validation**:
+- [x] App startup < 1 second on release builds
+- [x] Mixed audio file contains synchronized mic + system audio
+- [x] No temporal drift across 30-minute recordings
 
-technical challenges to solve:
-- format conversion: screencapturekit cmSampleBuffer → pcm for avaudioengine
-- device hot-swap: handle mic unplugged/changed during recording
-- error recovery: graceful handling of permission revocation, format mismatches
+### v0.2: audio stability & pipeline reliability (in progress)
+**goal**: bulletproof dual-pipeline capture that survives AirPods churn, telephony fallback, and long sessions without user intervention.
 
-**phase 3 - performance optimization**:
-- achieve < 200ms recording start latency
-- optimize memory usage during long recordings
-- implement stream-to-disk architecture
-
-**phase 4 - device management**:
-- full airpods switching during recording
-- device enumeration and selection
-- audio continuity across device changes
-
-**test cases**:
-- [ ] app startup under 1 second (beat voice memos)
-- [ ] permission dialogs only on user action (not app launch)
-- [ ] mixed audio file contains synchronized mic + system audio
-- [ ] no temporal alignment issues in transcription
-- [ ] memory usage stays under 30mb during recording
-- [ ] recording produces single transcription-ready file
-
-### milestone 2: transcription integration (2 days) → version 0.2.0
-**goal**: full transcription pipeline from audio to text
-
-**features**:
-- gemini 2.5 flash api integration (reuse electron patterns)
-- audio file processing and upload
-- transcript parsing and display
-- basic error handling and retry logic
-- cost tracking and display
+**scope**:
+- Dual warm pipelines with recording session coordinator, shared switch lock, and lifecycle observers
+- Stable output routing pipeline that preserves the user's preferred device while fallback engages
+- Telemetry wiring for mic/system switches, pinned windows, readiness retries, and segment diagnostics
+- Automated end-to-end validation (device-toggle simulation + mixing/transcription trace)
+- Launch/start/stop latency measurement and post-session diagnostics capture
 
 **success criteria**:
-- recorded audio automatically transcribed via gemini
-- transcripts display with proper speaker identification
-- api errors handled gracefully with user feedback
-- transcription cost tracked and displayed
-- processing states clearly communicated to user
+- Zero audio gaps during repeated AirPods connect/disconnect cycles (>5 switches in 10 minutes)
+- Built-in mic fallback engages without muting user playback or resetting speaker choice
+- PerformanceMonitor surfaces route changes, executed switches, warm prep attempts, and lossiness flags per session
+- End-to-end validation script passes (timeline coverage, segment stitching, transcription trigger)
 
 **test cases**:
-- [ ] transcription completes within 30 seconds for 5-minute recording
-- [ ] speaker identification (@me, @speaker1) works correctly
-- [ ] network failures handled with retry logic
-- [ ] cost calculations accurate and displayed clearly
-- [ ] large files (30+ minutes) process without memory issues
-- [ ] api rate limiting handled appropriately
+- [ ] 6-minute session with AirPods toggled every 45 seconds → no lost transcription
+- [ ] Telephony fallback + recovery restores original output route within 1s
+- [ ] Warm pipeline resume after app background/foreground without manual restart
+- [ ] Performance dashboard shows accurate route/switch counters after each run
 
-### milestone 3: user interface excellence (2-3 days) → version 0.3.0
-**goal**: professional native mac ui with superior user experience
+### v0.3: transcription & summaries (next)
+**goal**: rock-solid transcription services with canonical storage plus differentiated Sally Rooney-style summaries.
 
-**features**:
-- sidebar with recordings list (chronological, searchable)
-- main view with recording controls and status
-- tabbed transcript/summary display
-- native menu bar integration
-- settings preferences pane
-- keyboard shortcuts and accessibility
+**scope**:
+- MP3 gating with `ffmpeg` availability check + retry/backoff
+- Canonical transcript store (`session_<id>_transcripts.json`) with best-service selection
+- Prompt upgrades (multilingual hints, AirPods/system context, speaker personas)
+- Confidence scoring rendered in UI + warning badges for <0.7 segments
+- Enriched per-service status (queued/running/success/failure + log IDs)
+- Sally Rooney summary service ported from Electron with cost tracking and sectioned output
 
 **success criteria**:
-- ui follows apple human interface guidelines exactly
-- feels indistinguishable from professional mac apps
-- all interactions feel instant and responsive
-- proper keyboard navigation and voiceover support
-- settings persist between app launches
+- All three services run in parallel and log success/failure states deterministically
+- Transcript viewer persists best transcript choice and reloads instantly
+- Summaries available within 90s of recording stop with key points/action items/emotional tone
+- Confidence metadata drives UI affordances (opacity + warning icons)
 
 **test cases**:
-- [ ] sidebar scrolls smoothly with 100+ recordings
-- [ ] search finds recordings by content and date instantly
-- [ ] tab switching between transcript/summary is immediate
-- [ ] keyboard shortcuts work throughout app
-- [ ] voiceover navigation works properly
-- [ ] app remembers window size and position
-- [ ] copy/paste functionality works in all text areas
+- [ ] Upload fallback triggers on missing `ffmpeg`, user sees actionable error
+- [ ] Switching “best” transcript updates stored metadata and UI persistently
+- [ ] Summary generation handles multilingual session with AirPods + system context hints
+- [ ] Confidence overlay toggles when segments dip below threshold
 
-### milestone 4: polish and reliability (2-3 days) → version 0.4.0
-**goal**: production-ready app with professional reliability
+### v0.4: interface rebuild & architecture separation
+**goal**: redesign the app shell with clean separation between data/services and SwiftUI presentation so UI refactors never break capture logic.
 
-**features**:
-- comprehensive error recovery and user messaging
-- background processing for long transcriptions
-- export functionality (markdown, pdf, txt)
-- automatic updates checking
-- crash reporting and analytics integration
-- performance optimization and memory profiling
+**scope**:
+- Module separation: `Audio`, `Transcription`, `Data`, `UI` packages with explicit dependencies
+- New SwiftUI layout (sidebar → detail → tabs) with design-system tokens and Japanese palette alignment
+- Fully wired controls only (share/export/correct hidden until functional)
+- Keyboard shortcuts, accessibility, and multi-window readiness
+- View models and services decoupled for preview-driven UI development
 
 **success criteria**:
-- app never crashes under normal usage
-- handles all error scenarios gracefully
-- exports work perfectly for all content types  
-- update mechanism works seamlessly
-- performance metrics meet professional standards
+- UI follows Apple HIG; window + layout state persists between launches
+- Logic/services compile without the UI module (command-line/automation use cases)
+- SwiftUI previews run without touching CoreAudio/ScreenCaptureKit
 
 **test cases**:
-- [ ] 60+ minute recordings process without issues
-- [ ] app recovery after force quit preserves in-progress work
-- [ ] network interruptions handled transparently
-- [ ] all export formats maintain proper formatting
-- [ ] memory usage stable over 8+ hour sessions
-- [ ] app update and restart cycle works flawlessly
+- [ ] Sidebar scroll + search fluid with 100+ recordings
+- [ ] VoiceOver navigation covers recording controls + transcript cells
+- [ ] Hot reload of views via previews requires no hardware stubs
+- [ ] UI-only refactor leaves audio/transcription unit tests untouched
+
+### v0.5: everyday workflow essentials
+**goal**: add the productivity features that make daily use delightful.
+
+**scope**:
+- Share/export (Markdown, PDF, text, deep links)
+- Global search + filters (date, participants, keywords)
+- Foldering/collections and pinning important meetings
+- Onboarding checklist, contextual tips, and settings surface (audio defaults, transcription preferences)
+- Notifications / reminders for recording start + summary ready
+- Polished micro-interactions (hover states, subtle animations, haptics where available)
+
+**success criteria**:
+- Users can export/share within two clicks from transcript view
+- Search returns results <100ms with highlighted matches
+- Settings persist and sync across launches; onboarding completion stored per user
+
+**test cases**:
+- [ ] Export formats match design templates across 60-minute session
+- [ ] Notification fires when summary ready (and respects Do Not Disturb)
+- [ ] Folder reordering + drag/drop stable over 200 recordings
+
+### v0.6: backend, beta rollout, reliability hardening
+**goal**: stand up service infrastructure, ship the beta, and lock in performance/reliability for large-scale usage.
+
+**scope**:
+- Backend services (auth, storage, sync) + secret management
+- Beta distribution tooling, crash reporting, analytics
+- Automated regression suite + nightly pipeline validation
+- Performance profiling (memory, CPU, IO) over multi-hour sessions
+- Reliability dashboards + alerting for device switching, transcription queue health
+
+**success criteria**:
+- Beta builds delivered via TestFlight/alternative with automatic update checks
+- Backend handles concurrent sessions with secure storage + retention policies
+- Regression suite covers record → switch devices → mix → transcribe → summarize → export
+- Performance envelopes documented for multi-hour meetings on Intel + Apple Silicon
+
+**test cases**:
+- [ ] 60+ minute recordings with backend sync complete without gaps or crashes
+- [ ] Simulated backend outage surfaces graceful retry UI within 5s
+- [ ] Analytics + crash reporting capture 100% of beta incidents with actionable context
 
 ---
 
