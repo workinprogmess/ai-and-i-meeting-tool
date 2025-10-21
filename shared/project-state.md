@@ -1784,12 +1784,62 @@ result: overlapping audio becomes unintelligible to ai
 - run with `swift -module-cache-path .swift-module-cache native/Scripts/phase4-end-to-end-check.swift`
 - script falls back to a synthetic AirPods-toggle scenario when no metadata is present, keeping CI/workstation checks deterministic
 
+## version roadmap (2025-10-20)
+
+### v0.1: core foundation ✅ complete
+- swiftui shell with admin performance dashboard
+- one-click permission flow, hot-standby audio architecture
+- initial mic/system capture with metadata journaling
+
+### v0.2: audio stability & pipeline reliability ✅ complete (pending validation tests)
+- dual warm pipelines with recording session coordinator
+- stable output routing (OutputRouteController) preserving user's preferred device
+- comprehensive telemetry across mic/system recorders
+- automated end-to-end validation script
+- lifecycle observers (foreground/background) with configurable debug options
+
+**validation pending**:
+- [ ] 6-minute session with AirPods toggled every 45 seconds → no lost transcription
+- [ ] telephony fallback + recovery restores original output route within 1s
+- [ ] warm pipeline resume after app background/foreground without manual restart
+- [ ] performance dashboard shows accurate route/switch counters after each run
+
+### v0.3: transcription & summaries (next)
+- mp3 gating with ffmpeg availability check + retry/backoff
+- canonical transcript store with best-service selection
+- prompt upgrades (multilingual hints, speaker personas, AirPods/system context)
+- confidence scoring rendered in UI + warning badges
+- enriched per-service status (queued/running/success/failure + log IDs)
+- sally rooney summary service ported from electron
+
+### v0.4: interface rebuild & architecture separation
+- module separation (Audio, Transcription, Data, UI packages)
+- new swiftui layout with japanese palette alignment
+- keyboard shortcuts, accessibility, multi-window readiness
+- view models decoupled for preview-driven ui development
+
+### v0.5: everyday workflow essentials
+- share/export (markdown, pdf, text, deep links)
+- global search + filters (date, participants, keywords)
+- foldering/collections and pinning
+- onboarding, settings, notifications
+- polished micro-interactions
+
+### v0.6: backend, beta rollout, reliability hardening
+- backend services (auth, storage, sync) + secret management
+- beta distribution tooling, crash reporting, analytics
+- automated regression suite + nightly pipeline validation
+- performance profiling over multi-hour sessions
+- reliability dashboards + alerting
+
+see `shared/NATIVE_APP_IMPLEMENTATION_PLAN.md` for detailed scope, success criteria, and test cases per version.
+
 ---
 
-Last Updated: 2025-09-28 (Comprehensive reliability hardening with pipeline coordination)
+Last Updated: 2025-10-20 (v0.2 complete — output routing + telemetry instrumentation)
 Session Duration: Complete warm pipeline reliability system + systematic hardening refinements
-Major Achievements (electron build, archived):
-- milestone 3.2: zero data loss + device resilience complete
-- strategic roadmap: human intelligence prioritized over commodity features  
-- foundation assessment: ready for differentiation work
-- testflight path (archived) was planned for post-3.3 professional beta distribution
+Major Achievements (native app, in progress):
+- v0.1: core foundation complete
+- v0.2: audio stability complete (pending validation tests)
+- phase4 item 5/6: all deliverables finished
+- version roadmap: v0.1–v0.6 defined with clear success criteria
