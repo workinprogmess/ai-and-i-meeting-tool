@@ -8,6 +8,67 @@
 
 import Foundation
 
+// MARK: - ffmpeg discovery helper
+
+private func locateFFmpegExecutable() -> URL? {
+    let fileManager = FileManager.default
+    var candidates: [String] = []
+    var seen = Set<String>()
+
+    func appendCandidate(_ path: String) {
+        guard !path.isEmpty, !seen.contains(path) else { return }
+        seen.insert(path)
+        candidates.append(path)
+    }
+
+    // explicit override via environment (binary or directory)
+    if let override = ProcessInfo.processInfo.environment["FFMPEG_PATH"] {
+        appendCandidate(override)
+    }
+
+    // common install locations
+    ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].forEach { appendCandidate($0) }
+
+    // search PATH entries
+    if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
+        pathEnv.split(separator: ":").map(String.init).forEach { appendCandidate($0) }
+    }
+
+    for candidate in candidates {
+        // handle override that points directly to the ffmpeg binary
+        if fileManager.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+
+        let binaryPath = (candidate as NSString).appendingPathComponent("ffmpeg")
+        if fileManager.isExecutableFile(atPath: binaryPath) {
+            return URL(fileURLWithPath: binaryPath)
+        }
+    }
+
+    return nil
+}
+
+private func determineBitrate(for wavURL: URL) -> String {
+    let defaultBitrate = "128k"
+    guard
+        let attributes = try? FileManager.default.attributesOfItem(atPath: wavURL.path),
+        let fileSize = attributes[.size] as? NSNumber
+    else {
+        return defaultBitrate
+    }
+
+    let sizeMB = fileSize.doubleValue / (1024 * 1024)
+
+    if sizeMB >= 600 { // roughly ≥60 minutes at 44.1khz 16-bit stereo
+        return "64k"
+    } else if sizeMB >= 300 {
+        return "96k"
+    } else {
+        return defaultBitrate
+    }
+}
+
 // MARK: - core protocol
 
 /// defines the interface all transcription services must implement
@@ -256,38 +317,76 @@ class TranscriptionCoordinator: ObservableObject {
     /// convert wav to mp3 for smaller file size
     func convertToMP3(_ wavURL: URL) async throws -> URL {
         let mp3URL = wavURL.deletingPathExtension().appendingPathExtension("mp3")
-        
+
         // if already mp3, return as is
         if wavURL.pathExtension.lowercased() == "mp3" {
             return wavURL
         }
-        
-        // check if ffmpeg exists (try both Apple Silicon and Intel paths)
-        let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
-        guard let ffmpegPath = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+
+        guard let ffmpegURL = locateFFmpegExecutable() else {
             throw TranscriptionError.ffmpegNotFound
         }
-        
-        // run ffmpeg conversion
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: ffmpegPath)
-        process.arguments = [
-            "-i", wavURL.path,
-            "-b:a", "128k",     // 128kbps bitrate
-            "-ar", "16000",     // 16khz sample rate (optimal for speech)
-            "-ac", "1",         // mono
-            "-y",               // overwrite if exists
-            mp3URL.path
-        ]
-        
-        try process.run()
-        process.waitUntilExit()
-        
-        guard process.terminationStatus == 0 else {
-            throw TranscriptionError.conversionFailed
+
+        // clean up stale output if present
+        if FileManager.default.fileExists(atPath: mp3URL.path) {
+            try? FileManager.default.removeItem(at: mp3URL)
         }
-        
-        return mp3URL
+
+        let bitrate = determineBitrate(for: wavURL)
+
+        let maxAttempts = 2
+        var attempt = 0
+        var lastStatus: Int32 = 0
+        var lastMessage = ""
+
+        while attempt < maxAttempts {
+            let process = Process()
+            process.executableURL = ffmpegURL
+            process.arguments = [
+                "-i", wavURL.path,
+                "-b:a", bitrate,
+                "-ar", "16000",
+                "-ac", "1",
+                "-y",
+                mp3URL.path
+            ]
+
+            let stderrPipe = Pipe()
+            let stdoutPipe = Pipe()
+            process.standardError = stderrPipe
+            process.standardOutput = stdoutPipe
+
+            do {
+                try process.run()
+            } catch {
+                throw TranscriptionError.conversionFailed(status: -1, message: error.localizedDescription)
+            }
+
+            process.waitUntilExit()
+
+            let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            if let message = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
+                lastMessage = message
+            }
+            lastStatus = process.terminationStatus
+
+            if lastStatus == 0 {
+                return mp3URL
+            }
+
+            attempt += 1
+
+            // remove partial output before retrying
+            if FileManager.default.fileExists(atPath: mp3URL.path) {
+                try? FileManager.default.removeItem(at: mp3URL)
+            }
+
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+            }
+        }
+
+        throw TranscriptionError.conversionFailed(status: lastStatus, message: lastMessage)
     }
 }
 
@@ -297,11 +396,11 @@ enum TranscriptionError: LocalizedError {
     case serviceUnavailable
     case apiKeyMissing
     case fileTooLarge
-    case conversionFailed
+    case conversionFailed(status: Int32, message: String)
     case ffmpegNotFound
     case networkError(String)
     case apiError(String)
-    
+
     var errorDescription: String? {
         switch self {
         case .serviceUnavailable:
@@ -310,8 +409,11 @@ enum TranscriptionError: LocalizedError {
             return "api key not configured"
         case .fileTooLarge:
             return "audio file exceeds size limit"
-        case .conversionFailed:
-            return "failed to convert audio format"
+        case .conversionFailed(let status, let message):
+            if message.isEmpty {
+                return "failed to convert audio format (exit \(status))"
+            }
+            return "failed to convert audio format (exit \(status)): \(message)"
         case .ffmpegNotFound:
             return "ffmpeg not installed"
         case .networkError(let message):
