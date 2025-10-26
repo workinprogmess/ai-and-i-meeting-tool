@@ -69,6 +69,17 @@ private func determineBitrate(for wavURL: URL) -> String {
     }
 }
 
+struct CanonicalTranscriptStore: Codable {
+    static let currentVersion = 1
+
+    let version: Int
+    let sessionID: String
+    let createdAt: Date
+    let duration: TimeInterval?
+    let bestService: String
+    let services: [String: TranscriptionResult]
+}
+
 // MARK: - core protocol
 
 /// defines the interface all transcription services must implement

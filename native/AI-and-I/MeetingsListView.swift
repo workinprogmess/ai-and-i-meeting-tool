@@ -69,6 +69,7 @@ class MeetingsListViewModel: ObservableObject {
     private var recordingStartTime: Date?
     private var processingMeetingID: UUID?
     private var processingSessionID: String?
+    private let preferredServiceOrder = ["gemini", "deepgram", "assembly"]
     
     init() {
         loadMeetings()
@@ -170,7 +171,41 @@ class MeetingsListViewModel: ObservableObject {
                     
                     // check if transcription exists for this session
                     let transcriptPath = sessionsPath.appendingPathComponent("session_\(sessionTimestamp)_transcripts.json")
-                    let hasTranscript = FileManager.default.fileExists(atPath: transcriptPath.path)
+                    var canonicalStore: CanonicalTranscriptStore?
+                    if FileManager.default.fileExists(atPath: transcriptPath.path) {
+                        let decoder = JSONDecoder()
+                        decoder.dateDecodingStrategy = .iso8601
+                        if let data = try? Data(contentsOf: transcriptPath) {
+                            if let store = try? decoder.decode(CanonicalTranscriptStore.self, from: data) {
+                                canonicalStore = store
+                            } else if let legacyResults = try? decoder.decode([TranscriptionResult].self, from: data), !legacyResults.isEmpty {
+                                let bestService = selectBestServiceName(from: legacyResults)
+                                var serviceMap: [String: TranscriptionResult] = [:]
+                                legacyResults.forEach { serviceMap[$0.service] = $0 }
+                                canonicalStore = CanonicalTranscriptStore(
+                                    version: CanonicalTranscriptStore.currentVersion,
+                                    sessionID: metadata.sessionID,
+                                    createdAt: Date(),
+                                    duration: metadata.duration ?? duration,
+                                    bestService: bestService,
+                                    services: serviceMap
+                                )
+
+                                if let upgradedStore = canonicalStore {
+                                    do {
+                                        let encoder = JSONEncoder()
+                                        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                                        encoder.dateEncodingStrategy = .iso8601
+                                        let upgradedData = try encoder.encode(upgradedStore)
+                                        try upgradedData.write(to: transcriptPath, options: .atomic)
+                                    } catch {
+                                        print("⚠️ failed to upgrade legacy transcripts for session \(sessionTimestamp): \(error)")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let hasTranscript = canonicalStore != nil
                     
                     // check for audio files
                     let mp3Path = sessionsPath.appendingPathComponent("mixed_\(sessionTimestamp).mp3")
@@ -186,14 +221,11 @@ class MeetingsListViewModel: ObservableObject {
                     
                     // if transcript exists, try to load it for better title
                     var title = hasTranscript ? "meeting \(formattedDate)" : "recording \(formattedDate)"
-                    if hasTranscript {
-                        if let transcriptData = try? Data(contentsOf: transcriptPath),
-                           let transcripts = try? JSONDecoder().decode([TranscriptionResult].self, from: transcriptData),
-                           let bestResult = transcripts.first {
-                            // use AI-generated title if available
-                            if let aiTitle = bestResult.transcript.title, !aiTitle.isEmpty {
-                                title = aiTitle.lowercased()
-                            }
+                    if let store = canonicalStore {
+                        let bestName = !store.bestService.isEmpty ? store.bestService : selectBestServiceName(from: Array(store.services.values))
+                        let bestResult = store.services[bestName] ?? store.services.values.first
+                        if let aiTitle = bestResult?.transcript.title, !aiTitle.isEmpty {
+                            title = aiTitle.lowercased()
                         }
                     }
                     
@@ -552,16 +584,29 @@ class MeetingsListViewModel: ObservableObject {
 
         // save results with session-specific filename to prevent data loss
         if !results.isEmpty {
-            // save with session timestamp to prevent overwriting
             let sessionSpecificPath = sessionDir.appendingPathComponent("session_\(sessionTimestamp)_transcripts.json")
-            if let data = try? JSONEncoder().encode(results) {
-                try? data.write(to: sessionSpecificPath)
+            let sessionIdentifier = processingSessionID ?? String(sessionTimestamp)
+            let meetingDuration = processingMeetingID.flatMap { id in meetings.first(where: { $0.id == id })?.duration }
+            let store = buildCanonicalStore(
+                sessionID: sessionIdentifier,
+                duration: meetingDuration,
+                results: results
+            )
+
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(store)
+                try data.write(to: sessionSpecificPath, options: .atomic)
                 print("💾 saved \(results.count) transcription results to \(sessionSpecificPath.lastPathComponent)")
+            } catch {
+                print("❌ failed to write canonical transcripts: \(error)")
+                await MainActor.run {
+                    self.updateProcessingStatus("error writing transcripts")
+                }
             }
-            
-            // no longer saving to legacy transcription-results.json to prevent overwrites
-            
-            // reload to show completed transcript
+
             await MainActor.run {
                 self.markProcessingTranscriptAvailable()
                 loadMeetings()
@@ -628,6 +673,43 @@ class MeetingsListViewModel: ObservableObject {
     private func markProcessingTranscriptAvailable() {
         guard let index = processingMeetingIndex() else { return }
         meetings[index].transcriptAvailable = true
+    }
+
+    private func buildCanonicalStore(sessionID: String, duration: TimeInterval?, results: [TranscriptionResult]) -> CanonicalTranscriptStore {
+        var serviceMap: [String: TranscriptionResult] = [:]
+        results.forEach { serviceMap[$0.service] = $0 }
+
+        let bestService = selectBestServiceName(from: Array(serviceMap.values))
+
+        return CanonicalTranscriptStore(
+            version: CanonicalTranscriptStore.currentVersion,
+            sessionID: sessionID,
+            createdAt: Date(),
+            duration: duration,
+            bestService: bestService,
+            services: serviceMap
+        )
+    }
+
+    private func selectBestServiceName(from results: [TranscriptionResult]) -> String {
+        guard !results.isEmpty else { return "" }
+
+        if let confident = results
+            .filter({ ($0.confidence ?? 0) > 0 })
+            .max(by: { ($0.confidence ?? 0) < ($1.confidence ?? 0) }) {
+            return confident.service
+        }
+
+        if let fastest = results.min(by: { $0.processingTime < $1.processingTime }) {
+            return fastest.service
+        }
+
+        let ordered = results.sorted { preferredServiceIndex(for: $0.service) < preferredServiceIndex(for: $1.service) }
+        return ordered.first?.service ?? results.first?.service ?? ""
+    }
+
+    private func preferredServiceIndex(for service: String) -> Int {
+        preferredServiceOrder.firstIndex(of: service) ?? preferredServiceOrder.count
     }
 
     private func processingMeetingIndex() -> Int? {

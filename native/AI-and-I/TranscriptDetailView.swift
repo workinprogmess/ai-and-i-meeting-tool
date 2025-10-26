@@ -349,6 +349,7 @@ class TranscriptDetailViewModel: ObservableObject {
     @Published var allResults: [TranscriptionResult] = []
     @Published var serviceName = "gemini"
     @Published var cost: Double?
+    private let preferredOrder = ["gemini", "deepgram", "assembly"]
     
     func loadTranscript(for meeting: Meeting) {
         let sessionDirectory: URL
@@ -361,27 +362,38 @@ class TranscriptDetailViewModel: ObservableObject {
 
         let resultsPath = sessionDirectory.appendingPathComponent("session_\(meeting.sessionID)_transcripts.json")
 
-        guard let data = try? Data(contentsOf: resultsPath),
-              let results = try? JSONDecoder().decode([TranscriptionResult].self, from: data),
-              !results.isEmpty else {
-            allResults = []
-            segments = []
-            cost = nil
-            serviceName = "unknown"
+        guard let data = try? Data(contentsOf: resultsPath) else {
+            resetSelections()
             return
         }
 
-        let preferredOrder = ["gemini", "deepgram", "assembly"]
-        allResults = results.sorted { lhs, rhs in
-            let lhsIndex = preferredOrder.firstIndex(of: lhs.service) ?? preferredOrder.count
-            let rhsIndex = preferredOrder.firstIndex(of: rhs.service) ?? preferredOrder.count
-            return lhsIndex < rhsIndex
-        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
 
-        let firstResult = allResults[0]
-        segments = firstResult.transcript.segments
-        cost = firstResult.cost
-        serviceName = firstResult.service
+        if let store = try? decoder.decode(CanonicalTranscriptStore.self, from: data) {
+            let ordered = orderResults(Array(store.services.values), bestService: store.bestService)
+            guard !ordered.isEmpty else {
+                resetSelections()
+                return
+            }
+            allResults = ordered
+            let best = ordered.first { $0.service == store.bestService } ?? ordered.first!
+            segments = best.transcript.segments
+            cost = best.cost
+            serviceName = best.service
+        } else if let legacy = try? decoder.decode([TranscriptionResult].self, from: data), !legacy.isEmpty {
+            let ordered = orderResults(legacy, bestService: nil)
+            allResults = ordered
+            if let first = ordered.first {
+                segments = first.transcript.segments
+                cost = first.cost
+                serviceName = first.service
+            } else {
+                resetSelections()
+            }
+        } else {
+            resetSelections()
+        }
     }
     
     func selectService(at index: Int) {
@@ -411,6 +423,32 @@ class TranscriptDetailViewModel: ObservableObject {
     func exportTranscript() {
         // export as markdown or text file
         print("exporting transcript...")
+    }
+
+    private func resetSelections() {
+        allResults = []
+        segments = []
+        cost = nil
+        serviceName = "unknown"
+    }
+
+    private func orderResults(_ results: [TranscriptionResult], bestService: String?) -> [TranscriptionResult] {
+        var ordered = results.sorted { lhs, rhs in
+            let lhsIndex = preferredOrder.firstIndex(of: lhs.service) ?? preferredOrder.count
+            let rhsIndex = preferredOrder.firstIndex(of: rhs.service) ?? preferredOrder.count
+            if lhsIndex == rhsIndex {
+                return (lhs.confidence ?? 0) > (rhs.confidence ?? 0)
+            }
+            return lhsIndex < rhsIndex
+        }
+
+        if let bestService,
+           let index = ordered.firstIndex(where: { $0.service == bestService }) {
+            let best = ordered.remove(at: index)
+            ordered.insert(best, at: 0)
+        }
+
+        return ordered
     }
 }
 
