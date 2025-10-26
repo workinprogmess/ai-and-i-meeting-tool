@@ -1768,6 +1768,22 @@ result: overlapping audio becomes unintelligible to ai
 
 **result**: warm pipelines stay ready across route churn and lifecycle transitions without manual resets
 
+## v0.3 transcription & summaries – in progress (2025-10-20)
+**audio prep hardening**:
+- ffmpeg discovery now checks env overrides, common install paths, and PATH entries before conversion
+- adaptive bitrate (128/96/64 kbps) keeps long recordings under service limits; single retry wraps conversion with structured errors
+- conversion failures surface precise exit codes + stderr so the ui can surface actionable guidance
+
+**canonical transcript store**:
+- per-session `session_<id>_transcripts.json` now stores versioned `CanonicalTranscriptStore` (best service + service map)
+- legacy `[TranscriptionResult]` files auto-upgrade, ensuring historical sessions stay compatible
+- transcript detail view reads canonical files and prefers the stored best-service entry for initial display
+
+**next up**:
+- refresh provider prompts (multilingual hints, speaker/device context)
+- surface queued/running/success/failure status end-to-end and render confidence ui treatment
+- wire telemetry with per-service durations, retries, best choice, and summary latency
+
 ## output routing + telemetry instrumentation (2025-10-20)
 **dedicated output pipeline**:
 - `MicRecorder` snapshots the user’s speaker route through `OutputRouteController` and restores it after fallback or pinned switches
