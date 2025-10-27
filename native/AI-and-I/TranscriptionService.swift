@@ -69,6 +69,73 @@ private func determineBitrate(for wavURL: URL) -> String {
     }
 }
 
+// MARK: - transcript formatting + context helpers
+
+enum TranscriptFormat {
+    /// condensed instructions derived from `shared/transcript-format-sample.md`
+    static let instructions: String = """
+    FORMAT EXPECTATIONS (match ai&i sample):
+    - Begin with "MEETING TRANSCRIPT" and an underline of '=' characters on the next line.
+    - Provide a concise `TITLE: ...` line (4-7 words) before the transcript body.
+    - Every spoken line uses `@speaker: [emotion-intensity emotion] [topic-tags] text`.
+      * Emotion intensity must be one of: mildly, somewhat, very, extremely (or omit intensity for neutral).
+      * Include up to 3 lowercase, hyphenated topic tags per line (e.g., [payment-flow] [user-feedback]).
+    - Capture acoustic cues in parentheses, e.g., `(typing)`, `(door opens)`; place them on their own line when best.
+    - Capture meeting or technical events in square brackets, e.g., `[audio cutting out]`, `[multiple people talking]`.
+    - Use `@me` for the recorder's local mic, `@me-2` etc. for additional local voices, `@speaker1`, `@speaker2`... for remote/system participants, and `@system` for non-human/system playback.
+    - Preserve code-switching and multilingual phrases exactly as spoken; add clarifying English in brackets only when helpful.
+    - Include personal or casual conversation using the same format—do not omit or editorialize.
+    - End with a `---` separator followed by a `CONSISTENCY CHECK APPLIED:` block that lists the key normalization steps performed.
+    """
+}
+
+struct TranscriptionRequestContext {
+    var sessionID: String?
+    var duration: TimeInterval?
+    var languages: [String]
+    var expectedSpeakers: Int?
+    var microphoneDevices: [String]
+    var systemDevices: [String]
+    var deviceNotes: [String]
+    var userDictionary: UserDictionary
+    var formatInstructions: String
+
+    init(
+        sessionID: String? = nil,
+        duration: TimeInterval? = nil,
+        languages: [String] = TranscriptionRequestContext.defaultLanguageHints(),
+        expectedSpeakers: Int? = nil,
+        microphoneDevices: [String] = [],
+        systemDevices: [String] = [],
+        deviceNotes: [String] = [],
+        userDictionary: UserDictionary = UserDictionary(),
+        formatInstructions: String = TranscriptFormat.instructions
+    ) {
+        self.sessionID = sessionID
+        self.duration = duration
+        self.languages = languages
+        self.expectedSpeakers = expectedSpeakers
+        self.microphoneDevices = microphoneDevices
+        self.systemDevices = systemDevices
+        self.deviceNotes = deviceNotes
+        self.userDictionary = userDictionary
+        self.formatInstructions = formatInstructions
+    }
+
+    static func defaultLanguageHints() -> [String] {
+        let environment = ProcessInfo.processInfo.environment
+        if let rawHints = environment["AI_AND_I_LANGUAGE_HINTS"], !rawHints.isEmpty {
+            return rawHints
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        // default hints target common english+hindi+spanish mixing for ai&i sessions
+        return ["en", "en-IN", "hi", "es"]
+    }
+}
+
 struct CanonicalTranscriptStore: Codable {
     static let currentVersion = 1
 
@@ -88,7 +155,7 @@ protocol TranscriptionService {
     var serviceName: String { get }
     
     /// transcribe audio file to text with speaker attribution
-    func transcribe(audioURL: URL) async throws -> TranscriptionResult
+    func transcribe(audioURL: URL, context: TranscriptionRequestContext) async throws -> TranscriptionResult
     
     /// calculate cost for given audio duration
     func calculateCost(duration: TimeInterval) -> Double
@@ -185,6 +252,10 @@ struct UserDictionary: Codable {
     var names: Set<String> = []
     var companies: Set<String> = []
     var phrases: Set<String> = []
+
+    var isEmpty: Bool {
+        corrections.isEmpty && names.isEmpty && companies.isEmpty && phrases.isEmpty
+    }
     
     /// get prompt injection for ai services
     var promptInjection: String {
@@ -237,6 +308,27 @@ struct UserDictionary: Codable {
             phrases.insert(correct)
         }
     }
+
+    static func loadFromDisk() -> UserDictionary {
+        let fileManager = FileManager.default
+        guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return UserDictionary()
+        }
+
+        let storageDirectory = documentsDirectory.appendingPathComponent("ai-and-i")
+        let fileURL = storageDirectory.appendingPathComponent("user-dictionary.json")
+
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return UserDictionary()
+        }
+
+        let decoder = JSONDecoder()
+        if let dictionary = try? decoder.decode(UserDictionary.self, from: data) {
+            return dictionary
+        }
+
+        return UserDictionary()
+    }
 }
 
 /// individual correction entry
@@ -266,11 +358,26 @@ class TranscriptionCoordinator: ObservableObject {
     }
     
     /// transcribe with all available services in parallel
-    func transcribeWithAllServices(audioURL: URL) async {
+    func transcribeWithAllServices(
+        audioURL: URL,
+        context: TranscriptionRequestContext? = nil
+    ) async {
         isProcessing = true
         results = []
         bestResult = nil
         errorMessage = nil
+
+        let requestContext: TranscriptionRequestContext = {
+            if let context {
+                var merged = context
+                if merged.userDictionary.isEmpty, !userDictionary.isEmpty {
+                    merged.userDictionary = userDictionary
+                }
+                return merged
+            } else {
+                return TranscriptionRequestContext(userDictionary: userDictionary)
+            }
+        }()
         
         // convert to mp3 first for smaller file size
         let mp3URL: URL
@@ -288,7 +395,7 @@ class TranscriptionCoordinator: ObservableObject {
                 group.addTask {
                     do {
                         let startTime = Date()
-                        let result = try await service.transcribe(audioURL: mp3URL)
+                        let result = try await service.transcribe(audioURL: mp3URL, context: requestContext)
                         let processingTime = Date().timeIntervalSince(startTime)
                         
                         var updatedResult = result
