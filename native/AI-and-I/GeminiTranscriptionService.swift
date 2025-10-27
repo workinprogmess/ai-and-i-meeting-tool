@@ -41,24 +41,26 @@ class GeminiTranscriptionService: TranscriptionService {
         return minutes * costPerMinute
     }
     
-    func transcribe(audioURL: URL) async throws -> TranscriptionResult {
+    func transcribe(audioURL: URL, context: TranscriptionRequestContext) async throws -> TranscriptionResult {
         guard isAvailable() else {
             throw TranscriptionError.apiKeyMissing
         }
-        
+
         let startTime = Date()
-        
+
+        let effectiveDictionary = context.userDictionary.isEmpty ? userDictionary : context.userDictionary
+
         // read audio file
         let audioData = try Data(contentsOf: audioURL)
-        
+
         // check file size (gemini limit is 20mb)
         let maxSize = 20 * 1024 * 1024 // 20mb
         guard audioData.count <= maxSize else {
             throw TranscriptionError.fileTooLarge
         }
-        
+
         // prepare request
-        let request = try buildRequest(audioData: audioData)
+        let request = try buildRequest(audioData: audioData, context: context, dictionary: effectiveDictionary)
         
         // send request
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -71,10 +73,10 @@ class GeminiTranscriptionService: TranscriptionService {
         }
         
         // parse response
-        let transcript = try parseResponse(data)
-        
+        let transcript = try parseResponse(data, context: context)
+
         // calculate cost based on audio duration
-        let duration = getAudioDuration(audioURL: audioURL)
+        let duration = context.duration ?? getAudioDuration(audioURL: audioURL)
         let cost = calculateCost(duration: duration)
         
         // create result
@@ -91,35 +93,16 @@ class GeminiTranscriptionService: TranscriptionService {
     
     // MARK: - private methods
     
-    private func buildRequest(audioData: Data) throws -> URLRequest {
+    private func buildRequest(
+        audioData: Data,
+        context: TranscriptionRequestContext,
+        dictionary: UserDictionary
+    ) throws -> URLRequest {
         var request = URLRequest(url: URL(string: "\(baseURL)?key=\(apiKey)")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        // build prompt with user dictionary
-        var prompt = """
-        transcribe this audio recording into a conversation format.
-        
-        first, provide a title (4-7 words) that captures the essence of the meeting.
-        format as: TITLE: [your title]
-        
-        then provide the transcript.
-        format each line as:
-        @speaker: what they said
-        
-        use @me for the person who is recording (the main speaker)
-        use @speaker1, @speaker2, etc. for other participants
-        
-        focus on accuracy and natural conversation flow.
-        do not include timestamps.
-        transcribe any non-english phrases as spoken, with english translation in brackets if helpful.
-        """
-        
-        // add user dictionary if available
-        if !userDictionary.promptInjection.isEmpty {
-            prompt += "\n\n\(userDictionary.promptInjection)"
-        }
-        
+        let prompt = buildPrompt(context: context, dictionary: dictionary)
+
         // build request body
         let requestBody: [String: Any] = [
             "contents": [[
@@ -146,8 +129,72 @@ class GeminiTranscriptionService: TranscriptionService {
         
         return request
     }
+
+    private func buildPrompt(context: TranscriptionRequestContext, dictionary: UserDictionary) -> String {
+        var metadataLines: [String] = []
+
+        if let sessionID = context.sessionID {
+            metadataLines.append("session id: \(sessionID)")
+        }
+
+        if let duration = context.duration {
+            let minutes = duration / 60.0
+            metadataLines.append(String(format: "approx duration: %.1f minutes", minutes))
+        }
+
+        let languages = context.languages
+        if !languages.isEmpty {
+            metadataLines.append("language hints: \(languages.joined(separator: ", "))")
+        }
+
+        if let expected = context.expectedSpeakers {
+            metadataLines.append("expected participants: \(expected) (recorder + remote)")
+        }
+
+        if !context.microphoneDevices.isEmpty {
+            metadataLines.append("microphone devices: \(context.microphoneDevices.joined(separator: ", "))")
+        }
+
+        if !context.systemDevices.isEmpty {
+            metadataLines.append("system routes: \(context.systemDevices.joined(separator: ", "))")
+        }
+
+        if !context.deviceNotes.isEmpty {
+            metadataLines.append("device notes: \(context.deviceNotes.joined(separator: " | "))")
+        }
+
+        if metadataLines.isEmpty {
+            metadataLines.append("no additional session metadata provided")
+        }
+
+        let contextBlock = metadataLines.map { "- \($0)" }.joined(separator: "\n")
+
+        var prompt = """
+        You are the ai&i meeting transcription engine. Convert the supplied audio into a transcript that strictly follows the ai&i transcript format.
+
+        FORMAT RULES:
+        \(context.formatInstructions)
+
+        SESSION CONTEXT:
+        \(contextBlock)
+
+        OUTPUT REQUIREMENTS:
+        - Preserve speaker diarization faithfully; use @me for the recorder, @speaker1/@speaker2/etc. for remote participants, and @system for non-human/system playback.
+        - Capture acoustic cues in parentheses and meeting/technical events in square brackets exactly where they occur.
+        - Support code-switching across all hinted languages without translating unless adding a short clarification in brackets is essential.
+        - Keep topic tags consistent; reuse existing tags when the conversation stays on the same subject and cap at three tags per line.
+        - If wording is unclear, include your best guess with a trailing "(?)" but do not omit the line.
+        - End with a `---` separator and a `CONSISTENCY CHECK APPLIED:` section summarizing the key normalization steps you followed (topics, naming, intensity, etc.).
+        """
+
+        if !dictionary.promptInjection.isEmpty {
+            prompt += "\n\nUSER DICTIONARY HINTS:\n\(dictionary.promptInjection)"
+        }
+
+        return prompt
+    }
     
-    private func parseResponse(_ data: Data) throws -> Transcript {
+    private func parseResponse(_ data: Data, context: TranscriptionRequestContext) throws -> Transcript {
         // parse gemini response
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let candidates = json["candidates"] as? [[String: Any]],
@@ -161,18 +208,20 @@ class GeminiTranscriptionService: TranscriptionService {
         
         // parse transcript text into segments and extract title
         let (title, segments) = parseTranscriptText(text)
-        
+
         // create transcript
         return Transcript(
-            sessionID: UUID().uuidString,
+            sessionID: context.sessionID ?? UUID().uuidString,
             segments: segments,
             metadata: TranscriptMetadata(
                 recordingDate: Date(),
                 audioFileURL: "",
                 mixingMethod: .mixed,
-                deviceInfo: "ai&i native"
+                deviceInfo: context.deviceNotes.isEmpty
+                    ? "ai&i native"
+                    : context.deviceNotes.joined(separator: " | ")
             ),
-            duration: 0, // will be set by coordinator
+            duration: context.duration ?? 0,
             title: title
         )
     }
@@ -181,33 +230,44 @@ class GeminiTranscriptionService: TranscriptionService {
         var segments: [TranscriptSegment] = []
         var title: String?
         let lines = text.components(separatedBy: .newlines)
-        
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for rawLine in lines {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            
-            // extract title if present
+
+            if trimmed.uppercased() == "MEETING TRANSCRIPT" {
+                continue
+            }
+
+            if trimmed.allSatisfy({ $0 == "=" }) {
+                continue
+            }
+
             if trimmed.hasPrefix("TITLE:") {
                 title = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
                 continue
             }
-            
-            // parse speaker and text
-            if let colonIndex = trimmed.firstIndex(of: ":") {
-                let speakerPart = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
-                let textPart = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
-                
-                // determine speaker
-                let speaker: Speaker
-                if speakerPart.lowercased() == "@me" || speakerPart.lowercased() == "me" {
-                    speaker = .me
-                } else if speakerPart.hasPrefix("@") {
-                    let name = String(speakerPart.dropFirst())
-                    speaker = .other(name)
-                } else {
-                    speaker = .other(speakerPart)
-                }
-                
+
+            if trimmed == "---" {
+                segments.append(TranscriptSegment(
+                    speaker: .other("system"),
+                    text: trimmed,
+                    timestamp: nil,
+                    confidence: nil
+                ))
+                continue
+            }
+
+            if let colonIndex = trimmed.firstIndex(of: ":"), trimmed.first == "@" {
+                let speakerToken = trimmed[..<colonIndex]
+                let textStart = trimmed.index(after: colonIndex)
+                let textPart = String(trimmed[textStart...]).trimmingCharacters(in: .whitespaces)
+
+                let rawSpeaker = speakerToken.dropFirst() // remove '@'
+                let speaker: Speaker = rawSpeaker.lowercased() == "me"
+                    ? .me
+                    : .other(String(rawSpeaker))
+
                 segments.append(TranscriptSegment(
                     speaker: speaker,
                     text: textPart,
@@ -215,26 +275,15 @@ class GeminiTranscriptionService: TranscriptionService {
                     confidence: nil
                 ))
             } else {
-                // no speaker label, assume continuation of previous
-                if let lastSegment = segments.last {
-                    segments[segments.count - 1] = TranscriptSegment(
-                        speaker: lastSegment.speaker,
-                        text: lastSegment.text + " " + trimmed,
-                        timestamp: nil,
-                        confidence: nil
-                    )
-                } else {
-                    // first segment without speaker, assume @me
-                    segments.append(TranscriptSegment(
-                        speaker: .me,
-                        text: trimmed,
-                        timestamp: nil,
-                        confidence: nil
-                    ))
-                }
+                segments.append(TranscriptSegment(
+                    speaker: .other("system"),
+                    text: trimmed,
+                    timestamp: nil,
+                    confidence: nil
+                ))
             }
         }
-        
+
         return (title, segments)
     }
     
