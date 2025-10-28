@@ -505,11 +505,18 @@ class MeetingsListViewModel: ObservableObject {
         print("   DEEPGRAM_API_KEY: \(describeEnv("DEEPGRAM_API_KEY"))")
         print("   ASSEMBLYAI_API_KEY: \(describeEnv("ASSEMBLYAI_API_KEY"))")
 
+        let userDictionary = UserDictionary.loadFromDisk()
+        let requestContext = buildTranscriptionContext(
+            sessionDir: sessionDir,
+            sessionTimestamp: sessionTimestamp,
+            userDictionary: userDictionary
+        )
+
         // create services
         let serviceFactories: [(name: String, loader: () -> TranscriptionService?)] = [
-            ("gemini", { GeminiTranscriptionService.createFromEnvironment() }),
-            ("deepgram", { DeepgramTranscriptionService.createFromEnvironment() }),
-            ("assembly", { AssemblyAITranscriptionService.createFromEnvironment() })
+            ("gemini", { GeminiTranscriptionService.createFromEnvironment(userDictionary: userDictionary) }),
+            ("deepgram", { DeepgramTranscriptionService.createFromEnvironment(userDictionary: userDictionary) }),
+            ("assembly", { AssemblyAITranscriptionService.createFromEnvironment(userDictionary: userDictionary) })
         ]
 
         var configuredServices: [(name: String, service: TranscriptionService)] = []
@@ -550,7 +557,7 @@ class MeetingsListViewModel: ObservableObject {
             for entry in configuredServices {
                 group.addTask {
                     do {
-                        let result = try await entry.service.transcribe(audioURL: audioURL)
+                        let result = try await entry.service.transcribe(audioURL: audioURL, context: requestContext)
                         print("✅ \(entry.name) transcription complete")
                         return (entry.name, result)
                     } catch {
@@ -673,6 +680,92 @@ class MeetingsListViewModel: ObservableObject {
     private func markProcessingTranscriptAvailable() {
         guard let index = processingMeetingIndex() else { return }
         meetings[index].transcriptAvailable = true
+    }
+
+    private func buildTranscriptionContext(
+        sessionDir: URL,
+        sessionTimestamp: Int,
+        userDictionary: UserDictionary
+    ) -> TranscriptionRequestContext {
+        let metadataURL = sessionDir.appendingPathComponent("session_\(sessionTimestamp)_metadata.json")
+        let metadata = try? RecordingSessionMetadata.load(from: metadataURL)
+
+        var sessionDuration: TimeInterval?
+        var expectedSpeakers: Int?
+        var micDevices: [String] = []
+        var systemDevices: [String] = []
+        var deviceNotes: [String] = []
+
+        if let metadata {
+            sessionDuration = metadata.duration
+
+            if sessionDuration == nil {
+                let micDuration = metadata.micSegments.last?.endSessionTime ?? 0
+                let systemDuration = metadata.systemSegments.last?.endSessionTime ?? 0
+                sessionDuration = max(micDuration, systemDuration)
+            }
+
+            micDevices = uniqueDeviceNames(from: metadata.micSegments)
+            systemDevices = uniqueDeviceNames(from: metadata.systemSegments)
+
+            if let micSummary = summarizeSegments(metadata.micSegments, category: "mic input") {
+                deviceNotes.append(micSummary)
+            }
+
+            if let systemSummary = summarizeSegments(metadata.systemSegments, category: "system audio") {
+                deviceNotes.append(systemSummary)
+            }
+
+            expectedSpeakers = metadata.systemSegments.isEmpty ? 1 : max(3, min(6, metadata.systemSegments.count + 2))
+        }
+
+        return TranscriptionRequestContext(
+            sessionID: String(sessionTimestamp),
+            duration: sessionDuration,
+            expectedSpeakers: expectedSpeakers,
+            microphoneDevices: micDevices,
+            systemDevices: systemDevices,
+            deviceNotes: deviceNotes,
+            userDictionary: userDictionary
+        )
+    }
+
+    private func uniqueDeviceNames(from segments: [AudioSegmentMetadata]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for segment in segments {
+            if seen.insert(segment.deviceName).inserted {
+                ordered.append(segment.deviceName)
+            }
+        }
+
+        return ordered
+    }
+
+    private func summarizeSegments(_ segments: [AudioSegmentMetadata], category: String) -> String? {
+        guard !segments.isEmpty else { return nil }
+
+        var totals: [(name: String, duration: TimeInterval, quality: AudioSegmentMetadata.AudioQuality)] = []
+        var indexByName: [String: Int] = [:]
+
+        for segment in segments {
+            if let idx = indexByName[segment.deviceName] {
+                totals[idx].duration += segment.duration
+                totals[idx].quality = segment.quality
+            } else {
+                indexByName[segment.deviceName] = totals.count
+                totals.append((segment.deviceName, segment.duration, segment.quality))
+            }
+        }
+
+        let deviceSummaries = totals.map { entry -> String in
+            let minutes = entry.duration / 60.0
+            let formatted = String(format: "~%.1fm", minutes)
+            return "\(entry.name) (\(formatted), \(entry.quality.rawValue))"
+        }
+
+        return "\(category): \(deviceSummaries.joined(separator: "; "))"
     }
 
     private func buildCanonicalStore(sessionID: String, duration: TimeInterval?, results: [TranscriptionResult]) -> CanonicalTranscriptStore {
