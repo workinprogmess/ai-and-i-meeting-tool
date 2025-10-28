@@ -41,63 +41,76 @@ class DeepgramTranscriptionService: TranscriptionService {
         return minutes * costPerMinute
     }
     
-    func transcribe(audioURL: URL) async throws -> TranscriptionResult {
+    func transcribe(audioURL: URL, context: TranscriptionRequestContext) async throws -> TranscriptionResult {
         guard isAvailable() else {
             throw TranscriptionError.apiKeyMissing
         }
-        
+
         let startTime = Date()
-        
+        let effectiveDictionary = context.userDictionary.isEmpty ? userDictionary : context.userDictionary
+
         // read audio file
         let audioData = try Data(contentsOf: audioURL)
-        
+
         // build url with parameters
         var components = URLComponents(string: baseURL)!
         components.queryItems = [
             URLQueryItem(name: "model", value: "nova-2"),
             URLQueryItem(name: "diarize", value: "true"),
             URLQueryItem(name: "punctuate", value: "true"),
-            URLQueryItem(name: "language", value: "en"),
             URLQueryItem(name: "smart_format", value: "true"),
-            URLQueryItem(name: "utterances", value: "true")
+            URLQueryItem(name: "utterances", value: "true"),
+            URLQueryItem(name: "paragraphs", value: "true")
         ]
-        
+
+        let languageHints = context.languages
+        if languageHints.count > 1 {
+            components.queryItems?.append(URLQueryItem(name: "language", value: "multi"))
+            components.queryItems?.append(URLQueryItem(name: "detect_language", value: "true"))
+        } else if let primaryLanguage = languageHints.first {
+            components.queryItems?.append(URLQueryItem(name: "language", value: primaryLanguage))
+            components.queryItems?.append(URLQueryItem(name: "detect_language", value: "true"))
+        } else {
+            components.queryItems?.append(URLQueryItem(name: "language", value: "en"))
+            components.queryItems?.append(URLQueryItem(name: "detect_language", value: "true"))
+        }
+
         // add custom vocabulary if available
-        if !userDictionary.names.isEmpty || !userDictionary.companies.isEmpty {
-            let keywords = Array(userDictionary.names) + Array(userDictionary.companies)
+        if !effectiveDictionary.names.isEmpty || !effectiveDictionary.companies.isEmpty {
+            let keywords = Array(effectiveDictionary.names) + Array(effectiveDictionary.companies)
             if !keywords.isEmpty {
                 let keywordsParam = keywords.map { "\($0):2" }.joined(separator: ",")
                 components.queryItems?.append(URLQueryItem(name: "keywords", value: keywordsParam))
             }
         }
-        
+
         // create request
         var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue(detectContentType(audioURL: audioURL), forHTTPHeaderField: "Content-Type")
         request.httpBody = audioData
-        
+
         // send request
         let (data, response) = try await URLSession.shared.data(for: request)
-        
+
         // check response
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             throw TranscriptionError.apiError("deepgram http \(statusCode)")
         }
-        
+
         // parse response
-        let transcript = try parseResponse(data)
-        
+        let transcript = try parseResponse(data, context: context)
+
         // calculate cost
         let duration = transcript.duration
         let cost = calculateCost(duration: duration)
-        
+
         // create result
         let processingTime = Date().timeIntervalSince(startTime)
-        
+
         return TranscriptionResult(
             service: serviceName,
             transcript: transcript,
@@ -122,16 +135,16 @@ class DeepgramTranscriptionService: TranscriptionService {
         }
     }
     
-    private func parseResponse(_ data: Data) throws -> Transcript {
+    private func parseResponse(_ data: Data, context: TranscriptionRequestContext) throws -> Transcript {
         // parse deepgram response
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [String: Any] else {
             throw TranscriptionError.apiError("invalid deepgram response")
         }
-        
+
         // get duration
         let metadata = json["metadata"] as? [String: Any]
-        let duration = metadata?["duration"] as? TimeInterval ?? 0
+        let detectedDuration = metadata?["duration"] as? TimeInterval
         
         var segments: [TranscriptSegment] = []
         
@@ -165,14 +178,19 @@ class DeepgramTranscriptionService: TranscriptionService {
             ))
         }
         
+        let deviceInfo = context.deviceNotes.isEmpty
+            ? "ai&i native"
+            : context.deviceNotes.joined(separator: " | ")
+        let duration = context.duration ?? detectedDuration ?? 0
+
         return Transcript(
-            sessionID: UUID().uuidString,
+            sessionID: context.sessionID ?? UUID().uuidString,
             segments: segments,
             metadata: TranscriptMetadata(
                 recordingDate: Date(),
                 audioFileURL: "",
                 mixingMethod: .mixed,
-                deviceInfo: "ai&i native"
+                deviceInfo: deviceInfo
             ),
             duration: duration,
             title: nil  // deepgram doesn't generate titles yet
