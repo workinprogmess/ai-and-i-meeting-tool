@@ -42,24 +42,30 @@ class AssemblyAITranscriptionService: TranscriptionService {
         return minutes * costPerMinute
     }
     
-    func transcribe(audioURL: URL) async throws -> TranscriptionResult {
+    func transcribe(audioURL: URL, context: TranscriptionRequestContext) async throws -> TranscriptionResult {
         guard isAvailable() else {
             throw TranscriptionError.apiKeyMissing
         }
-        
+
         let startTime = Date()
-        
+
+        let effectiveDictionary = context.userDictionary.isEmpty ? userDictionary : context.userDictionary
+
         // step 1: upload audio file
         let uploadedURL = try await uploadAudioFile(audioURL: audioURL)
-        
+
         // step 2: request transcription
-        let transcriptID = try await requestTranscription(audioURL: uploadedURL)
-        
+        let transcriptID = try await requestTranscription(
+            audioURL: uploadedURL,
+            context: context,
+            dictionary: effectiveDictionary
+        )
+
         // step 3: poll for completion
         let transcriptData = try await pollForCompletion(transcriptID: transcriptID)
-        
+
         // step 4: parse transcript
-        let transcript = try parseTranscript(transcriptData)
+        let transcript = try parseTranscript(transcriptData, context: context)
         
         // calculate cost
         let duration = transcript.duration
@@ -108,7 +114,11 @@ class AssemblyAITranscriptionService: TranscriptionService {
         return uploadURL
     }
     
-    private func requestTranscription(audioURL: String) async throws -> String {
+    private func requestTranscription(
+        audioURL: String,
+        context: TranscriptionRequestContext,
+        dictionary: UserDictionary
+    ) async throws -> String {
         // build request body with custom vocabulary
         var requestBody: [String: Any] = [
             "audio_url": audioURL,
@@ -116,25 +126,34 @@ class AssemblyAITranscriptionService: TranscriptionService {
             "language_detection": true,
             "punctuate": true,
             "format_text": true,
-            "disfluencies": false
+            "disfluencies": false,
+            "auto_highlights": true
         ]
-        
+
+        if let expectedSpeakers = context.expectedSpeakers {
+            requestBody["speakers_expected"] = expectedSpeakers
+        }
+
+        if let primaryLanguage = context.languages.first {
+            requestBody["language_code"] = primaryLanguage
+        }
+
         // add custom vocabulary
-        if !userDictionary.names.isEmpty || !userDictionary.companies.isEmpty {
+        if !dictionary.names.isEmpty || !dictionary.companies.isEmpty {
             var wordBoost: [String] = []
-            wordBoost.append(contentsOf: userDictionary.names)
-            wordBoost.append(contentsOf: userDictionary.companies)
-            wordBoost.append(contentsOf: userDictionary.phrases)
+            wordBoost.append(contentsOf: dictionary.names)
+            wordBoost.append(contentsOf: dictionary.companies)
+            wordBoost.append(contentsOf: dictionary.phrases)
             
             if !wordBoost.isEmpty {
                 requestBody["word_boost"] = wordBoost
             }
         }
-        
+
         // add custom spelling if we have corrections
-        if !userDictionary.corrections.isEmpty {
+        if !dictionary.corrections.isEmpty {
             var customSpelling: [[String: Any]] = []
-            for correction in userDictionary.corrections {
+            for correction in dictionary.corrections {
                 customSpelling.append([
                     "from": [correction.wrong],  // array of strings
                     "to": correction.correct      // single string
@@ -142,7 +161,11 @@ class AssemblyAITranscriptionService: TranscriptionService {
             }
             requestBody["custom_spelling"] = customSpelling
         }
-        
+
+        if !context.deviceNotes.isEmpty {
+            requestBody["metadata"] = context.deviceNotes.joined(separator: " | ")
+        }
+
         // create request
         var request = URLRequest(url: URL(string: transcriptURL)!)
         request.httpMethod = "POST"
@@ -207,12 +230,12 @@ class AssemblyAITranscriptionService: TranscriptionService {
         throw TranscriptionError.apiError("transcription timeout")
     }
     
-    private func parseTranscript(_ json: [String: Any]) throws -> Transcript {
+    private func parseTranscript(_ json: [String: Any], context: TranscriptionRequestContext) throws -> Transcript {
         var segments: [TranscriptSegment] = []
-        
+
         // get duration
         let audioDuration = (json["audio_duration"] as? Double ?? 0) / 1000 // convert ms to seconds
-        
+
         // parse utterances with speaker labels
         if let utterances = json["utterances"] as? [[String: Any]] {
             for utterance in utterances {
@@ -246,16 +269,21 @@ class AssemblyAITranscriptionService: TranscriptionService {
             ))
         }
         
+        let deviceInfo = context.deviceNotes.isEmpty
+            ? "ai&i native"
+            : context.deviceNotes.joined(separator: " | ")
+        let resolvedDuration = context.duration ?? audioDuration
+
         return Transcript(
-            sessionID: UUID().uuidString,
+            sessionID: context.sessionID ?? UUID().uuidString,
             segments: segments,
             metadata: TranscriptMetadata(
                 recordingDate: Date(),
                 audioFileURL: "",
                 mixingMethod: .mixed,
-                deviceInfo: "ai&i native"
+                deviceInfo: deviceInfo
             ),
-            duration: audioDuration,
+            duration: resolvedDuration,
             title: nil  // assembly ai doesn't generate titles yet
         )
     }
