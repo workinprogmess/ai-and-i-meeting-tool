@@ -48,33 +48,37 @@ class TranscriptionTester: ObservableObject {
     @Published var comparison: TranscriptionComparison?
     
     private let coordinator: TranscriptionCoordinator
+    private let userDictionary: UserDictionary
     
     init() {
+        let dictionary = UserDictionary.loadFromDisk()
+        userDictionary = dictionary
+
         // create all three services
         var services: [TranscriptionService] = []
         
-        if let gemini = GeminiTranscriptionService.createFromEnvironment() {
+        if let gemini = GeminiTranscriptionService.createFromEnvironment(userDictionary: dictionary) {
             services.append(gemini)
             print("✅ gemini service ready")
         } else {
             print("⚠️ gemini service not available")
         }
         
-        if let deepgram = DeepgramTranscriptionService.createFromEnvironment() {
+        if let deepgram = DeepgramTranscriptionService.createFromEnvironment(userDictionary: dictionary) {
             services.append(deepgram)
             print("✅ deepgram service ready")
         } else {
             print("⚠️ deepgram service not available")
         }
         
-        if let assembly = AssemblyAITranscriptionService.createFromEnvironment() {
+        if let assembly = AssemblyAITranscriptionService.createFromEnvironment(userDictionary: dictionary) {
             services.append(assembly)
             print("✅ assembly ai service ready")
         } else {
             print("⚠️ assembly ai service not available")
         }
         
-        coordinator = TranscriptionCoordinator(services: services)
+        coordinator = TranscriptionCoordinator(services: services, userDictionary: dictionary)
     }
     
     /// test with the most recent mixed audio file
@@ -91,7 +95,8 @@ class TranscriptionTester: ObservableObject {
         testStatus = "testing with: \(audioURL.lastPathComponent)"
         
         // run transcription
-        await coordinator.transcribeWithAllServices(audioURL: audioURL)
+        let requestContext = buildContext(for: audioURL)
+        await coordinator.transcribeWithAllServices(audioURL: audioURL, context: requestContext)
         
         // update results
         results = coordinator.results
@@ -159,6 +164,91 @@ class TranscriptionTester: ObservableObject {
             print("couldn't get audio duration: \(error)")
             return nil
         }
+    }
+}
+
+extension TranscriptionTester {
+    private func buildContext(for audioURL: URL) -> TranscriptionRequestContext {
+        let baseDirectory = audioURL.deletingLastPathComponent()
+        let filename = audioURL.deletingPathExtension().lastPathComponent
+        let timestampString = filename.hasPrefix("mixed_")
+            ? String(filename.dropFirst("mixed_".count))
+            : nil
+
+        var metadata: RecordingSessionMetadata?
+        if let timestampString,
+           let timestamp = Int(timestampString) {
+            let metadataURL = baseDirectory.appendingPathComponent("session_\(timestamp)_metadata.json")
+            metadata = try? RecordingSessionMetadata.load(from: metadataURL)
+        }
+
+        var duration = metadata?.duration
+        if duration == nil {
+            duration = getAudioDuration(url: audioURL)
+        }
+
+        let micDevices = metadata.map { uniqueDeviceNames(from: $0.micSegments) } ?? []
+        let systemDevices = metadata.map { uniqueDeviceNames(from: $0.systemSegments) } ?? []
+
+        var deviceNotes: [String] = []
+        if let metadata {
+            if let micSummary = summarizeSegments(metadata.micSegments, category: "mic input") {
+                deviceNotes.append(micSummary)
+            }
+            if let systemSummary = summarizeSegments(metadata.systemSegments, category: "system audio") {
+                deviceNotes.append(systemSummary)
+            }
+        }
+
+        let expectedSpeakers = metadata.map { $0.systemSegments.isEmpty ? 1 : max(3, min(6, $0.systemSegments.count + 2)) }
+
+        return TranscriptionRequestContext(
+            sessionID: timestampString,
+            duration: duration,
+            expectedSpeakers: expectedSpeakers,
+            microphoneDevices: micDevices,
+            systemDevices: systemDevices,
+            deviceNotes: deviceNotes,
+            userDictionary: userDictionary
+        )
+    }
+
+    private func uniqueDeviceNames(from segments: [AudioSegmentMetadata]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for segment in segments {
+            if seen.insert(segment.deviceName).inserted {
+                ordered.append(segment.deviceName)
+            }
+        }
+
+        return ordered
+    }
+
+    private func summarizeSegments(_ segments: [AudioSegmentMetadata], category: String) -> String? {
+        guard !segments.isEmpty else { return nil }
+
+        var totals: [(name: String, duration: TimeInterval, quality: AudioSegmentMetadata.AudioQuality)] = []
+        var indexByName: [String: Int] = [:]
+
+        for segment in segments {
+            if let idx = indexByName[segment.deviceName] {
+                totals[idx].duration += segment.duration
+                totals[idx].quality = segment.quality
+            } else {
+                indexByName[segment.deviceName] = totals.count
+                totals.append((segment.deviceName, segment.duration, segment.quality))
+            }
+        }
+
+        let deviceSummaries = totals.map { entry -> String in
+            let minutes = entry.duration / 60.0
+            let formatted = String(format: "~%.1fm", minutes)
+            return "\(entry.name) (\(formatted), \(entry.quality.rawValue))"
+        }
+
+        return "\(category): \(deviceSummaries.joined(separator: "; "))"
     }
 }
 
