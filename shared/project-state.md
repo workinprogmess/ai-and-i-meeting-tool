@@ -1780,9 +1780,9 @@ result: overlapping audio becomes unintelligible to ai
 - transcript detail view reads canonical files and prefers the stored best-service entry for initial display
 
 **service prompts refresh**:
-- generative (gemini) transcripts now enforce `shared/transcript-format-sample.md` with emotion/topic tags, acoustic events, and consistency checks
-- deepgram and assembly ai requests carry language hints, speaker estimates, device summaries, and user dictionary boosts pulled from session metadata
-- prompt context loader reads `user-dictionary.json` plus `RecordingSessionMetadata` to feed multilingual and route notes into every request
+- gemini now follows the exact format from `shared/transcript-format-sample.md`, including emotions, topic tags, acoustic events, and the closing consistency note
+- deepgram + assembly ai get the same session fact sheet (languages, expected speakers, device notes, user dictionary words) before every request
+- context builder pulls that fact sheet straight from `RecordingSessionMetadata` and `user-dictionary.json`, so the prompts stay up to date automatically
 
 **next up**:
 - surface queued/running/success/failure status end-to-end and render confidence ui treatment
